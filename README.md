@@ -1,5 +1,9 @@
 # SearcheXtra
 
+[简体中文](#简体中文) · [English](#english)
+
+## 简体中文
+
 SearcheXtra 是基于 [Search](https://github.com/driceroland/Search) 的修改版，保留原版轻量、简洁的浏览体验，增加了**简体中文支持和界面语言切换**。原项目由 [Office Commun](https://officecommun.com) 开发，本仓库维护修改版。
 
 支持英文和简体中文，菜单、设置项及说明、弹窗和操作提示均提供两套文案。在 **设置 → 通用 → 界面语言** 中选择“跟随系统”“English”或“简体中文”，点击“重新启动 SearcheXtra”后生效。默认跟随系统，不支持的系统语言使用英文。
@@ -132,9 +136,11 @@ SEARCH_ARCH=arm64 ./build.sh release
 
 ### GitHub Actions 发布
 
-将版本写入 `VERSION`，提交后推送对应的 `v版本号` 标签，即可触发 `ARM64 Release` 工作流。也可以在 Actions 页面手动指定标签构建。
+将版本写入 `VERSION`，提交后推送对应的 `v版本号` 标签，即可触发 `Release` 工作流。也可以在 Actions 页面手动指定标签构建。
 
-工作流检查标签与版本是否一致，构建 ARM64 应用，验证架构、版本号和签名，然后发布 ZIP 安装包与 `SHA256SUMS.txt`。
+工作流检查标签与版本是否一致，构建 macOS ARM64 和 Windows x64 安装包，验证构建结果，然后发布安装包与 `SHA256SUMS.txt`。
+
+[`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md) 为同一版本同时提供中文和英文更新说明，发布工作流直接使用该文件作为 Release 正文。
 
 `Bilingual interface checks` 工作流负责语言选择、英文回退、动态文案格式、双语资源打包及 ARM64 构建检查。
 
@@ -186,3 +192,149 @@ SEARCH_ARCH=arm64 ./build.sh release
 项目采用 **MIT 许可证**，详见 [LICENSE](LICENSE)。修改和分发时保留原有版权及许可声明。
 
 Search 的原始代码和名称来自 Office Commun。本仓库以 SearcheXtra 名称维护修改版，使用新的应用图标，并提供中文支持和语言切换。
+
+---
+
+## English
+
+SearcheXtra is a fork of [Search](https://github.com/driceroland/Search), originally developed by [Office Commun](https://officecommun.com). It retains the lightweight browsing experience and adds Simplified Chinese support and an interface language selector.
+
+Menus, settings, descriptions, dialogs, and action messages are available in English and Simplified Chinese. Choose **Settings → General → Interface language**, select System, English, or Simplified Chinese, then restart SearcheXtra. The default follows the system; unsupported system languages fall back to English. Website content, bookmark names, and third-party extension interfaces keep their own languages.
+
+![SearcheXtra browser with tabs in the sidebar](.github/screenshot.png)
+
+**[Download macOS and Windows releases →](https://github.com/small32/SearcheXtra/releases/latest)**
+
+- **macOS:** macOS 14 or later; the published package supports Apple silicon (ARM64). Download the ZIP, extract it, and move `SearcheXtra.app` to Applications. Extensions require macOS 15.4 or later.
+- **Windows:** Windows 10 1809 or later, x64 only. The Windows implementation uses C#, WinUI 3, and WebView2. See [Windows development notes](Windows/README.md) for features, platform differences, builds, and tests.
+
+Release packages are built with GitHub Actions. `SHA256SUMS.txt` contains package checksums. To retain compatibility with existing macOS installations, the data directory, preferences domain, and password keychain identifiers still use Search's internal names; renaming the app does not erase this data.
+
+### Overview and features
+
+SearcheXtra keeps the interface focused on tabs and pages. On macOS, tabs can appear across the top or in a sidebar. The address field accepts both URLs and search terms. There is no recommendation feed, browser account, or cloud sync service. The macOS browser uses the system **WebKit** engine, the same underlying technology as Safari, without bundling Chromium. Windows uses **WebView2**.
+
+The following feature descriptions and keyboard shortcuts describe the macOS implementation; see the Windows notes for its implementation and differences.
+
+Set **Settings → General → Start page** to choose the page for new windows. Addresses such as `example.com` work without a scheme. Choose Use blank page to restore the blank start page. Changes take effect immediately without replacing open or restored pages. New tabs default to a blank page independently of this setting, or to an enabled new-tab extension's page. Private new tabs remain blank.
+
+- **Addresses and search:** URLs open directly; other text uses the search engine. Address suggestions come from local history. Input is not sent before you press Return.
+- **Tabs and pins:** Pin frequently used pages as letters or site icons. Session tabs are restored, with web views created when selected. `⌘K` finds open tabs by name.
+- **Split view:** Enable it in Settings → Tabs, then drag a tab to a page edge or choose Tabs → Split Current Page. Resize with the divider. Commands target the outlined pane. Split pairs and widths are saved with their spaces and restored after restarting.
+- **Reader mode:** `⇧⌘R` extracts the article body.
+- **Hide page elements:** Press `⇧⌘H`, then click a cookie notice, subscription overlay, or other element. Rules are saved per site and applied before rendering on later visits.
+- **Ad and tracker blocking:** Blocks third-party trackers and ad networks during network requests. Enabled by default, with per-site controls.
+- **Picture in picture:** `⇧⌘P` puts video in a floating window that remains visible while switching apps.
+- **Passwords and Keychain:** Offers to save passwords after login and shows saved accounts when a login field is selected. macOS Keychain encrypts and stores passwords. Import is supported from Chrome, Arc, Dia, Brave, and Edge. System passkey features require appropriate signing and entitlements.
+- **Appearance:** Light, dark, and system appearance settings apply to the browser and webpages.
+- **Bookmarks, history, and downloads:** Dedicated panels with search and keyboard shortcuts.
+- **Chrome extensions:** Install from a Chrome Web Store URL or its listing, pin frequently used extensions, or load an unpacked local extension and reload it after editing. On macOS, extensions use WebKit's extension engine with additional Chrome API compatibility. Support depends on the APIs an extension uses.
+- **Windows and spaces:** Open multiple windows and organize sets of tabs into spaces.
+- **Updates:** Download this fork's packages from [GitHub Releases](https://github.com/small32/SearcheXtra/releases). The macOS automatic updater still points upstream; ad-hoc-signed builds cannot complete automatic replacement. This fork does not yet have its own automatic update channel.
+
+Ad blocking, element hiding, reader mode, picture in picture, and password management are built in; extensions supplement these features. The browser has no account, cloud sync, or cloud browsing-data storage. It does not collect telemetry, usage analytics, or send crash reports to a server. Network traffic primarily comes from webpages, favicons, extension downloads, and update checks.
+
+### Privacy and macOS data storage
+
+| Data | Location | Access |
+|---|---|---|
+| Passwords | macOS login Keychain, retaining the `Search` identifier | Controlled by Keychain. A differently signed app may require system authorization. |
+| History, bookmarks, tabs, and hidden elements | JSON files in `~/Library/Application Support/Search/` | Local user. |
+| Cookies and site data | App-managed WebKit storage | Subject to website permissions and browser isolation. |
+| Extensions | `~/Library/Application Support/Search/Extensions/`; extension data in WebKit storage | Permissions granted during installation. |
+
+**Private tabs** (`⇧⌘N`) use separate cookie storage and do not retain the session's browsing data after closing. Apps authorized under System Settings → Privacy & Security → Automation can read ordinary tab URLs and titles through AppleScript; private tabs are excluded.
+
+### Bookmarks and macOS shortcuts
+
+In **Settings → Tabs**, Compact bookmarks bar reduces spacing between bookmarks, icons, and text. Bookmarks bar opening behavior can be Default (current tab), New background tab, or New foreground tab, including bookmarks inside folders. Settings take effect immediately and are saved locally. Middle-click opens a background tab; Shift + middle-click switches to the new tab.
+
+| Action | Shortcut |
+|---|---|
+| Enter a URL or search | `⌘L` |
+| Find an open tab | `⌘K` |
+| New window / tab | `⌘N` / `⌘T` |
+| New private tab | `⇧⌘N` |
+| Close / restore closed tab or window | `⌘W` / `⇧⌘T` |
+| Back / forward | `⌘[` / `⌘]` |
+| Previous / next tab | `⇧⌘[` / `⇧⌘]` |
+| Select a numbered tab | `⌘1`–`⌘9` |
+| Switch between top tabs and sidebar | `⇧⌘S` |
+| Fold sidebar | `⌘S` |
+| Bookmark current page | `⇧⌘B` |
+| Reader / picture in picture | `⇧⌘R` / `⇧⌘P` |
+| Hide an element / view site hiding rules | `⇧⌘H` / `⇧⌘U` |
+| Find in page / duplicate tab | `⌘F` / `⌘D` |
+| Copy URL / paste and open | `⇧⌘C` / `⇧⌘V` |
+| History / downloads | `⌘Y` / `⇧⌘J` |
+| Settings / passwords | `⌘,` / `⌥⌘L` |
+
+`⌘R` reloads; `⌥⌘R` reloads from the origin and rechecks the cache. `⌃Tab` and `⌃⇧Tab` switch tabs, while `Tab` remains available for webpage focus navigation. `Esc` closes the current panel or overlay.
+
+With split view enabled, `⌥⌘N` splits the current page and `⌃⌘←` / `⌃⌘→` switches focus. `⌘W` closes the focused tab and expands the remaining page. Tabs → Separate Split Tabs keeps both pages as independent tabs.
+
+### Development
+
+The upstream repository is [driceroland/Search](https://github.com/driceroland/Search). This fork maintains Chinese support, language selection, and GitHub Actions releases. The macOS interface is written in Swift and mainly uses system frameworks. The source is available for inspection, local builds, and contributions.
+
+#### Build macOS locally
+
+Use macOS with Swift 6 and the corresponding macOS SDK. Full Xcode is recommended; XCTest requires its testing frameworks.
+
+```bash
+git clone https://github.com/small32/SearcheXtra.git
+cd SearcheXtra
+swift build                         # SwiftPM executable
+./build.sh                          # Assemble an app bundle
+SEARCH_ARCH=arm64 ./build.sh release # Explicit ARM64 build
+```
+
+The app is written to `build/SearcheXtra.app`. Without a Developer ID certificate, it uses ad-hoc signing and is not automatically notarized. Current GitHub Release builds also use ad-hoc signing; first launch may require opening through Finder's context menu or allowing the app in System Settings → Privacy & Security. macOS determines whether a differently signed build needs permission to access existing Keychain items.
+
+`./build.sh release dmg` also produces `SearcheXtra.dmg` and `SearcheXtra.zip`. `./build.sh release ship` submits for notarization and staples the ticket, requiring a Developer ID certificate and Apple notarization credentials.
+
+#### GitHub Actions releases
+
+Set `VERSION`, commit it, and push the matching `v<version>` tag to trigger the **Release** workflow. It can also be started manually for a specified tag. The workflow checks the version and tag, builds macOS ARM64 and Windows x64 packages, validates the results, and publishes packages with `SHA256SUMS.txt`.
+
+Release notes in [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md) provide Chinese and English text for the same release. The **Bilingual interface checks** workflow checks language selection, English fallback, dynamic formatting, packaged translations, and the ARM64 build.
+
+#### Interface translations
+
+- `Sources/SearcheXtra/Resources/Translations.json` contains `en` and `zh-Hans` entries for each translation key.
+- `Sources/SearcheXtra/Localization.swift` handles language selection, lookup, English fallback, and dynamic substitutions.
+- `Localization/en.lproj/InfoPlist.strings` and `Localization/zh-Hans.lproj/InfoPlist.strings` contain system permission descriptions.
+- Storage keys, protocol identifiers, URLs, shortcut IDs, and user input retain their original values.
+
+See [localization maintenance notes](docs/LOCALIZATION.md). Language preferences are stored locally and do not change bookmarks, history, or shortcut identifiers.
+
+#### macOS architecture
+
+- **SwiftUI** draws the interface, **AppKit** handles native window interactions, and **WKWebView** displays webpages.
+- Each page has a `Tab`. Restored web views are created lazily; page content runs in WebKit content processes.
+- Ad blocking uses compiled `WKContentRuleList` rules. Element hiding injects saved per-site CSS at document start to avoid flicker.
+- `Design.swift` centralizes light and dark colors.
+- Extensions use `WKWebExtension` on macOS 15.4+. `Crx.swift` verifies CRX3 signatures and extension IDs before extraction; `Extensions.swift` manages tabs, permissions, and popups; `ExtensionShims.swift` supplies additional Chrome APIs and compatibility behavior. Extension pages use `chrome-extension://<id>/`. `ExtensionNative.swift` supports native messaging hosts registered in Chrome's `NativeMessagingHosts` directories.
+- Files in `Sources/SearcheXtra/` are organized by feature: `Vault.swift` for Keychain, `Shield.swift` for blocking, `Curtain.swift` for element hiding, `Session.swift` for session restoration, `Updater.swift` for updates, and `Bench.swift` for testing.
+
+#### Isolated test sessions
+
+Enable **Settings → General → Let a script drive SearcheXtra** to expose a Unix socket in the app's data directory, accessible only to the current user. Use `./bench` to send commands:
+
+```bash
+./bench open https://example.com    # Create a marked test tab
+./bench wait 2e7e7e89               # Wait for loading
+./bench text 2e7e7e89               # Read page text
+./bench shot 2e7e7e89 out.png       # Save a screenshot
+./bench click 2e7e7e89 "button.go"  # Click through page events
+./bench probe                      # Inspect window and panel state
+./bench close all                  # Close test tabs
+```
+
+Test tabs do not automatically become active or write session/history data; scripts close them. `./bench ext-*` provides extension tests. After building, run `python3 Tests/split_view.py` to check the split model in a hidden, isolated session with separate settings and files, cleaned up afterward. Dragging, divider feedback, and animations still require visual checks.
+
+#### Contributing and license
+
+Report issues or propose changes through [this repository's Issues](https://github.com/small32/SearcheXtra/issues) or pull requests. Keep changes focused, minimize dependencies, and preserve local storage and privacy. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md) for the upstream contribution and security reporting processes and contacts.
+
+This project uses the **MIT license**; see [LICENSE](LICENSE). Preserve copyright and license notices when modifying or distributing it. Search's original code and name come from Office Commun. This fork is maintained as SearcheXtra with its own app icon and bilingual interface.
