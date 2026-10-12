@@ -56,7 +56,7 @@ enum Spaces {
     static let icons = [
         "briefcase", "building.2", "desktopcomputer", "laptopcomputer", "chevron.left.forwardslash.chevron.right", "terminal",
         "sparkles", "brain.head.profile", "lightbulb", "gamecontroller", "beach.umbrella", "cup.and.saucer",
-        "music.note", "film", "paintpalette", L10n.text("Spaces.1008"), "house", "book",
+        "music.note", "film", "paintpalette", "camera", "house", "book",
         "graduationcap", "cart", "airplane", "dumbbell", "leaf", "heart",
     ]
     static let iconNames = [

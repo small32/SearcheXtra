@@ -102,12 +102,14 @@ public sealed partial class MainWindow
         if (manifest.TryGetProperty("chrome_url_overrides", out var overrides) && overrides.TryGetProperty("newtab", out var newtab)) item.NewTab = newtab.GetString() ?? "";
         if (!Settings.Extensions.Contains(item)) Settings.Extensions.Add(item);
         if (!Settings.ExtensionFolders.Contains(item.Folder)) Settings.ExtensionFolders.Add(item.Folder);
+        foreach (var loadedProfile in App.Windows.SelectMany(window => window.views.Values).Where(view => view.Control.CoreWebView2 != null).Select(view => view.Control.CoreWebView2.Profile).DistinctBy(p => (p.ProfileName, p.IsInPrivateModeEnabled)))
+            if (!loadedProfile.IsInPrivateModeEnabled || PageView.SupportsPrivateExtensions && Settings.ExtensionsInPrivate) await PageView.SynchronizeExtensionsAsync(loadedProfile, Settings);
         Status.Text = T("Installed: ", "已安装：") + item.Name; store.Notify(); ScheduleSave();
     }
     private async Task SetExtensionEnabledAsync(InstalledExtension item, bool enabled)
     {
         var current = await CurrentProfileAsync();
-        foreach (var profile in views.Values.Where(v => v.Control.CoreWebView2 != null).Select(v => v.Control.CoreWebView2.Profile).Append(current).DistinctBy(p => (p.ProfileName, p.IsInPrivateModeEnabled)))
+        foreach (var profile in App.Windows.SelectMany(window => window.views.Values).Where(v => v.Control.CoreWebView2 != null).Select(v => v.Control.CoreWebView2.Profile).Append(current).DistinctBy(p => (p.ProfileName, p.IsInPrivateModeEnabled)))
         {
             var native = (await profile.GetBrowserExtensionsAsync()).FirstOrDefault(e => e.Id == item.Id);
             if (native != null) await native.EnableAsync(enabled);
@@ -117,7 +119,7 @@ public sealed partial class MainWindow
     private async Task RemoveExtensionAsync(InstalledExtension item)
     {
         // Extensions are per WebView2 profile, including every space currently open.
-        foreach (var profile in views.Values.Where(v => v.Control.CoreWebView2 != null).Select(v => v.Control.CoreWebView2.Profile).DistinctBy(p => p.ProfileName))
+        foreach (var profile in App.Windows.SelectMany(window => window.views.Values).Where(v => v.Control.CoreWebView2 != null).Select(v => v.Control.CoreWebView2.Profile).DistinctBy(p => (p.ProfileName, p.IsInPrivateModeEnabled)))
         {
             var native = (await profile.GetBrowserExtensionsAsync()).FirstOrDefault(e => e.Id == item.Id);
             if (native != null) await native.RemoveAsync();
@@ -142,6 +144,7 @@ public sealed partial class MainWindow
     private async Task OpenExtensionPopupAsync(InstalledExtension item)
     {
         if (!item.Enabled) return;
+        if (active?.IsPrivate == true && !PageView.SupportsPrivateExtensions) { Status.Text = T("Extensions are unavailable in private tabs on Windows.", "Windows 的无痕标签页暂不支持扩展。"); return; }
         if (item.Popup.Length == 0) { if (item.Options.Length > 0) AddTab($"chrome-extension://{item.Id}/{item.Options}"); return; }
         DismissOverlay();
         var view = new WebView2 { Width = 360, Height = 480 };
@@ -249,12 +252,12 @@ public sealed partial class MainWindow
         foreach (var item in Settings.Extensions.Where(e => e.Enabled))
         {
             var entry = new MenuFlyoutSubItem { Text = item.Name };
-            var open = new MenuFlyoutItem { Text = T("Open extension", "打开扩展") };
+            var open = new MenuFlyoutItem { Text = T("Open extension", "打开扩展"), IsEnabled = active?.IsPrivate != true || PageView.SupportsPrivateExtensions };
             open.Click += async (_, _) => await OpenExtensionPopupAsync(item);
             entry.Items.Add(open);
             if (item.Options.Length > 0)
             {
-                var settings = new MenuFlyoutItem { Text = T("Extension settings", "扩展设置") };
+                var settings = new MenuFlyoutItem { Text = T("Extension settings", "扩展设置"), IsEnabled = active?.IsPrivate != true || PageView.SupportsPrivateExtensions };
                 settings.Click += (_, _) => AddTab($"chrome-extension://{item.Id}/{item.Options}");
                 entry.Items.Add(settings);
             }

@@ -50,18 +50,30 @@ public sealed partial class MainWindow
     }
     private async Task ShowSiteCardAsync()
     {
-        if (active == null || !AddressParser.IsWeb(active.Url)) return;
-        var uri = new Uri(active.Url); var site = GetSite(uri.Host); var panel = new StackPanel { Spacing = 10 };
+        if (active == null || !AddressParser.IsWeb(active.Url) || ActiveView is not { } view || view.Control.CoreWebView2 is not { } core) return;
+        var tab = active; var uri = new Uri(tab.Url); var origin = uri.GetLeftPart(UriPartial.Authority); var profile = core.Profile;
+        var permissions = tab.IsPrivate ? new Dictionary<string, string>() : GetSite(origin).Permissions;
+        if (tab.IsPrivate)
+            foreach (var permission in await profile.GetNonDefaultPermissionSettingsAsync())
+                if (PageView.PermissionOriginMatches(permission.PermissionOrigin, origin)) permissions[permission.PermissionKind.ToString()] = permission.PermissionState == CoreWebView2PermissionState.Allow ? "allow" : "deny";
+        if (view.IsDisposed || active != tab) return;
+        var site = GetSite(uri.Host); var panel = new StackPanel { Spacing = 10 };
         panel.Children.Add(new TextBlock { Text = uri.Scheme == "https" ? T("Secure connection", "安全连接") : T("Connection is not encrypted", "连接未加密"), FontSize = 13 });
         var zoom = new Slider { Header = T("Page zoom", "网页缩放"), Minimum = .5, Maximum = 3, StepFrequency = .05, Value = site.Zoom ?? Settings.PageZoom };
-        zoom.ValueChanged += (_, _) => { site.Zoom = zoom.Value; ActiveView?.ApplySettings(); ScheduleSave(); }; panel.Children.Add(zoom);
+        zoom.ValueChanged += (_, _) => { site.Zoom = zoom.Value; view.ApplySettings(); ScheduleSave(); }; panel.Children.Add(zoom);
         foreach (var permission in new[] { "Camera", "Microphone", "Geolocation", "Notifications", "ClipboardRead" })
         {
-            var options = new ComboBox { Header = SitePermissionName(permission), ItemsSource = new[] { T("Ask", "询问"), T("Allow", "允许"), T("Block", "阻止") }, SelectedIndex = site.Permissions.GetValueOrDefault(permission) switch { "allow" => 1, "deny" => 2, _ => 0 } };
-            options.SelectionChanged += async (_, _) => { if (options.SelectedIndex < 0) return; site.Permissions[permission] = new[] { "ask", "allow", "deny" }[options.SelectedIndex]; if (ActiveView?.Control.CoreWebView2 is { } core && Enum.TryParse<CoreWebView2PermissionKind>(permission, out var kind)) await core.Profile.SetPermissionStateAsync(kind, uri.GetLeftPart(UriPartial.Authority), options.SelectedIndex switch { 1 => CoreWebView2PermissionState.Allow, 2 => CoreWebView2PermissionState.Deny, _ => CoreWebView2PermissionState.Default }); ScheduleSave(); }; panel.Children.Add(options);
+            var options = new ComboBox { Header = SitePermissionName(permission), ItemsSource = new[] { T("Ask", "询问"), T("Allow", "允许"), T("Block", "阻止") }, SelectedIndex = permissions.GetValueOrDefault(permission) switch { "allow" => 1, "deny" => 2, _ => 0 } };
+            options.SelectionChanged += async (_, _) =>
+            {
+                if (options.SelectedIndex < 0 || view.IsDisposed || !Enum.TryParse<CoreWebView2PermissionKind>(permission, out var kind)) return;
+                await profile.SetPermissionStateAsync(kind, origin, options.SelectedIndex switch { 1 => CoreWebView2PermissionState.Allow, 2 => CoreWebView2PermissionState.Deny, _ => CoreWebView2PermissionState.Default });
+                permissions[permission] = new[] { "ask", "allow", "deny" }[options.SelectedIndex];
+                if (!tab.IsPrivate) ScheduleSave();
+            }; panel.Children.Add(options);
         }
         var clear = QuietButton(T("Clear this site's data", "清除此网站数据"));
-        clear.Click += async (_, _) => { if (ActiveView?.Control.CoreWebView2 is { } core) { await ClearSiteDataAsync(core, uri); clear.Content = T("Site data cleared", "网站数据已清除"); } }; panel.Children.Add(clear);
+        clear.Click += async (_, _) => { if (!view.IsDisposed) { await ClearSiteDataAsync(core, uri); clear.Content = T("Site data cleared", "网站数据已清除"); } }; panel.Children.Add(clear);
         await ShowCardAsync(uri.Host, panel);
     }
     private async Task ShowImportAsync()
@@ -73,7 +85,7 @@ public sealed partial class MainWindow
         profile.Click += async (_, _) =>
         {
             var picker = new FolderPicker(); picker.FileTypeFilter.Add("*"); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this)); var folder = await picker.PickSingleFolderAsync(); if (folder == null) return;
-            try { var result = await BrowserImport.ProfileAsync(folder.Path); store.Bookmarks.AddRange(result.Bookmarks); store.History = store.History.Concat(result.History).DistinctBy(h => h.Url).OrderByDescending(h => h.Visited).Take(10000).ToList(); store.Notify(); ScheduleSave(); Status.Text = T("Imported bookmarks and history.", "已导入书签和历史记录。"); showBar.Visibility = result.Bookmarks.Count > 0 && !Settings.BookmarksBar ? Visibility.Visible : Visibility.Collapsed; }
+            try { var result = await BrowserImport.ProfileAsync(folder.Path); store.Bookmarks.AddRange(result.Bookmarks); store.History = BrowserImport.MergeHistory(store.History, result.History); store.Notify(); ScheduleSave(); Status.Text = T("Imported bookmarks and history.", "已导入书签和历史记录。"); showBar.Visibility = result.Bookmarks.Count > 0 && !Settings.BookmarksBar ? Visibility.Visible : Visibility.Collapsed; }
             catch (Exception ex) { Status.Text = ex.Message; }
         };
         panel.Children.Add(profile);
@@ -88,9 +100,8 @@ public sealed partial class MainWindow
         var picker = new FileOpenPicker(); picker.FileTypeFilter.Add(".csv"); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this)); var file = await picker.PickSingleFileAsync(); if (file == null) return;
         try
         {
-            var imported = CsvPasswords.Parse(await File.ReadAllTextAsync(file.Path)); var passwords = await PasswordStore.ReadAsync();
-            foreach (var login in imported) { passwords.RemoveAll(p => p.Origin == login.Origin && p.Username == login.Username); passwords.Add(login); }
-            await PasswordStore.WriteAsync(passwords); Status.Text = T("Passwords imported: ", "已导入密码：") + imported.Count;
+            var imported = CsvPasswords.Parse(await File.ReadAllTextAsync(file.Path));
+            await PasswordStore.UpdateAsync(passwords => { foreach (var login in imported) { passwords.RemoveAll(p => p.Origin == login.Origin && p.Username == login.Username); passwords.Add(login); } }); Status.Text = T("Passwords imported: ", "已导入密码：") + imported.Count;
         }
         catch (Exception ex) { Status.Text = ex.Message; }
     }

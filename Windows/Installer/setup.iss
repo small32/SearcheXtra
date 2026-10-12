@@ -65,6 +65,7 @@ var
   ExitCode: Integer;
   Started: Boolean;
   Installer: String;
+  SignaturePath: String;
 begin
   if RuntimeInstalled(Name) then exit;
   WizardForm.StatusLabel.Caption := 'Downloading ' + Name + '...';
@@ -72,8 +73,10 @@ begin
   Installer := ExpandConstant('{tmp}\') + FileName;
   { Evergreen changes its bootstrapper: validate the Microsoft signature instead of pinning its hash. }
   if Hash = '' then begin
+    SignaturePath := Installer;
+    StringChangeEx(SignaturePath, '''', '''''', True);
     if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-      '-NoProfile -NonInteractive -Command "$s=Get-AuthenticodeSignature -LiteralPath ''' + Installer + '''; if ($s.Status -eq ''Valid'' -and $s.SignerCertificate.Subject -match ''O=Microsoft Corporation'') {exit 0} else {exit 1}"',
+      '-NoProfile -NonInteractive -Command "$s=Get-AuthenticodeSignature -LiteralPath ''' + SignaturePath + '''; if ($s.Status -eq ''Valid'' -and $s.SignerCertificate.Subject -match ''O=Microsoft Corporation'') {exit 0} else {exit 1}"',
       '', SW_HIDE, ewWaitUntilTerminated, ExitCode) or (ExitCode <> 0) then
       RaiseException('Invalid Microsoft installer signature: ' + Name);
   end;

@@ -8,7 +8,7 @@ namespace SearcheXtra.Windows;
 
 public sealed partial class MainWindow
 {
-    private static readonly (string, string, string)[] SettingsPages = { ("general", "General", "通用"), ("tabs", "Tabs", "标签页"), ("shortcuts", "Shortcuts", "快捷键"), ("extensions", "Extensions", "扩展"), ("passwords", "Passwords", "密码"), ("downloads", "Downloads", "下载"), ("privacy", "Privacy", "隐私"), ("about", "About", "关于") };
+    private static readonly (string, string, string)[] SettingsPages = { ("general", "General", "通用"), ("tabs", "Tabs", "标签页"), ("shortcuts", "Shortcuts", "快捷键"), ("bookmarks", "Bookmark manager", "书签管理器"), ("extensions", "Extensions", "扩展"), ("passwords", "Passwords", "密码"), ("downloads", "Downloads", "下载"), ("privacy", "Privacy", "隐私"), ("about", "About", "关于") };
 
     private async Task ShowSettingsAsync()
     {
@@ -61,9 +61,9 @@ public sealed partial class MainWindow
             if (detail.Length > 0) words.Children.Add(new TextBlock { Text = detail, FontSize = 11.5, Opacity = .58, TextWrapping = TextWrapping.Wrap });
             row.Children.Add(words); if (control != null) { Grid.SetColumn((FrameworkElement)control, 1); if (control is FrameworkElement element) element.VerticalAlignment = VerticalAlignment.Center; row.Children.Add(control); } card.Children.Add(row);
         }
-        void Toggle(string en, string zh, bool value, Action<bool> set, string detail = "")
+        void Toggle(string en, string zh, bool value, Action<bool> set, string detail = "", bool enabled = true)
         {
-            var toggle = new ToggleSwitch { IsOn = value, OnContent = "", OffContent = "", MinWidth = 40, Width = 40 };
+            var toggle = new ToggleSwitch { IsEnabled = enabled, IsOn = value, OnContent = "", OffContent = "", MinWidth = 40, Width = 40 };
             toggle.Toggled += (_, _) => { set(toggle.IsOn); Changed(); }; Line(T(en, zh), detail, toggle);
         }
         void Choice(string en, string zh, string[] labels, int selected, Action<int> set)
@@ -124,6 +124,9 @@ public sealed partial class MainWindow
                 Toggle("Tab groups", "标签组", Settings.UsesTabGroups, value => Settings.UsesTabGroups = value);
                 Toggle("Split view", "分屏", Settings.SplitView, value => Settings.SplitView = value);
                 break;
+            case "bookmarks":
+                ActionRow("Bookmark manager", "书签管理器", T("Open", "打开"), async () => { DismissOverlay(); await ShowBookmarksAsync(); }, T("Import, edit, delete and organize bookmarks and folders.", "导入、编辑、删除及整理书签和文件夹。"));
+                break;
             case "shortcuts":
                 BuildShortcutSettings(card); break;
             case "extensions":
@@ -131,7 +134,7 @@ public sealed partial class MainWindow
                 Input("Store link or extension ID", "商店链接或扩展 ID", "", async value => await InstallStoreExtensionAsync(value), "https://chromewebstore.google.com/detail/…");
                 ActionRow("Unpacked extension", "未打包扩展", T("Choose folder…", "选择目录…"), async () => { await ChooseExtensionFolderAsync(); render(page); });
                 ActionRow("Extension package (MV2 / MV3)", "扩展文件（MV2 / MV3）", T("Import CRX / ZIP…", "导入 CRX / ZIP…"), async () => { await ChooseExtensionPackageAsync(); render(page); });
-                Toggle("Extensions in private tabs", "无痕标签页使用扩展", Settings.ExtensionsInPrivate, value => Settings.ExtensionsInPrivate = value, T("Applies to newly opened private tabs.", "应用于新打开的无痕标签页。"));
+                Toggle("Extensions in private tabs", "无痕标签页使用扩展", PageView.SupportsPrivateExtensions && Settings.ExtensionsInPrivate, value => Settings.ExtensionsInPrivate = value, T("Private tabs cannot run extensions on Windows.", "Windows 无痕标签页暂不支持扩展。"), PageView.SupportsPrivateExtensions);
                 ActionRow("Manage extensions", "扩展管理", T("Open", "打开"), async () => { DismissOverlay(); await ShowExtensionManagerAsync(); });
                 break;
             case "passwords":

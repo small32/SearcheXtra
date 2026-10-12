@@ -12,10 +12,14 @@ public static class CsvPasswords
             var c = csv[i];
             if (c == '"') { if (quoted && i + 1 < csv.Length && csv[i + 1] == '"') { value.Append('"'); i++; } else quoted = !quoted; }
             else if (!quoted && c == ',') { row.Add(value.ToString()); value.Clear(); }
-            else if (!quoted && c == '\n') { row.Add(value.ToString().TrimEnd('\r')); rows.Add(row); row = []; value.Clear(); }
+            else if (!quoted && c is '\r' or '\n')
+            {
+                row.Add(value.ToString()); rows.Add(row); row = []; value.Clear();
+                if (c == '\r' && i + 1 < csv.Length && csv[i + 1] == '\n') i++;
+            }
             else value.Append(c);
         }
-        if (value.Length > 0 || row.Count > 0) { row.Add(value.ToString().TrimEnd('\r')); rows.Add(row); }
+        if (value.Length > 0 || row.Count > 0) { row.Add(value.ToString()); rows.Add(row); }
         if (rows.Count == 0) return [];
         var header = rows[0].Select(s => s.Trim('\uFEFF').ToLowerInvariant()).ToList();
         var origin = header.FindIndex(s => s is "url" or "origin" or "website"); var user = header.FindIndex(s => s is "username" or "user" or "login"); var password = header.FindIndex(s => s == "password");

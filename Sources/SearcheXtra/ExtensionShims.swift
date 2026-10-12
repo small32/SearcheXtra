@@ -3304,6 +3304,12 @@ enum ExtensionShims {
          "color": "grey", "windowId": 1, "shared": false]
     }
 
+    static func resultLimit(_ value: Any?, default fallback: Int, maximum: Int = Int.max) throws -> Int {
+        let count = value as? Int ?? fallback
+        guard count >= 0 && count <= maximum else { throw Unsupported(what: "Result count is out of range") }
+        return count
+    }
+
     struct Unsupported: LocalizedError {
         let what: String
         var errorDescription: String? { what }
@@ -3434,7 +3440,7 @@ enum ExtensionShims {
                 find(key, in: browser.bookmarks.roots).map { node($0.node, parent: $0.parent, index: $0.index, deep: false) }
             }
         case "bookmarks.getRecent":
-            let count = (first as? Int) ?? 10
+            let count = try resultLimit(first, default: 10)
             return flat(browser.bookmarks.roots).filter { !$0.node.isFolder }.suffix(count).reversed()
                 .map { node($0.node, parent: $0.parent, index: $0.index, deep: false) }
         case "bookmarks.search":
@@ -3486,7 +3492,7 @@ enum ExtensionShims {
             let start = (spec["startTime"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
                 ?? Date().addingTimeInterval(-24 * 3600)
             let end = (spec["endTime"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) } ?? .distantFuture
-            let limit = spec["maxResults"] as? Int ?? 100
+            let limit = try resultLimit(spec["maxResults"], default: 100)
             return browser.history.everything(matching: text)
                 .filter { $0.last >= start && $0.last <= end }
                 .sorted { $0.last > $1.last }
@@ -3543,7 +3549,7 @@ enum ExtensionShims {
                  "startTime": ISO8601DateFormatter().string(from: keep.date), "mime": ""] as [String: Any]
             }
         case "downloads.open", "downloads.show":
-            guard let index = first as? Int, browser.loot.kept.indices.contains(index - 1) else { return nil }
+            guard let index = first as? Int, index > 0, browser.loot.kept.indices.contains(index - 1) else { return nil }
             let keep = browser.loot.kept[index - 1]
             if api == "downloads.open" {
                 // As in Chrome, opening asks for its own permission; and only
@@ -3974,7 +3980,7 @@ enum ExtensionShims {
 
         // MARK: sessions — the tabs you closed
         case "sessions.getRecentlyClosed":
-            let limit = (first as? [String: Any])?["maxResults"] as? Int ?? 25
+            let limit = try resultLimit((first as? [String: Any])?["maxResults"], default: 25, maximum: 25)
             return browser.ghosts.reversed().prefix(limit).map { ghost in
                 ["lastModified": Int(Date().timeIntervalSince1970),
                  "tab": ["sessionId": ghost.id.uuidString, "url": ghost.url.absoluteString, "title": ghost.title,

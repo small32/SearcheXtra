@@ -14,10 +14,18 @@ public sealed class PageView : IDisposable
     private readonly Action<string> open;
     private Task? initialization;
     private bool disposed;
-    private string? documentScript;
+    private readonly CancellationTokenSource lifetime = new();
+    private string? documentScript, documentScriptSource;
+    private readonly SemaphoreSlim ScriptGate = new(1, 1);
+    private CoreWebView2DevToolsProtocolEventReceiver? securityReceiver;
     public WebView2 Control { get; } = new() { Visibility = Visibility.Collapsed };
     public Window? FloatingWindow { get; set; }
     public bool IsDisposed => disposed;
+    internal CancellationToken Lifetime => lifetime.Token;
+    // WebView2 exposes no API for granting extensions access to an InPrivate profile.
+    internal static bool SupportsPrivateExtensions => false;
+    internal string WebsiteIcon { get; private set; } = "";
+    public event Action? WebsiteIconChanged;
     public event Action<DownloadItem>? DownloadStarted;
     public event Func<string, Task>? StoreInstallRequested;
     public event Func<CoreWebView2PermissionRequestedEventArgs, Task>? PermissionRequested;
@@ -44,7 +52,8 @@ public sealed class PageView : IDisposable
         await Control.EnsureCoreWebView2Async(env, options);
         if (disposed) return;
         var core = Control.CoreWebView2;
-        core.GetDevToolsProtocolEventReceiver("Security.visibleSecurityStateChanged").DevToolsProtocolEventReceived += (_, e) =>
+        securityReceiver = core.GetDevToolsProtocolEventReceiver("Security.visibleSecurityStateChanged");
+        securityReceiver.DevToolsProtocolEventReceived += (_, e) =>
         {
             using var data = JsonDocument.Parse(e.ParameterObjectAsJson);
             ConnectionSecurityState = data.RootElement.GetProperty("visibleSecurityState").GetProperty("securityState").GetString() ?? "unknown";
@@ -71,32 +80,60 @@ public sealed class PageView : IDisposable
         foreach (var extension in await core.Profile.GetBrowserExtensionsAsync()) if (store.Settings.RemovedExtensionIds.Contains(extension.Id)) await extension.RemoveAsync();
         ApplySettings();
         await UpdateDocumentScriptAsync();
-        if (!tab.IsPrivate || store.Settings.ExtensionsInPrivate)
+        if (!tab.IsPrivate || SupportsPrivateExtensions && store.Settings.ExtensionsInPrivate)
         {
-            var installed = (await core.Profile.GetBrowserExtensionsAsync()).ToDictionary(e => e.Id);
-            foreach (var folder in store.Settings.ExtensionFolders.ToArray())
+            await SynchronizeExtensionsAsync(core.Profile, store.Settings);
+            foreach (var folder in store.Settings.ExtensionFolders.Where(folder => store.Settings.Extensions.All(item => item.Folder != folder)).ToArray())
             {
                 if (!Directory.Exists(folder)) continue;
-                var item = store.Settings.Extensions.FirstOrDefault(e => e.Folder == folder);
-                try
-                {
-                    // Re-adding an installed extension unloads its background and open extension pages.
-                    CoreWebView2BrowserExtension extension;
-                    if (item != null && installed.TryGetValue(item.Id, out var current)) extension = current;
-                    else { await Task.Run(() => CrxInstaller.ValidateFolder(folder)); extension = await core.Profile.AddBrowserExtensionAsync(folder); }
-                    if (item != null && extension.IsEnabled != item.Enabled) await extension.EnableAsync(item.Enabled);
-                }
-                catch { /* A removed/incompatible extension must not prevent browsing. */ }
+                try { await Task.Run(() => CrxInstaller.ValidateFolder(folder)); await core.Profile.AddBrowserExtensionAsync(folder); }
+                catch { /* Legacy imports must not prevent browsing. */ }
             }
         }
-        if (!disposed && tab.Url.Length > 0) core.Navigate(tab.Url);
+        if (!disposed && tab.Url.Length > 0) Navigate(tab.Url);
     }
-    public void Navigate(string url) { if (!disposed) Control.CoreWebView2?.Navigate(url); }
+    private static readonly SemaphoreSlim ExtensionGate = new(1, 1);
+    public static async Task SynchronizeExtensionsAsync(CoreWebView2Profile profile, BrowserSettings settings)
+    {
+        await ExtensionGate.WaitAsync();
+        try
+        {
+            var key = profile.ProfileName + (profile.IsInPrivateModeEnabled ? ":private" : ":regular");
+            if (!settings.ProfileExtensionFolders.TryGetValue(key, out var folders)) settings.ProfileExtensionFolders[key] = folders = [];
+            var installed = (await profile.GetBrowserExtensionsAsync()).ToDictionary(extension => extension.Id);
+            foreach (var item in settings.Extensions.ToArray())
+            {
+                if (!Directory.Exists(item.Folder)) continue;
+                try
+                {
+                    installed.TryGetValue(item.Id, out var extension);
+                    if (extension == null || folders.GetValueOrDefault(item.Id) != item.Folder)
+                    {
+                        await Task.Run(() => CrxInstaller.ValidateFolder(item.Folder));
+                        if (extension != null) await extension.RemoveAsync();
+                        extension = await profile.AddBrowserExtensionAsync(item.Folder);
+                        folders[item.Id] = item.Folder;
+                    }
+                    if (extension.IsEnabled != item.Enabled) await extension.EnableAsync(item.Enabled);
+                }
+                catch { /* Keep browsing available if an extension is incompatible. */ }
+            }
+        }
+        finally { ExtensionGate.Release(); }
+    }
+    public void Navigate(string url)
+    {
+        if (disposed) return;
+        if (tab.IsPrivate && !SupportsPrivateExtensions && url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase)) url = "about:blank";
+        Control.CoreWebView2?.Navigate(url);
+    }
     public static string ProfileName(BrowserSettings settings, string space)
     {
         if (!settings.SpaceProfiles.TryGetValue(space, out var name)) settings.SpaceProfiles[space] = name = space == "Default" ? "SearcheXtra" : "Space_" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(space)))[..24];
         return name;
     }
+    internal static bool PermissionOriginMatches(string storedOrigin, string origin) =>
+        Uri.TryCreate(storedOrigin, UriKind.Absolute, out var stored) && stored.GetLeftPart(UriPartial.Authority).Equals(origin, StringComparison.OrdinalIgnoreCase);
     public void ApplySettings()
     {
         if (Control.CoreWebView2 is not { } core) return;
@@ -108,7 +145,11 @@ public sealed class PageView : IDisposable
         _ = core.ExecuteScriptAsync("if(document.documentElement)document.documentElement.style.zoom=" + JsonSerializer.Serialize(site?.Zoom ?? store.Settings.PageZoom));
         _ = core.ExecuteScriptAsync("window.__searchPrefs=" + JsonSerializer.Serialize(ScriptOptions()));
     }
-    private void NavigationStarting(CoreWebView2 sender, CoreWebView2NavigationStartingEventArgs args) { tab.Loading = true; tab.Url = args.Uri; tab.Reading = 0; }
+    private void NavigationStarting(CoreWebView2 sender, CoreWebView2NavigationStartingEventArgs args)
+    {
+        if (tab.IsPrivate && !SupportsPrivateExtensions && args.Uri.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase)) { args.Cancel = true; return; }
+        tab.Loading = true; tab.Url = args.Uri; tab.Reading = 0;
+    }
     private async void NavigationCompleted(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
     {
         tab.Loading = false;
@@ -131,7 +172,13 @@ public sealed class PageView : IDisposable
     }
     private void TitleChanged(CoreWebView2 sender, object args) { tab.Title = sender.DocumentTitle; changed(); }
     private void SourceChanged(CoreWebView2 sender, CoreWebView2SourceChangedEventArgs args) => tab.Url = sender.Source;
-    private void FaviconChanged(CoreWebView2 sender, object args) => tab.Favicon = store.Settings.IconGlyphs ? sender.FaviconUri : "";
+    private void FaviconChanged(CoreWebView2 sender, object args)
+    {
+        tab.Favicon = store.Settings.IconGlyphs ? sender.FaviconUri : "";
+        if (WebsiteIcon == sender.FaviconUri) return;
+        WebsiteIcon = sender.FaviconUri;
+        WebsiteIconChanged?.Invoke();
+    }
     private async void NewWindowRequested(CoreWebView2 sender, CoreWebView2NewWindowRequestedEventArgs args)
     {
         var deferral = args.GetDeferral();
@@ -217,9 +264,20 @@ public sealed class PageView : IDisposable
     }
     public async Task UpdateDocumentScriptAsync()
     {
-        if (disposed || Control.CoreWebView2 is not { } core) return;
-        if (documentScript != null) core.RemoveScriptToExecuteOnDocumentCreated(documentScript);
-        documentScript = await core.AddScriptToExecuteOnDocumentCreatedAsync(PageScripts.StoreBridge(new Strings(store.Settings).Text("Add to SearcheXtra", "添加至 SearcheXtra")) + PageScripts.HiddenRules(store.HiddenElements) + (store.Settings.BlockTrackers && (!Uri.TryCreate(tab.Url, UriKind.Absolute, out var page) || store.Settings.Sites.GetValueOrDefault(page.Host)?.BlockTrackers != false) ? PageScripts.Ads : "") + PageScripts.Capture + PageScripts.Features + "window.__searchPrefs=" + JsonSerializer.Serialize(ScriptOptions()));
+        await ScriptGate.WaitAsync();
+        try
+        {
+            if (disposed || Control.CoreWebView2 is not { } core) return;
+            var source = PageScripts.StoreBridge(new Strings(store.Settings).Text("Add to SearcheXtra", "添加至 SearcheXtra")) + PageScripts.HiddenRules(store.HiddenElements) + (store.Settings.BlockTrackers && (!Uri.TryCreate(tab.Url, UriKind.Absolute, out var page) || store.Settings.Sites.GetValueOrDefault(page.Host)?.BlockTrackers != false) ? PageScripts.Ads : "") + PageScripts.Capture + PageScripts.Features + "window.__searchPrefs=" + JsonSerializer.Serialize(ScriptOptions());
+            if (source == documentScriptSource) return;
+            var added = await core.AddScriptToExecuteOnDocumentCreatedAsync(source);
+            if (disposed) return;
+            if (documentScript != null) core.RemoveScriptToExecuteOnDocumentCreated(documentScript);
+            documentScript = added;
+            documentScriptSource = source;
+        }
+        catch (System.Runtime.InteropServices.COMException) when (disposed) { }
+        finally { ScriptGate.Release(); }
     }
     private object ScriptOptions() => new { peek = store.Settings.PeeksLinks, links = store.Settings.ShowsLinks, scroll = store.Settings.AutoScroll, wait = store.Settings.WaitsForPlay, passkeys = store.Settings.Passkeys, passwords = store.Settings.SavesPasswords && !tab.IsPrivate, autocorrect = store.Settings.Autocorrect, reading = store.Settings.ShowsReading, flicks = store.Settings.FloatFlicks };
     public void Resume() { if (Control.CoreWebView2 is { } core) core.Resume(); tab.Sleeping = false; }
@@ -245,7 +303,16 @@ public sealed class PageView : IDisposable
         {
             args.SavesInProfile = false;
             if (args.PermissionKind == CoreWebView2PermissionKind.Notifications && !store.Settings.SiteNotifications) { args.State = CoreWebView2PermissionState.Deny; return; }
-            if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri) && store.Settings.Sites.GetValueOrDefault(uri.Host)?.Permissions.GetValueOrDefault(args.PermissionKind.ToString()) is { } saved && saved != "ask") { args.State = saved == "allow" ? CoreWebView2PermissionState.Allow : CoreWebView2PermissionState.Deny; return; }
+            if (Uri.TryCreate(args.Uri, UriKind.Absolute, out var uri))
+            {
+                var origin = uri.GetLeftPart(UriPartial.Authority);
+                if (tab.IsPrivate)
+                {
+                    var permissions = await sender.Profile.GetNonDefaultPermissionSettingsAsync();
+                    if (permissions.FirstOrDefault(permission => permission.PermissionKind == args.PermissionKind && PermissionOriginMatches(permission.PermissionOrigin, origin)) is { } saved) { args.State = saved.PermissionState; return; }
+                }
+                else if (store.Settings.Sites.GetValueOrDefault(origin)?.Permissions.GetValueOrDefault(args.PermissionKind.ToString()) is { } saved && saved != "ask") { args.State = saved == "allow" ? CoreWebView2PermissionState.Allow : CoreWebView2PermissionState.Deny; return; }
+            }
             if (PermissionRequested != null) await PermissionRequested(args); else args.State = CoreWebView2PermissionState.Deny;
         }
         catch { args.State = CoreWebView2PermissionState.Deny; }
@@ -256,6 +323,7 @@ public sealed class PageView : IDisposable
     {
         if (disposed) return;
         disposed = true;
+        lifetime.Cancel();
         FloatingWindow?.Close(); FloatingWindow = null;
         if (Control.CoreWebView2 is { } core)
         {

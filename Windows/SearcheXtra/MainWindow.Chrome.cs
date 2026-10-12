@@ -123,10 +123,10 @@ public sealed partial class MainWindow
             return new(keyword.Template.Replace("%s", Uri.EscapeDataString(parts[1])));
         return AddressParser.Resolve(text, Settings.SearchTemplate.Replace("%s", "{0}"));
     }
-    private async Task<ContentDialogResult> ShowCardAsync(string title, UIElement content, string? primary = null, bool fitWindow = false)
+    private async Task<ContentDialogResult> ShowCardAsync(string title, UIElement content, string? primary = null, bool fitWindow = false, string? secondary = null)
     {
         if (OverlayLayer.Visibility == Visibility.Visible) return ContentDialogResult.None;
-        var done = new TaskCompletionSource<ContentDialogResult>();
+        var done = new TaskCompletionSource<ContentDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var panel = new Grid { Width = content is FrameworkElement { Width: > 560 } sized ? sized.Width + 44 : 560, MaxHeight = 650, Padding = new(22), RowSpacing = 16 };
         if (fitWindow && content is FrameworkElement popup) { panel.Width = popup.Width + 44; panel.MaxHeight = Math.Max(120, Root.ActualHeight - 32); }
         panel.RowDefinitions.Add(new() { Height = GridLength.Auto }); panel.RowDefinitions.Add(new() { Height = new(1, GridUnitType.Star) }); panel.RowDefinitions.Add(new() { Height = GridLength.Auto });
@@ -134,6 +134,7 @@ public sealed partial class MainWindow
         header.Children.Add(heading); var close = QuietButton("×"); close.HorizontalAlignment = HorizontalAlignment.Right; close.Click += (_, _) => overlayClose?.Invoke(); header.Children.Add(close); panel.Children.Add(header);
         Grid.SetRow((FrameworkElement)content, 1); panel.Children.Add(content);
         if (primary != null) { var button = QuietButton(primary); button.HorizontalAlignment = HorizontalAlignment.Right; Grid.SetRow(button, 2); button.Click += (_, _) => Finish(ContentDialogResult.Primary); panel.Children.Add(button); }
+        if (secondary != null) { var button = QuietButton(secondary); button.HorizontalAlignment = HorizontalAlignment.Left; Grid.SetRow(button, 2); button.Click += (_, _) => Finish(ContentDialogResult.Secondary); panel.Children.Add(button); }
         void Finish(ContentDialogResult result) { OverlayLayer.Children.Clear(); OverlayLayer.Visibility = Visibility.Collapsed; overlayClose = null; done.TrySetResult(result); }
         overlayClose = () => Finish(ContentDialogResult.None);
         var card = new Border { Background = Brush("Ground"), BorderBrush = Brush("Hairline"), BorderThickness = new(1), CornerRadius = new(16), Child = panel, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };

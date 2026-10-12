@@ -1,3 +1,5 @@
+SearcheXtra 2.0.3 完善 macOS 与 Windows 的书签管理，支持拖动排序、批量操作和图标设置，并修复隐私模式、扩展、网站权限及数据导入问题。 SearcheXtra 2.0.3 improves bookmark management on macOS and Windows with drag-and-drop, bulk actions, and icon controls, and fixes private browsing, extensions, site permissions, and data imports.
+
 SearcheXtra 2.0.2 为 macOS 和 Windows 提供卡片式扩展管理，支持搜索和开关控制扩展。Windows 同时支持将扩展图标固定到标题栏，修复 Chrome 扩展商店安装报错，简化权限确认界面，移除重复安装按钮，并修复扩展弹窗内容显示不全的问题。
 
 # SearcheXtra 1.0.0

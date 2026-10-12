@@ -55,6 +55,91 @@ final class BookmarkBarTests: XCTestCase {
         }
     }
 
+    func testBulkOpeningPreservesBookmarkOrder() {
+        Shared.prefs.lazyTabs = true
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        defer { for tab in browser.tabs { tab.close() } }
+        let urls = ["a", "b", "c"].map { URL(string: "http://127.0.0.1:1/" + $0)! }
+        let opened = browser.openBookmarks(urls)
+        XCTAssertEqual(opened.compactMap { $0.pending ?? $0.address }, urls)
+        XCTAssertEqual(browser.tabs.filter { tab in opened.contains { $0.id == tab.id } }.map { $0.id }, opened.map { $0.id })
+    }
+
+    func testExtensionResultCountsRejectNegativeValues() throws {
+        guard #available(macOS 15.4, *) else { throw XCTSkip("Extensions require macOS 15.4") }
+        XCTAssertThrowsError(try ExtensionShims.resultLimit(-1, default: 10))
+        XCTAssertThrowsError(try ExtensionShims.resultLimit(26, default: 25, maximum: 25))
+        XCTAssertEqual(try ExtensionShims.resultLimit(0, default: 10), 0)
+        XCTAssertEqual(try ExtensionShims.resultLimit(nil, default: 10), 10)
+    }
+
+    func testLastPrivatePageLeavesAPrivateBlankTab() {
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        defer { for tab in browser.tabs { tab.close() } }
+        browser.newShyTab()
+        let privatePage = browser.active!
+        privatePage.setAddressOptimistically(URL(string: "https://private.example")!)
+        for tab in browser.tabs where !tab.shy { browser.close(tab) }
+        let store = privatePage.store
+        browser.close(privatePage)
+        XCTAssertEqual(browser.tabs.count, 1)
+        XCTAssertEqual(browser.active?.shy, true)
+        XCTAssertEqual(browser.active?.isBlank, true)
+        XCTAssertTrue(browser.active?.store === store)
+        XCTAssertFalse(browser.active!.store.isPersistent)
+    }
+
+    func testBookmarkGroupFromPrivatePageKeepsPrivacyAndStaysOutOfSession() {
+        let previousGroups = Shared.prefs.usesTabGroups
+        defer { Shared.prefs.usesTabGroups = previousGroups }
+        Shared.prefs.lazyTabs = true
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        defer { for tab in browser.tabs { tab.close() } }
+        let ordinary = browser.active!
+        ordinary.setAddressOptimistically(URL(string: "https://ordinary.example")!)
+        browser.newShyTab()
+        let source = browser.active!
+        let urls = ["a", "b"].map { URL(string: "https://private.example/" + $0)! }
+        let opened = browser.openBookmarkGroup(urls, name: "Private bookmarks")
+        XCTAssertEqual(opened.count, 2)
+        XCTAssertTrue(opened.allSatisfy { $0.shy && !$0.store.isPersistent && $0.store === source.store })
+        let group = opened[0].groupID
+        XCTAssertNotNil(group)
+        XCTAssertTrue(opened.allSatisfy { $0.groupID == group })
+        browser.move(ordinary, toGroup: group)
+        XCTAssertNil(ordinary.groupID)
+        browser.dropTabIntoStrip(ordinary, before: opened[0])
+        XCTAssertNil(ordinary.groupID)
+        XCTAssertFalse(browser.allRows().values.flatMap { $0.groups ?? [] }.contains { $0.id == group })
+    }
+
+    func testPrivateExtensionSettingRebuildsExistingPageWithSameStore() throws {
+        guard #available(macOS 15.4, *) else { throw XCTSkip("Extensions require macOS 15.4") }
+        let previous = Shared.prefs.extensionsInPrivate
+        defer { Shared.prefs.extensionsInPrivate = previous }
+        Shared.prefs.extensionsInPrivate = false
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        defer { for tab in browser.tabs { tab.close() } }
+        browser.newShyTab()
+        let tab = browser.active!
+        let id = tab.id
+        let store = tab.store
+        let address = URL(string: "https://private.example")!
+        tab.setAddressOptimistically(address)
+        let oldView = tab.web
+        Shared.prefs.extensionsInPrivate = true
+        XCTAssertTrue(tab.carriesExtensions)
+        XCTAssertEqual(tab.id, id)
+        XCTAssertTrue(tab.store === store)
+        XCTAssertTrue(tab.web !== oldView)
+        XCTAssertEqual(tab.address, address)
+        Shared.prefs.extensionsInPrivate = false
+        XCTAssertFalse(tab.carriesExtensions)
+        XCTAssertTrue(tab.store === store)
+        XCTAssertFalse(tab.store.isPersistent)
+        XCTAssertEqual(tab.address, address)
+    }
+
     func testSettingsPersist() {
         Shared.prefs.compactBookmarksBar = true
         XCTAssertTrue(Preferences().compactBookmarksBar)

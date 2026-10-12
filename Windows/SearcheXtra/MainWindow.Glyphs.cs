@@ -13,6 +13,8 @@ public sealed partial class MainWindow
         {
             "general" => "M2,3H14V13H2Z M2,6H14 M4,4.5H4.1 M6,4.5H6.1",
             "tabs" => "M2,3H14V13H2Z M6,3V13 M10,3V13",
+            "bookmarks" => "M4,2H12V14L8,11L4,14Z",
+            "folder" => "M1,4V13Q1,14 2,14H14Q15,14 15,13V5Q15,4 14,4H7L5,2H2Q1,2 1,3Z",
             "shortcuts" => "M1.5,4H14.5V12H1.5Z M4,6H4.1 M7,6H7.1 M10,6H10.1 M12,6H12.1 M4,8H4.1 M7,8H7.1 M10,8H10.1 M4,10H12",
             "extensions" => "M2,2H6C4.5,-1 10,-1 8.5,2H13V6C16,4.5 16,10 13,8.5V13H9C10.5,16 5,16 6.5,13H2V9C-1,10.5 -1,5 2,6.5Z",
             "passwords" => "M7,6.5A3,3 0 1 0 7,6.6 M6,9L12,15 M9,12L11,10 M11,14L13,12",

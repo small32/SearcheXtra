@@ -37,7 +37,7 @@ public partial class App : Application
         if (index >= 0 && index + 1 < command.Length && AddressParser.IsWeb(command[index + 1])) { if (Store.Settings.LittleLinks) NewWindow(initialUrl: command[index + 1], small: true); else Windows[0].OpenExternal(command[index + 1]); }
     }
 
-    internal static void NewWindow(bool restore = false, SessionState? session = null, string? initialUrl = null, bool small = false)
+    internal static MainWindow NewWindow(bool restore = false, SessionState? session = null, string? initialUrl = null, bool small = false)
     {
         var window = new MainWindow(Store, restore, session);
         Windows.Add(window);
@@ -45,5 +45,6 @@ public partial class App : Application
         if (initialUrl != null) window.OpenExternal(initialUrl);
         if (small) window.AppWindow.Resize(new global::Windows.Graphics.SizeInt32(720, 540));
         window.Activate();
+        return window;
     }
 }

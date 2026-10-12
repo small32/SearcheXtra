@@ -283,9 +283,8 @@ final class Extensions: NSObject, ObservableObject {
     }
 
     /// Private tabs keep nothing and see no extensions, unless Settings ›
-    /// Extensions says they may — and then only the ones made since, which
-    /// carry the controller; one made before the switch has no page an
-    /// extension could reach.
+    /// Extensions says they may. A changed setting rebuilds their views and
+    /// updates this row so a revoked page is no longer visible to extensions.
     private func seen(_ tab: Tab) -> Bool { !tab.shy || tab.carriesExtensions }
     /// The first window's tabs as extensions see them: what a bare tab
     /// index means (see tab(window:index:) for any window's).
@@ -336,6 +335,15 @@ final class Extensions: NSObject, ObservableObject {
     }
 
     // MARK: - every window, followed
+
+    func privateAccessChanged(_ on: Bool) {
+        for context in contexts.values { context.hasAccessToPrivateData = on }
+    }
+
+    func privateTabsChanged(in browser: Browser) {
+        follow(browser.tabs, in: browser)
+        activated(from: nil, to: browser.activeID, in: browser)
+    }
 
     /// A window's browser, told to WebKit and followed: its row and its
     /// tab in front.
@@ -441,9 +449,18 @@ final class Extensions: NSObject, ObservableObject {
 
     // MARK: - loading
 
+    /// Invalidated by unloading, including while WebKit is still reading the package.
+    private var loading: [String: UUID] = [:]
+
     @discardableResult
     private func load(_ item: Installed) async -> Bool {
+        guard installed.contains(where: { $0.id == item.id && $0.enabled && $0.version == item.version }) else { return false }
+        if contexts[item.id] != nil { return true }
+        let token = UUID()
+        loading[item.id] = token
+        defer { if loading[item.id] == token { loading[item.id] = nil } }
         if let forgetting = forgetting[item.id] { await forgetting.value }
+        guard loading[item.id] == token else { return false }
         // The shim this build of Search carries, in place of whatever the
         // build that installed it carried — away from the main thread: the
         // first launch after an update reads and rewrites every script and
@@ -455,10 +472,17 @@ final class Extensions: NSObject, ObservableObject {
             catch { return false }
         }
         try? await Task.detached(priority: .userInitiated) { try ExtensionShims.prepare(folder) }.value
+        guard loading[item.id] == token else { return false }
         do {
             let found = try await WKWebExtension(resourceBaseURL: Extensions.folder(for: item.id))
+            // Reading scripts and constructing the extension both suspend. A
+            // disable, removal, update or newer load wins over this old work.
+            guard loading[item.id] == token,
+                  installed.contains(where: { $0.id == item.id && $0.enabled && $0.version == item.version })
+            else { return false }
             let context = WKWebExtensionContext(for: found)
             context.uniqueIdentifier = item.id
+            context.hasAccessToPrivateData = Store.settings.bool(forKey: "extensions.private")
             // The same origin every launch. WebKit picks a fresh one
             // otherwise, and everything an extension keeps in its own pages
             // — localStorage, IndexedDB — is filed under its origin.
@@ -503,6 +527,7 @@ final class Extensions: NSObject, ObservableObject {
     }
 
     private func unload(_ id: String) {
+        loading[id] = nil
         guard let context = contexts[id] else { return }
         Browsers.closePopups(of: id)
         try? controller.unload(context)
@@ -577,19 +602,20 @@ final class Extensions: NSObject, ObservableObject {
         installFolder(at: source)
     }
 
-    func installFolder(at source: URL, confirm: Bool = true) {
+    @discardableResult
+    func installFolder(at source: URL, confirm: Bool = true) -> Task<Void, Never>? {
         guard FileManager.default.fileExists(atPath: source.appendingPathComponent("manifest.json").path) else {
             browser?.announce(L10n.text("Extensions.0404"))
-            return
+            return nil
         }
         let source = URL(fileURLWithPath: Crx.realPath(of: source), isDirectory: true)
         let id = Crx.unpackedID(for: source)
         if installed.contains(where: { $0.id == id }) {
             browser?.announce(L10n.text("upstream.extension.alreadyLoaded"))
-            return
+            return nil
         }
         let staged = Extensions.stagingFolder(for: id)
-        Task {
+        return Task {
             defer { try? FileManager.default.removeItem(at: staged) }
             do {
                 try FileManager.default.createDirectory(at: Extensions.folder, withIntermediateDirectories: true)
@@ -760,7 +786,9 @@ final class Extensions: NSObject, ObservableObject {
         installed.removeAll { $0.id == id }
         installed.append(item)
         save()
-        if await load(item) {
+        let loaded = await load(item)
+        guard installed.contains(where: { $0.id == id && $0.enabled && $0.version == item.version }) else { return }
+        if loaded || contexts[id] != nil {
             browser?.announce(L10n.text("Extensions.0412", String(describing: name)))
         } else {
             browser?.announce(L10n.text("Extensions.0413", String(describing: name)))
@@ -900,16 +928,19 @@ final class Extensions: NSObject, ObservableObject {
         installed.first { $0.enabled && Extensions.settings(for: $0.id)["privacy.services.passwordSavingEnabled"] as? Bool == false }?.name
     }
 
-    func setEnabled(_ id: String, _ on: Bool) {
-        guard let index = installed.firstIndex(where: { $0.id == id }) else { return }
+    @discardableResult
+    func setEnabled(_ id: String, _ on: Bool) -> Task<Bool, Never>? {
+        guard let index = installed.firstIndex(where: { $0.id == id }), installed[index].enabled != on else { return nil }
         installed[index].enabled = on
         save()
         if on {
-            Task { await load(installed[index]) }
+            let item = installed[index]
+            return Task { await load(item) }
         } else {
             unload(id)
             ExtensionCapture.forget(id)
         }
+        return nil
     }
 
     func openOptions(_ id: String) {

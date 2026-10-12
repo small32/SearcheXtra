@@ -1,11 +1,103 @@
 {
+  "bookmarks.bar.websiteIcons": {
+    "en": "Show bookmark website icons",
+    "zh-Hans": "书签显示网站图标"
+  },
+  "bookmarks.context.addPage": {
+    "en": "Add page…",
+    "zh-Hans": "添加网页…"
+  },
+  "bookmarks.context.addFolder": {
+    "en": "Add folder…",
+    "zh-Hans": "添加文件夹…"
+  },
+  "bookmarks.context.openAll": {
+    "en": "Open all ({0}) bookmarks",
+    "zh-Hans": "打开全部（{0} 个）书签"
+  },
+  "bookmarks.context.openWindow": {
+    "en": "Open all ({0}) in a new window",
+    "zh-Hans": "在新窗口中打开全部（{0} 个）书签"
+  },
+  "bookmarks.context.openPrivate": {
+    "en": "Open all ({0}) in a private window",
+    "zh-Hans": "在无痕窗口中打开全部（{0} 个）网址"
+  },
+  "bookmarks.context.openGroup": {
+    "en": "Open all ({0}) in a new tab group",
+    "zh-Hans": "在新标签页组中打开全部（{0} 个）网址"
+  },
+  "bookmarks.context.rename": {
+    "en": "Rename…",
+    "zh-Hans": "重命名…"
+  },
+  "bookmarks.context.cut": {
+    "en": "Cut",
+    "zh-Hans": "剪切"
+  },
+  "bookmarks.context.copy": {
+    "en": "Copy",
+    "zh-Hans": "复制"
+  },
+  "bookmarks.context.paste": {
+    "en": "Paste",
+    "zh-Hans": "粘贴"
+  },
+  "bookmarks.context.manager": {
+    "en": "Open bookmark manager",
+    "zh-Hans": "打开书签管理器"
+  },
+  "bookmarks.context.bar": {
+    "en": "Bookmarks bar",
+    "zh-Hans": "书签栏"
+  },
+  "bookmarks.context.showBar": {
+    "en": "Show bookmarks bar",
+    "zh-Hans": "显示书签栏"
+  },
+  "bookmarks.bar.folderIcons": {
+    "en": "Bookmarks bar folder icons",
+    "zh-Hans": "书签栏文件夹图标"
+  },
+  "bookmarks.manager.selectAll": {
+    "en": "Select all",
+    "zh-Hans": "全选"
+  },
+  "bookmarks.manager.deleteSelected": {
+    "en": "Delete selected",
+    "zh-Hans": "删除所选"
+  },
+  "bookmarks.manager.deleteDetail": {
+    "en": "Selected bookmarks and folders will be deleted, including their contents.",
+    "zh-Hans": "将删除所选书签和文件夹，包括文件夹中的内容。"
+  },
+  "bookmarks.manager.new": {
+    "en": "New bookmark",
+    "zh-Hans": "新建书签"
+  },
+  "bookmarks.manager.address": {
+    "en": "Bookmark address",
+    "zh-Hans": "书签网址"
+  },
+  "bookmarks.manager.title": {
+    "en": "Bookmark manager",
+    "zh-Hans": "书签管理器"
+  },
+  "bookmarks.manager.detail": {
+    "en": "Search, import, edit, delete and organize bookmarks and folders.",
+    "zh-Hans": "搜索、导入、编辑、删除及整理书签和文件夹。"
+  },
+  "bookmarks.manager.sort": {
+    "en": "Sort by name",
+    "zh-Hans": "按名称排序"
+  },
   "bookmarks.bar.compact.title": {
     "en": "Compact bookmarks bar",
     "zh-Hans": "紧凑书签栏"
   },
   "bookmarks.bar.compact.detail": {
-    "en": "Reduce spacing between bookmarks, icons and titles.",
-    "zh-Hans": "缩小书签之间及图标与文字之间的间距。"
+    "en": "Reduce spacing in the bookmarks bar and its dropdown menus.",
+    "zh-Hans": "缩小书签栏及其下拉菜单的间距。"
   },
   "bookmarks.bar.opening.title": {
     "en": "Open bookmarks from the bar",
@@ -3008,8 +3100,8 @@
     "zh-Hans": "下次启动 SearcheXtra 时生效"
   },
   "Settings.0857": {
-    "en": "Open the disk image, the same as the first time",
-    "zh-Hans": "打开磁盘映像，按首次安装的方式安装"
+    "en": "Download the update from GitHub Releases",
+    "zh-Hans": "从 GitHub Release 下载更新"
   },
   "Settings.0858": {
     "en": "Checked and put in place when you press Install",
@@ -5186,5 +5278,13 @@
   "upstream.extension.sourceMoved": {
     "en": "{0} wasn't reloaded — its folder now leads somewhere else",
     "zh-Hans": "未重新加载 {0}：扩展目录已指向其他位置。"
+  },
+  "updates.github.title": {
+    "en": "Updates from GitHub",
+    "zh-Hans": "从 GitHub 更新"
+  },
+  "updates.github.detail": {
+    "en": "Download the latest SearcheXtra release and replace the application",
+    "zh-Hans": "下载最新版 SearcheXtra 并替换应用"
   }
 }

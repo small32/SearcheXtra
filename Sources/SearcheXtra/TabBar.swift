@@ -1033,11 +1033,13 @@ struct TabMenu: View {
     let close: () -> Void
 
     var body: some View {
-        if browser.prefs.usesTabGroups && tab.pin == nil && !tab.shy && !tab.bench {
+        if browser.prefs.usesTabGroups && tab.pin == nil && !tab.bench {
             Menu(L10n.text("TabBar.1092")) {
                 Button(L10n.text("TabBar.1093")) { browser.addTabGroup(containing: tab) }
                 if !browser.tabGroups.isEmpty { Divider() }
-                ForEach(browser.tabGroups) { group in
+                ForEach(browser.tabGroups.filter { group in
+                    !browser.tabs.contains { $0.groupID == group.id && $0.shy != tab.shy }
+                }) { group in
                     Button(group.name) { browser.move(tab, toGroup: group.id) }
                         .disabled(tab.groupID == group.id)
                 }

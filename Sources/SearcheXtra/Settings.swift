@@ -19,13 +19,14 @@ struct SettingsPanel: View {
     @State private var page: Page = Page(rawValue: Store.settings.string(forKey: "settings.page") ?? "") ?? .general
 
     enum Page: String, CaseIterable, Identifiable {
-        case general, tabs, shortcuts, extensions, passwords, downloads, privacy, about
+        case general, tabs, shortcuts, bookmarks, extensions, passwords, downloads, privacy, about
         var id: String { rawValue }
         var title: String {
             switch self {
             case .general: return L10n.text("Settings.0692")
             case .tabs: return L10n.text("Settings.0693")
             case .shortcuts: return L10n.text("Settings.0694")
+            case .bookmarks: return L10n.text("bookmarks.manager.title")
             case .extensions: return L10n.text("Settings.0695")
             case .passwords: return L10n.text("Settings.0696")
             case .downloads: return L10n.text("Settings.0697")
@@ -38,6 +39,7 @@ struct SettingsPanel: View {
             case .general: return "macwindow"
             case .tabs: return "rectangle.split.3x1"
             case .shortcuts: return "keyboard"
+            case .bookmarks: return "book"
             case .extensions: return "puzzlepiece.extension"
             case .passwords: return "key"
             case .downloads: return "arrow.down.circle"
@@ -144,6 +146,15 @@ struct SettingsPanel: View {
                         tabs
                         if !prefs.sidebar { toolbar }
                     case .shortcuts: ShortcutsPage(browser: browser, store: .shared)
+                    case .bookmarks:
+                        Card {
+                            Line(L10n.text("bookmarks.manager.title"), L10n.text("bookmarks.manager.detail")) {
+                                Pill(L10n.text("Settings.0786")) {
+                                    browser.tuning = false
+                                    browser.bookmarking = true
+                                }
+                            }
+                        }
                     case .extensions: ExtensionsPage(browser: browser)
                     case .passwords: passwords
                     case .downloads: downloads
@@ -684,8 +695,8 @@ struct SettingsPanel: View {
             Card {
                 Line(versionTitle, versionDetail) { versionControl }
                 Rule()
-                Line(L10n.text("Settings.0829"), L10n.text("Settings.0830")) {
-                    Switch(on: $prefs.installsUpdates)
+                Line(L10n.text("updates.github.title"), L10n.text("updates.github.detail")) {
+                    Pill("GitHub Releases") { NSWorkspace.shared.open(URL(string: "https://github.com/small32/SearcheXtra/releases/latest")!) }
                 }
                 Rule()
                 Line(L10n.text("Settings.0831"), L10n.text("Settings.0832")) {

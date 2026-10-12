@@ -52,8 +52,11 @@ public sealed class BrowserSettings
     public List<string> RemovedExtensionIds { get; set; } = [];
     public Dictionary<string, string> SpaceProfiles { get; set; } = [];
     public List<InstalledExtension> Extensions { get; set; } = [];
+    public Dictionary<string, Dictionary<string, string>> ProfileExtensionFolders { get; set; } = [];
     public bool ExtensionsInPrivate { get; set; }
     public bool CompactBookmarksBar { get; set; }
+    public bool BookmarkBarFolderIcons { get; set; } = true;
+    public bool BookmarkWebsiteIcons { get; set; } = true;
     public BookmarkOpening BookmarkOpening { get; set; }
     public bool LazyBackgroundTabs { get; set; } = true;
     public bool SuspendTabs { get; set; } = true;
@@ -116,20 +119,20 @@ public sealed class BrowserTab : INotifyPropertyChanged
     private double reading;
     private bool useIcons;
     private bool loading, pinned, sleeping;
-    public string Title { get => title; set { title = value; Changed(); Changed(nameof(DisplayTitle)); Changed(nameof(Letter)); Changed(nameof(Label)); } }
-    public string Url { get => url; set { url = value; Changed(); } }
-    public bool Loading { get => loading; set { loading = value; Changed(); Changed(nameof(DisplayTitle)); Changed(nameof(Letter)); Changed(nameof(Label)); } }
-    public bool Pinned { get => pinned; set { pinned = value; Changed(); Changed(nameof(DisplayTitle)); Changed(nameof(Letter)); Changed(nameof(Label)); } }
-    public bool Sleeping { get => sleeping; set { sleeping = value; Changed(); Changed(nameof(DisplayTitle)); Changed(nameof(Letter)); Changed(nameof(Label)); } }
+    public string Title { get => title; set { if (title == value) return; title = value; Changed(); Changed(nameof(DisplayTitle)); Changed(nameof(Letter)); Changed(nameof(LetterDisplay)); Changed(nameof(Label)); } }
+    public string Url { get => url; set { if (url == value) return; url = value; Changed(); } }
+    public bool Loading { get => loading; set { if (loading == value) return; loading = value; Changed(); Changed(nameof(DisplayTitle)); Changed(nameof(Letter)); Changed(nameof(Label)); } }
+    public bool Pinned { get => pinned; set { if (pinned == value) return; pinned = value; Changed(); Changed(nameof(DisplayTitle)); Changed(nameof(Letter)); Changed(nameof(Label)); } }
+    public bool Sleeping { get => sleeping; set { if (sleeping == value) return; sleeping = value; Changed(); Changed(nameof(DisplayTitle)); Changed(nameof(Letter)); Changed(nameof(Label)); } }
     public bool IsPrivate { get; init; }
     public string Letter => (string.IsNullOrWhiteSpace(Title) ? "S" : Title.Trim()[..1]).ToUpperInvariant();
     public string Label => string.IsNullOrWhiteSpace(Title) ? "SearcheXtra" : Title;
-    public string Favicon { get => icon; set { icon = value; Changed(); Changed(nameof(LetterDisplay)); } }
-    public bool UseIcons { get => useIcons; set { useIcons = value; Changed(); Changed(nameof(LetterDisplay)); } }
+    public string Favicon { get => icon; set { if (icon == value) return; icon = value; Changed(); Changed(nameof(LetterDisplay)); } }
+    public bool UseIcons { get => useIcons; set { if (useIcons == value) return; useIcons = value; Changed(); Changed(nameof(LetterDisplay)); } }
     public string LetterDisplay => UseIcons && Favicon.Length > 0 ? "" : Letter;
-    public double Reading { get => reading; set { reading = value; Changed(); } }
+    public double Reading { get => reading; set { if (reading == value) return; reading = value; Changed(); } }
     public string Space { get; set; } = "Default";
-    public string Group { get => group; set { group = value; Changed(); Changed(nameof(DisplayTitle)); Changed(nameof(Letter)); Changed(nameof(Label)); } }
+    public string Group { get => group; set { if (group == value) return; group = value; Changed(); Changed(nameof(DisplayTitle)); Changed(nameof(Letter)); Changed(nameof(Label)); } }
     public string DisplayTitle => $"{(Pinned ? "● " : "")}{(IsPrivate ? "◈ " : "")}{(Group.Length > 0 ? "[" + Group + "] " : "")}{(Loading ? "↻ " : Sleeping ? "◌ " : "")}{(string.IsNullOrWhiteSpace(Title) ? "SearcheXtra" : Title)}";
     [JsonIgnore] public DateTimeOffset LastUsed { get; set; } = DateTimeOffset.Now;
     public event PropertyChangedEventHandler? PropertyChanged;

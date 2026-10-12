@@ -267,7 +267,8 @@ final class Tab: ObservableObject, Identifiable {
 
     private func uiDelegate(_ delegate: (WKNavigationDelegate & WKUIDelegate)?) -> WKUIDelegate? {
         guard #available(macOS 15.4, *), let pages = MainActor.assumeIsolated({ Extensions.pages }),
-              configuration.userContentController === pages else { return delegate }
+              configuration.userContentController === pages || (shy && address.flatMap(Browser.extensionHost) != nil)
+        else { return delegate }
         let made = pageDelegate as? ExtensionPageDelegate ?? ExtensionPageDelegate()
         made.next = delegate
         pageDelegate = made
@@ -637,7 +638,7 @@ final class Tab: ObservableObject, Identifiable {
         hovered.tab = self
         controller.add(hovered, contentWorld: .defaultClient, name: HoveredLink.name)
         controller.add(middles, contentWorld: Web.world, name: MiddleRelay.name)
-        Shield.shared.protect(controller)
+        Shield.shared.protect(controller, for: address?.host)
         built = web
         // A tab muted before it went to sleep wakes muted.
         if muted { Muter.set(true, on: web) }
@@ -1030,6 +1031,29 @@ final class Tab: ObservableObject, Identifiable {
             discard()
         }
         configuration = Web.configuration(space: space)
+    }
+
+    /// WebKit fixes the extension controller when a view is built. Rebuild
+    /// existing private pages when permission changes, retaining their own
+    /// ephemeral store and the normal page's restorable history.
+    @available(macOS 15.4, *)
+    func privateExtensionsChanged(_ on: Bool) {
+        guard shy, carriesExtensions != on else { return }
+        let previousStore = store
+        let wasBuilt = built != nil
+        if let built {
+            memory = built.isLoading ? nil : built.interactionState
+            pending = address ?? built.url
+            picture = nil
+            cover = nil
+            discard()
+        }
+        configuration = Web.configuration(shy: true, store: previousStore)
+        configuration.webExtensionController = on ? Extensions.shared.controller : nil
+        // A disabled extension's own new-tab page must not keep running.
+        if !on, let address, Browser.extensionHost(of: address) != nil { returnToBlank() }
+        else if wasBuilt { _ = wake() }
+        objectWillChange.send()
     }
 
     /// Settings › Videos wait for a click, changed: the page's next view

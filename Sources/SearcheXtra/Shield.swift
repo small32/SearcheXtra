@@ -12,7 +12,7 @@ final class Shield: ObservableObject {
     static let shared = Shield()
 
     private(set) var list: WKContentRuleList?
-    private var waiting: [WKUserContentController] = []
+    private var waiting: [(controller: WKUserContentController, host: String?)] = []
 
     /// Set the one time compiling the list didn't work. The toggle in
     /// Settings can say "on" all it wants; nothing is actually blocked until
@@ -47,7 +47,11 @@ final class Shield: ObservableObject {
     /// doing this at the navigation is what makes "off for this site" true
     /// for the whole page rather than for the second half of it.
     func tune(_ controller: WKUserContentController, for host: String?) {
-        guard let list else { return }
+        guard let list else {
+            if let index = waiting.firstIndex(where: { $0.controller === controller }) { waiting[index].host = host }
+            else { waiting.append((controller, host)) }
+            return
+        }
         controller.remove(list)
         if enabled, !isPaused(on: host) { controller.add(list) }
     }
@@ -145,27 +149,22 @@ final class Shield: ObservableObject {
                 }
                 self.list = compiled
                 // Tabs that opened while this was still compiling get it now.
-                if self.enabled { self.waiting.forEach { $0.add(compiled) } }
+                self.waiting.forEach { self.tune($0.controller, for: $0.host) }
                 self.waiting = []
             }
         }
     }
 
     /// Every tab asks for it; whoever asks before it is ready is remembered.
-    func protect(_ controller: WKUserContentController) {
-        if let list {
-            if enabled { controller.add(list) }
-        } else {
-            waiting.append(controller)
-        }
+    func protect(_ controller: WKUserContentController, for host: String? = nil) {
+        tune(controller, for: host)
     }
 
     /// Switched on or off for every page that is already open.
-    func apply(to controllers: [WKUserContentController]) {
-        guard let list else { return }
-        for controller in controllers {
-            controller.remove(list)
-            if enabled { controller.add(list) }
+    func apply(to tabs: [Tab]) {
+        for tab in tabs {
+            guard let built = tab.built else { continue }
+            tune(built.configuration.userContentController, for: tab.address?.host ?? built.url?.host)
         }
     }
 }

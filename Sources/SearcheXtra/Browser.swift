@@ -1754,8 +1754,24 @@ final class Browser: NSObject, ObservableObject {
             .sink { [weak self] on in
                 guard let self else { return }
                 Shield.shared.enabled = on
-                Shield.shared.apply(to: tabs.compactMap { $0.built?.configuration.userContentController })
+                Shield.shared.apply(to: tabs + parkedTabs + [peekTab].compactMap { $0 })
                 announce(on ? L10n.text("Browser.0329") : L10n.text("Browser.0330"))
+            }
+            .store(in: &bag)
+
+        prefs.$extensionsInPrivate
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] on in
+                guard let self, #available(macOS 15.4, *) else { return }
+                Extensions.shared.privateAccessChanged(on)
+                let pages = tabs + parkedTabs + [peekTab].compactMap({ $0 })
+                if let id = floating, let tab = pages.first(where: { $0.id == id }),
+                   tab.shy, tab.carriesExtensions != on { land() }
+                for tab in pages {
+                    tab.privateExtensionsChanged(on)
+                }
+                Extensions.shared.privateTabsChanged(in: self)
             }
             .store(in: &bag)
 
@@ -2491,6 +2507,7 @@ final class Browser: NSObject, ObservableObject {
     /// so one carried across the hidden line becomes the kind it landed
     /// among, which keeps the squares ahead of the rows (see settlePin).
     private func joins(_ tab: Tab, kindOf anchor: Tab) -> Bool {
+        if anchor.groupID != nil, tab.shy != anchor.shy { return false }
         guard tab.pin != nil, anchor.pin != nil, tab.listed != anchor.listed else { return true }
         if prefs.showsPinRows { return false }
         tab.listed = anchor.listed
@@ -2687,7 +2704,8 @@ final class Browser: NSObject, ObservableObject {
             if tab.isBlank {
                 NSApp.keyWindow?.performClose(nil)
             } else {
-                let fresh = Tab(configuration: Web.configuration(space: spaceID))
+                let fresh = Tab(shy: tab.shy, configuration: Web.configuration(shy: tab.shy, space: spaceID,
+                    store: tab.shy ? tab.store : nil))
                 remember(tab, at: 0)
                 tab.close()
                 adopt(fresh)
@@ -3085,7 +3103,7 @@ final class Browser: NSObject, ObservableObject {
         tabGroups.append(TabGroup(id: id, name: L10n.text("Browser.0344", String(describing: tabGroups.count + 1)), collapsed: false))
         editingGroupID = id
         move(tab, toGroup: id)
-        // A tab that can't be in a group (a pin, a private one) leaves none behind.
+        // A tab that can't be in a group (a pin or a bench tab) leaves none behind.
         removeEmptyGroup(id)
         writeSession(now: true)
         return id
@@ -3120,8 +3138,8 @@ final class Browser: NSObject, ObservableObject {
     /// with Clear, so no neighbour wakes only to be closed.
     func closeTabGroup(_ id: UUID) {
         guard let at = tabGroups.firstIndex(where: { $0.id == id }) else { return }
-        closedGroups[id] = (tabGroups[at], at)
         let going = tabs.filter { $0.groupID == id }
+        if going.contains(where: { !$0.shy }) { closedGroups[id] = (tabGroups[at], at) }
         closingTogether { _ in
             for tab in going where !visibleTabIDs.contains(tab.id) { close(tab) }
             for tab in going where visibleTabIDs.contains(tab.id) { close(tab) }
@@ -3132,8 +3150,10 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func move(_ tab: Tab, toGroup id: UUID?) {
-        guard tabs.contains(where: { $0.id == tab.id }), tab.pin == nil, !tab.shy, !tab.bench,
+        guard tabs.contains(where: { $0.id == tab.id }), tab.pin == nil, !tab.bench,
               id == nil || tabGroups.contains(where: { $0.id == id }) else { return }
+        // A private group never acquires an ordinary page (or the reverse).
+        if let id, tabs.contains(where: { $0.groupID == id && $0.shy != tab.shy }) { return }
         let previousGroup = tab.groupID
         guard previousGroup != id else { return }
         // A pair is one place in the row: moved into a group or out of one,
@@ -3306,18 +3326,19 @@ final class Browser: NSObject, ObservableObject {
         // An extension's own page is served only to a view built from that
         // extension's configuration.
         let url = Browser.page(url)
-        let page = Browser.extensionConfiguration(for: url)
+        let privateStore = source.flatMap { $0.shy ? $0.store : nil }
+        let page = Browser.extensionConfiguration(for: url, privateStore: privateStore)
         // A new tab is in this window's space, with its sign-ins — not the
         // space of whichever window is in front, when this one is behind it.
-        let tab = if let source, source.shy, page == nil {
-            Tab(shy: true, configuration: Web.configuration(shy: true, store: source.store))
+        let tab = if let source, source.shy {
+            Tab(shy: true, configuration: page ?? Web.configuration(shy: true, store: source.store))
         } else {
             Tab(configuration: page ?? Web.configuration(space: spaceID))
         }
         prepare(tab)
         // A link opened from a grouped tab joins its group, only while groups
         // are on: turned off, they sleep, and nothing new goes into one.
-        if prefs.usesTabGroups, let source, !tab.shy, !tab.bench { tab.groupID = source.groupID }
+        if prefs.usesTabGroups, let source, tab.shy == source.shy, !tab.bench { tab.groupID = source.groupID }
         tabs.insert(tab, at: atEnd ? tabs.count : placeForNew())
         if mayWait, !foreground, prefs.lazyTabs, page == nil {
             tab.restore(url: url, title: "")
@@ -3345,7 +3366,7 @@ final class Browser: NSObject, ObservableObject {
         // A private tab stays private, and keeps its own sign-ins when it
         // had them; an extension's page it showed was in that extension's
         // store, so going back to the web takes a new private one.
-        let page = Browser.extensionConfiguration(for: url)
+        let page = Browser.extensionConfiguration(for: url, privateStore: tab.shy ? tab.store : nil)
         let fresh = if tab.shy {
             Tab(shy: true, bench: tab.bench, configuration: page
                 ?? Web.configuration(shy: true, store: tab.store.isPersistent ? nil : tab.store))
@@ -3386,11 +3407,21 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// The configuration for an extension's page, or nil for anything else.
-    static func extensionConfiguration(for url: URL) -> WKWebViewConfiguration? {
+    static func extensionConfiguration(for url: URL, privateStore: WKWebsiteDataStore? = nil) -> WKWebViewConfiguration? {
         guard #available(macOS 15.4, *) else { return nil }
         let url = Extensions.current(url)
         guard url.scheme == Extensions.scheme else { return nil }
-        return Extensions.shared.controller.extensionContext(for: url)?.webViewConfiguration
+        guard let configuration = Extensions.shared.controller.extensionContext(for: url)?.webViewConfiguration else { return nil }
+        if let privateStore {
+            guard Shared.prefs.extensionsInPrivate else { return nil }
+            configuration.websiteDataStore = privateStore.isPersistent ? .nonPersistent() : privateStore
+            // Extension configurations normally share the controller for
+            // their own pages. Private pages need a separate one as well as
+            // their own data store, so they cannot share document state.
+            configuration.userContentController = WKUserContentController()
+            configuration.userContentController.addScriptMessageHandler(ExtensionCapture.shared, contentWorld: .page, name: ExtensionCapture.channel)
+        }
+        return configuration
     }
 
     /// A page for the bench: at the end of the row, behind whatever you are
@@ -3709,10 +3740,11 @@ final class Browser: NSObject, ObservableObject {
         // The window closes whatever else is true. Tying that to the bookkeeping
         // is how a little window outlives the thing that opened it.
         if floater.showing { floater.drop() }
-        guard let id = floating, let tab = tabs.first(where: { $0.id == id }) else { return }
+        guard let id = floating else { return }
         floating = nil
+        guard let tab = (tabs + parkedTabs + [peekTab].compactMap { $0 }).first(where: { $0.id == id }) else { return }
         tab.floating = false
-        tab.web.evaluateInSearch(Isolate.off)
+        tab.built?.evaluateInSearch(Isolate.off)
     }
 
     func prepare(_ tab: Tab) {
@@ -4385,7 +4417,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // ⌘-click's goes (see open(_:foreground:)).
         if (webView as? PageView)?.takeBehind() == true, let source = self.tab(for: webView) {
             prepare(tab)
-            if prefs.usesTabGroups, !tab.shy, !tab.bench { tab.groupID = source.groupID }
+            if prefs.usesTabGroups, tab.shy == source.shy, !tab.bench { tab.groupID = source.groupID }
             tabs.insert(tab, at: placeForNew())
         } else {
             adopt(tab)

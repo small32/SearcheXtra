@@ -257,6 +257,12 @@ final class Preferences: ObservableObject {
     @Published var compactBookmarksBar: Bool {
         didSet { store.set(compactBookmarksBar, forKey: "bookmarks.bar.compact") }
     }
+    @Published var bookmarkBarFolderIcons: Bool {
+        didSet { store.set(bookmarkBarFolderIcons, forKey: "bookmarks.bar.folderIcons") }
+    }
+    @Published var bookmarkWebsiteIcons: Bool {
+        didSet { store.set(bookmarkWebsiteIcons, forKey: "bookmarks.bar.websiteIcons") }
+    }
     @Published var bookmarkBarOpening: BookmarkBarOpening {
         didSet { store.set(bookmarkBarOpening.rawValue, forKey: "bookmarks.bar.opening") }
     }
@@ -440,6 +446,8 @@ final class Preferences: ObservableObject {
         littleLinks = store.bool(forKey: "links.little")
         bookmarksBar = store.bool(forKey: "bookmarks.bar")
         compactBookmarksBar = store.bool(forKey: "bookmarks.bar.compact")
+        bookmarkBarFolderIcons = store.object(forKey: "bookmarks.bar.folderIcons") as? Bool ?? true
+        bookmarkWebsiteIcons = store.object(forKey: "bookmarks.bar.websiteIcons") as? Bool ?? true
         bookmarkBarOpening = store.string(forKey: "bookmarks.bar.opening").flatMap(BookmarkBarOpening.init) ?? .standard
         alwaysShowsDownloads = store.bool(forKey: "downloads.button")
         let links = store.object(forKey: "links.show") as? Bool ?? true

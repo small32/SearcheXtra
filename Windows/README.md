@@ -6,7 +6,7 @@ Windows 版使用 C# / .NET 8、WinUI 3 和 WebView2，与 macOS 的 Swift 源�
 
 - **仅支持 Windows 10 1809（build 17763）及更新版本，包含 Windows 11。**
 - **仅支持 x86_64 / x64 系统。** 不提供 x86 或 ARM64 构建；启动时检查系统架构。
-- 推荐运行 `SearcheXtra-2.0.2-win-x64-setup.exe` 安装。安装器检测 .NET 8 x64、Windows App SDK 1.8 x64 和 WebView2；缺失时从微软下载并安装，已有兼容版本会跳过。补装 .NET 时需要管理员权限和网络。
+- 推荐运行 `SearcheXtra-2.0.3-win-x64-setup.exe` 安装。安装器检测 .NET 8 x64、Windows App SDK 1.8 x64 和 WebView2；缺失时从微软下载并安装，已有兼容版本会跳过。补装 .NET 时需要管理员权限和网络。
 - ZIP 为依赖系统运行库的便携包，需先安装上述运行库；解压整个目录后运行 `SearcheXtra.exe`。
 - 应用目录不携带 .NET 或 Windows App SDK 运行库，只保留必要的托管接口、部署引导库与应用依赖。共享运行库不会随卸载应用而删除。
 - 此本地构建未作代码签名。
@@ -32,6 +32,10 @@ Windows 版使用 C# / .NET 8、WinUI 3 和 WebView2，与 macOS 的 Swift 源�
 | 其他 | 中英文、外观、起始页面、打印、开发者工具、全屏、版本下载入口 |
 
 后台挂起前检查播放中的媒体、已修改的输入框和经网页媒体接口开始的采集。挂起保留页面状态；当前实现不自动销毁闲置页面，以避免丢失网页内存状态。
+
+Windows 无痕标签页暂不支持扩展，设置中的对应开关不可用；新建无痕标签页保持空白。
+
+Private Windows tabs currently do not support extensions. The corresponding setting is unavailable, and new private tabs remain blank.
 
 ## 与 macOS 版的差异
 
@@ -90,8 +94,8 @@ Remove-Item Env:SEARCHEXTRA_TEST_MV2_PACKAGE
 
 ```text
 Windows/artifacts/win-x64/SearcheXtra.exe
-Windows/artifacts/SearcheXtra-2.0.2-win-x64.zip
-Windows/artifacts/SearcheXtra-2.0.2-win-x64-setup.exe
+Windows/artifacts/SearcheXtra-2.0.3-win-x64.zip
+Windows/artifacts/SearcheXtra-2.0.3-win-x64-setup.exe
 Windows/artifacts/SHA256SUMS.txt
 ```
 

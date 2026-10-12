@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import WebKit
 
 // Chrome's native messaging, for the extensions that talk to an app on this
@@ -85,7 +86,6 @@ enum ExtensionNative {
         // have left its host behind.
         stopOrphans()
         let pipe = HostPipe(program: program, origin: "chrome-extension://\(extensionID)/")
-        try pipe.start()
         pipe.onMessage = { message in
             DispatchQueue.main.async { port.sendMessage(message, completionHandler: nil) }
         }
@@ -121,6 +121,7 @@ enum ExtensionNative {
         }
         port.disconnectHandler = { _ in beating?.invalidate(); pipe.stop() }
         Live.keep(pipe, for: port)
+        try pipe.start()
     }
 
     /// WebKit doesn't always say when a port goes: an extension unloaded —
@@ -155,10 +156,34 @@ final class HostPipe: @unchecked Sendable {
     private let process = Process()
     private let input = Pipe()
     private let output = Pipe()
+    private let reading = DispatchQueue(label: "SearcheXtra.native-host.read")
     private var buffer = Data()
     private let lock = NSLock()
-    var onMessage: ((Any) -> Void)?
-    var onExit: (() -> Void)?
+    private var messages: [Any] = []
+    private var finished = false
+    private var messageHandler: ((Any) -> Void)?
+    private var exitHandler: (() -> Void)?
+    var onMessage: ((Any) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return messageHandler }
+        set {
+            lock.lock()
+            messageHandler = newValue
+            let queued = newValue == nil ? [] : messages
+            if newValue != nil { messages = [] }
+            lock.unlock()
+            queued.forEach { newValue?($0) }
+        }
+    }
+    var onExit: (() -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return exitHandler }
+        set {
+            lock.lock()
+            let exited = finished
+            exitHandler = exited ? nil : newValue
+            lock.unlock()
+            if exited { newValue?() }
+        }
+    }
     private var waiters: [CheckedContinuation<Any?, Error>] = []
 
     init(program: URL, origin: String) {
@@ -174,23 +199,52 @@ final class HostPipe: @unchecked Sendable {
     }
 
     func start() throws {
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
+        let descriptor = output.fileHandleForReading.fileDescriptor
+        let flags = fcntl(descriptor, F_GETFL)
+        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) >= 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        output.fileHandleForReading.readabilityHandler = { [weak self] _ in
             guard let self else { return }
-            if chunk.isEmpty {
-                handle.readabilityHandler = nil
-                self.finish()
+            self.reading.async { [weak self] in self?.drain() }
+        }
+        process.terminationHandler = { [weak self] _ in
+            guard let self else { return }
+            self.reading.async { [weak self] in
+                guard let self else { return }
+                // Termination may arrive before the stdout callback. Drain
+                // its final reply first, then fail any unanswered reader.
+                drain()
+                finish()
+            }
+        }
+        do { try process.run() }
+        catch { output.fileHandleForReading.readabilityHandler = nil; finish(); throw error }
+    }
+
+    private func drain() {
+        var bytes = [UInt8](repeating: 0, count: 8192)
+        while true {
+            let count = bytes.withUnsafeMutableBytes {
+                Darwin.read(output.fileHandleForReading.fileDescriptor, $0.baseAddress!, $0.count)
+            }
+            if count > 0 { take(Data(bytes.prefix(count))) }
+            else if count == 0 {
+                output.fileHandleForReading.readabilityHandler = nil
+                finish()
+                return
+            } else if errno == EINTR { continue }
+            else {
+                if errno != EAGAIN && errno != EWOULDBLOCK { finish() }
                 return
             }
-            self.take(chunk)
         }
-        process.terminationHandler = { [weak self] _ in self?.finish() }
-        try process.run()
     }
 
     func stop() {
         output.fileHandleForReading.readabilityHandler = nil
         if process.isRunning { process.terminate() }
+        finish()
     }
 
     func write(_ message: Any) throws {
@@ -205,13 +259,18 @@ final class HostPipe: @unchecked Sendable {
     func readOne() async throws -> Any? {
         try await withCheckedThrowingContinuation { continuation in
             lock.lock()
-            waiters.append(continuation)
+            let result: Result<Any?, Error>?
+            if !messages.isEmpty { result = .success(messages.removeFirst()) }
+            else if finished { result = .failure(ExtensionNative.Refused(why: "Native host has exited.")) }
+            else { waiters.append(continuation); result = nil }
             lock.unlock()
+            if let result { continuation.resume(with: result) }
         }
     }
 
     private func take(_ chunk: Data) {
         lock.lock()
+        guard !finished else { lock.unlock(); return }
         buffer.append(chunk)
         var messages: [Any] = []
         while buffer.count >= 4 {
@@ -224,22 +283,28 @@ final class HostPipe: @unchecked Sendable {
             }
         }
         var handed: [(CheckedContinuation<Any?, Error>, Any)] = []
-        for message in messages where !waiters.isEmpty {
-            handed.append((waiters.removeFirst(), message))
+        var delivered: [Any] = []
+        let handler = messageHandler
+        for message in messages {
+            if !waiters.isEmpty { handed.append((waiters.removeFirst(), message)) }
+            else if handler != nil { delivered.append(message) }
+            else { self.messages.append(message) }
         }
-        let rest = messages.dropFirst(handed.count)
         lock.unlock()
         handed.forEach { $0.0.resume(returning: $0.1) }
-        rest.forEach { onMessage?($0) }
+        delivered.forEach { handler?($0) }
     }
 
     private func finish() {
         lock.lock()
+        guard !finished else { lock.unlock(); return }
+        finished = true
         let pending = waiters
         waiters = []
+        let exited = exitHandler
+        exitHandler = nil
         lock.unlock()
         pending.forEach { $0.resume(throwing: ExtensionNative.Refused(why: "Native host has exited.")) }
-        onExit?()
-        onExit = nil
+        exited?()
     }
 }

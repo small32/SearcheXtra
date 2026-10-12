@@ -3,50 +3,17 @@ import Combine
 import CryptoKit
 import Security
 
-// Knowing when there is a newer one, and having it ready.
-//
-// No framework, no background daemon: one small JSON file next to the
-// download, read at launch, every hour and whenever asked. If it names a build newer
-// than this one, the ZIP it points at is fetched quietly, checked, and put
-// where this bundle is — so the next time the app opens, it is the new one.
-// Chrome's way, without Chrome's machinery. Nothing relaunches on its own; a
-// page you are reading is not interrupted by a browser that wants to be
-// newer.
-//
-// What the updater leaves alone, on purpose: everything in
-// ~/Library/Application Support/Search, the defaults under
-// com.officecommun.search, and the keychain. The session, the pins, the
-// history, the passwords — none of it is read, moved or rewritten here. Only
-// the bundle changes hands, and it keeps its bundle id and its signing
-// identity, so the keychain items the old build made open for the new one.
-// The updater deletes only what it made: its own scratch folder and the
-// `.old` bundle it set aside.
-//
-// build.sh writes the file (build/appcast.json) at the same time as the DMG
-// and the ZIP; publish.sh puts all three where `feed` points.
+// Check SearcheXtra releases on GitHub and offer the matching macOS download.
+// Automatic bundle replacement remains restricted to signed test feeds: public
+// builds are ad-hoc signed and must not use the upstream Search signing identity.
 
 @MainActor
 final class Updater: ObservableObject {
     static let shared = Updater()
 
-    /// Where the file lives. SEARCH_FEED, for a test run, points somewhere
-    /// else — and is the only way plain http is accepted, so a build that
-    /// was not handed the variable only ever listens to the real site.
-    /// SEARCH_FEED points a test run at a feed of its own. Only a test run:
-    /// the browser people use reads Office Commun's feed whatever the
-    /// environment it was started with says.
     static let feed: URL = {
-        if overridden, let set = ProcessInfo.processInfo.environment["SEARCH_FEED"], let url = URL(string: set) {
-            return url
-        }
-        // An Intel Mac has a download of its own from 1.0.5 (build.sh,
-        // SEARCH_ARCH=x86_64) and a feed beside it naming only Intel builds,
-        // so neither kind of Mac is ever offered the other's.
-        #if arch(x86_64)
-        return URL(string: "https://officecommun.com/search/intel/appcast.json")!
-        #else
-        return URL(string: "https://officecommun.com/search/appcast.json")!
-        #endif
+        if overridden, let set = ProcessInfo.processInfo.environment["SEARCH_FEED"], let url = URL(string: set) { return url }
+        return URL(string: "https://api.github.com/repos/small32/SearcheXtra/releases/latest")!
     }()
 
     private static var overridden: Bool {
@@ -187,7 +154,7 @@ final class Updater: ObservableObject {
             checking = false
             lastChecked = Date()
             Store.settings.set(Date(), forKey: lastKey)
-            guard let found, found.build > Updater.build, found.runsHere else {
+            guard let found, (Updater.overridden ? found.build > Updater.build : (try? ExtensionVersion.isNewer(found.version, than: Updater.version)) == true), found.runsHere else {
                 // A build already swapped in stays ready whatever the feed
                 // says now.
                 if case .ready = stage {} else { stage = .none }
@@ -195,6 +162,7 @@ final class Updater: ObservableObject {
                 return
             }
             done(found)
+            if !Updater.overridden { stage = .offered(found); say?(L10n.text("Updater.1140", found.version)); return }
             guard !installsOnItsOwn else { take(found); return }
             switch stage {
             case .fetching, .ready: break
@@ -215,6 +183,7 @@ final class Updater: ObservableObject {
 
     func openDisk() {
         guard case .offered(let release) = stage, !fetchingDisk else { return }
+        if !Updater.overridden { NSWorkspace.shared.open(release.dmg); return }
         fetchingDisk = true
         say?(L10n.text("Updater.1136", String(describing: release.version)))
         Task.detached(priority: .utility) {
@@ -301,6 +270,27 @@ final class Updater: ObservableObject {
     }
 
     private static func fetch() async -> Release? {
+        if !overridden {
+            guard let data = await get(feed, limit: 1 << 20),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  json["draft"] as? Bool != true, json["prerelease"] as? Bool != true,
+                  let tag = json["tag_name"] as? String,
+                  let page = json["html_url"] as? String, let releaseURL = URL(string: page),
+                  releaseURL.host == "github.com", releaseURL.path.hasPrefix("/small32/SearcheXtra/releases/"),
+                  let assets = json["assets"] as? [[String: Any]] else { return nil }
+            #if arch(x86_64)
+            let suffix = "-x86_64.zip"
+            #else
+            let suffix = "-arm64.zip"
+            #endif
+            guard let asset = assets.first(where: { ($0["name"] as? String)?.hasSuffix(suffix) == true }),
+                  let text = asset["browser_download_url"] as? String, let archive = URL(string: text),
+                  archive.scheme == "https", archive.host == "github.com",
+                  archive.path.hasPrefix("/small32/SearcheXtra/releases/download/") else { return nil }
+            return Release(version: tag.hasPrefix("v") ? String(tag.dropFirst()) : tag, build: 0,
+                           archive: archive, dmg: releaseURL, sha256: nil,
+                           notes: json["body"] as? String, minimumSystemVersion: "14.0")
+        }
         // The feed as Office Commun signed it: appcast.json.zip, next to the
         // plain one older builds read, holding the same file with its code
         // signature (build.sh). Only what comes out of it, checked, is read:
@@ -331,6 +321,7 @@ final class Updater: ObservableObject {
 
     private static func get(_ url: URL, limit: Int) async -> Data? {
         var request = URLRequest(url: url)
+        request.setValue("SearcheXtra/" + version, forHTTPHeaderField: "User-Agent")
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 12
         guard let (data, response) = try? await URLSession.shared.data(for: request),
@@ -438,6 +429,7 @@ private enum Swap {
 
     static func download(_ url: URL, to file: URL) async throws {
         var request = URLRequest(url: url)
+        request.setValue("SearcheXtra/" + Updater.version, forHTTPHeaderField: "User-Agent")
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 60
         let (got, response) = try await URLSession.shared.download(for: request)

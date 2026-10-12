@@ -7,6 +7,13 @@ using System.IO.Compression;
 Environment.SetEnvironmentVariable("SEARCHEXTRA_DATA_DIR", Path.Combine(Path.GetTempPath(), "SearcheXtra-tests-" + Guid.NewGuid().ToString("N")));
 var count = 0;
 void Check(bool condition, string message) { if (!condition) throw new Exception(message); count++; }
+var unchangedTab = new BrowserTab();
+var notifications = 0;
+unchangedTab.PropertyChanged += (_, _) => notifications++;
+unchangedTab.Title = "Example"; unchangedTab.Favicon = "https://example.com/favicon.ico";
+var initialNotifications = notifications;
+unchangedTab.Title = "Example"; unchangedTab.Favicon = "https://example.com/favicon.ico";
+Check(notifications == initialNotifications, "Unchanged tab properties do not rebuild UI");
 const string search = "https://www.bing.com/search?q={0}";
 Check(AddressParser.Resolve("example.com/path", search).AbsoluteUri == "https://example.com/path", "Bare hostname");
 Check(AddressParser.Resolve("localhost:8080/test", search).AbsoluteUri == "http://localhost:8080/test", "Localhost");
@@ -18,6 +25,22 @@ Check(imported.Count == 1 && imported[0].Title == "Work & tools", "Import folder
 Check(imported[0].Children?.Count == 2, "Import children");
 Check(BookmarkImport.Flatten(imported).Count(b => b.Url != null) == 2, "Nested import and unsafe URL filtering");
 Check(imported[0].Children![0].Url!.Contains("&b=2"), "HTML URL decoding");
+var sortFixture = new List<Bookmark> { new() { Title = "Z", Children = [new() { Title = "Child" }] }, new() { Title = "a", Url = "https://a.example" }, new() { Title = "A", Url = "https://b.example" } };
+var folderBeforeSort = sortFixture[0];
+BookmarkImport.SortByName(sortFixture);
+Check(sortFixture.Select(node => node.Title).SequenceEqual(new[] { "a", "A", "Z" }), "Bookmark name sorting is stable and ignores case");
+Check(ReferenceEquals(sortFixture[2], folderBeforeSort) && folderBeforeSort.Children![0].Title == "Child", "Bookmark sorting preserves folder identity and children");
+var movedA = new Bookmark { Title = "A", Url = "https://a.example" };
+var movedB = new Bookmark { Title = "B", Url = "https://b.example" };
+var movedC = new Bookmark { Title = "C", Url = "https://c.example" };
+var dragNestedFolder = new Bookmark { Title = "Nested", Children = [] };
+var destination = new Bookmark { Title = "Destination", Children = [dragNestedFolder] };
+var dragTree = new List<Bookmark> { movedA, movedB, movedC, destination };
+Check(BookmarkImport.Move(dragTree, [movedA.Id, movedB.Id], null, 3) && dragTree.Take(3).SequenceEqual(new[] { movedC, movedA, movedB }), "Batch bookmark reorder adjusts insertion index and preserves relative order");
+Check(BookmarkImport.Move(dragTree, [movedB.Id, movedA.Id], destination.Id) && destination.Children!.Skip(1).SequenceEqual(new[] { movedA, movedB }), "Drag into folder preserves original tree order rather than selection order");
+Check(!BookmarkImport.Move(dragTree, [destination.Id], dragNestedFolder.Id) && dragTree.Contains(destination), "Reject moving folder inside its descendant without deleting contents");
+Check(BookmarkImport.Move(dragTree, [destination.Id, movedA.Id], null, 0) && dragTree[0] == destination && destination.Children!.Contains(movedA), "Dragging selected folder and child moves the folder once");
+Check(!BookmarkImport.Move(dragTree, [movedC.Id], Guid.NewGuid()) && dragTree.Contains(movedC), "Reject unknown destination without losing bookmarks");
 Check(SiteSearch.Match(new(), "yout")?.Name == "YouTube" && SiteSearch.Match(new(), "so")?.Name == "Stack Overflow", "Built-in site search prefixes and aliases");
 Check(SiteSearch.Match(new(), "youtube cats") == null && SiteSearch.Match(new(), "y") == null, "Site search needs a name prefix");
 var chromeTree = BrowserImport.ChromeBookmarks("""{"roots":{"bookmark_bar":{"name":"Bar","children":[{"name":"Example","url":"https://example.com"},{"name":"Bad","url":"javascript:bad"}]}}}""");
@@ -29,6 +52,44 @@ await using (var database = new Microsoft.Data.Sqlite.SqliteConnection("Data Sou
 }
 var browserData = await BrowserImport.ProfileAsync(chromeProfile);
 Check(browserData.History.Count == 1 && browserData.History[0].Visited.Year == 2025, "Chrome SQLite history timestamps convert from Windows epoch");
+var firefoxProfile = Path.Combine(DataStore.Root, "FirefoxFixture"); Directory.CreateDirectory(firefoxProfile);
+await using (var database = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=" + Path.Combine(firefoxProfile, "places.sqlite")))
+{
+    await database.OpenAsync(); using var command = database.CreateCommand(); command.CommandText = """
+        CREATE TABLE moz_places(id INTEGER PRIMARY KEY, url TEXT, title TEXT, last_visit_date INTEGER);
+        CREATE TABLE moz_bookmarks(id INTEGER PRIMARY KEY, parent INTEGER, type INTEGER, title TEXT, fk INTEGER, position INTEGER, guid TEXT);
+        INSERT INTO moz_places VALUES
+          (1,'https://a.example','A',1735689600000000),(2,'https://tools.example','Tools',NULL),
+          (3,'https://b.example','B',NULL),(4,'https://menu.example','Menu',NULL),
+          (5,'https://other.example','Other',NULL),(6,'https://mobile.example','Mobile',NULL),
+          (7,'https://custom.example','Custom',NULL),(8,'javascript:bad','Bad',NULL);
+        INSERT INTO moz_bookmarks VALUES
+          (1,0,2,'',NULL,0,'root________'),(2,1,2,'Bookmarks Menu',NULL,0,'menu________'),
+          (3,1,2,'Bookmarks Toolbar',NULL,1,'toolbar_____'),(4,1,2,'Tags',NULL,2,'tags________'),
+          (5,1,2,'',NULL,3,'unfiled_____'),(6,1,2,'',NULL,4,'mobile______'),
+          (7,1,2,'Custom',NULL,5,'custom______'),
+          (10,3,1,'A',1,0,'bookmarkA___'),(11,3,2,'Tags',NULL,1,'realFolder__'),
+          (12,3,1,'B',3,2,'bookmarkB___'),(13,11,1,'Tool',2,0,'bookmarkTool'),
+          (14,2,1,'Menu site',4,0,'bookmarkMenu'),(15,5,1,'Other site',5,0,'bookmarkOthr'),
+          (16,6,1,'Mobile site',6,0,'bookmarkMobl'),(17,7,1,'Custom site',7,0,'bookmarkCust'),
+          (18,3,1,'Unsafe',8,3,'bookmarkBad_'),(19,3,3,'',NULL,4,'separator___'),
+          (20,4,2,'Internal tag',NULL,0,'internalTag_'),(21,20,1,'A duplicate',1,0,'tagDupA_____'),
+          (22,20,2,'Nested tag',NULL,1,'nestedTag___'),(23,22,1,'B duplicate',3,0,'tagDupB_____');
+        """; await command.ExecuteNonQueryAsync();
+}
+var firefoxData = await BrowserImport.ProfileAsync(firefoxProfile);
+Check(firefoxData.Bookmarks.Select(item => item.Title).SequenceEqual(new[] { "A", "Tags", "B", "Menu site", "Other", "Mobile", "Custom" }), "Firefox flattens its internal containers and preserves toolbar order and real folders");
+Check(BookmarkImport.Flatten(firefoxData.Bookmarks).Count(item => item.Url != null) == 7 && !BookmarkImport.Flatten(firefoxData.Bookmarks).Any(item => item.Title is "Internal tag" or "Nested tag" or "A duplicate" or "B duplicate"), "Firefox excludes the entire internal tags tree without losing user bookmarks named Tags");
+Check(firefoxData.Bookmarks[1].Children?.Single().Url == "https://tools.example" && firefoxData.Bookmarks[^1].Children?.Single().Url == "https://custom.example", "Firefox keeps nested user folders and additional roots");
+Check(firefoxData.History.Single().Visited == new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero), "Firefox SQLite timestamps use the Unix epoch");
+var firstVisit = new HistoryEntry("https://a.example", "First", new(2025, 1, 1, 0, 0, 0, TimeSpan.Zero));
+var secondVisit = firstVisit with { Title = "Second", Visited = firstVisit.Visited.AddDays(1) };
+var latestVisit = firstVisit with { Title = "Latest imported", Visited = firstVisit.Visited.AddDays(3) };
+var existingVisits = new List<HistoryEntry> { secondVisit, firstVisit, firstVisit };
+var mergedVisits = BrowserImport.MergeHistory(existingVisits, new[] { latestVisit, latestVisit, firstVisit with { Title = "Duplicate imported" } });
+Check(mergedVisits.Count == 4 && mergedVisits[0] == latestVisit && mergedVisits.Count(visit => visit.Visited == firstVisit.Visited) == 2, "History import preserves every existing visit and adds newer imported visits without duplicate imports");
+Check(BrowserImport.MergeHistory(mergedVisits, new[] { latestVisit }).SequenceEqual(mergedVisits), "Repeating a history import does not add the same visit twice");
+Check(BrowserImport.MergeHistory(existingVisits, Array.Empty<HistoryEntry>()).SequenceEqual(existingVisits), "Bookmark-only imports leave existing history unchanged");
 var store = await DataStore.LoadAsync();
 store.Settings.CompactBookmarksBar = true;
 store.Settings.BookmarkOpening = BookmarkOpening.Background;
@@ -44,6 +105,15 @@ Check(corrupt.Bookmarks.Count == 0 && Directory.GetFiles(DataStore.Root, "bookma
 Check(!Directory.GetFiles(DataStore.Root, "*.tmp").Any(), "Atomic writes cleaned up");
 var csv = CsvPasswords.Parse("name,url,username,password\r\nExample,https://example.com/login,\"a,b\",\"p\"\"w\"\r\nBad,javascript:bad,x,y");
 Check(csv.Count == 1 && csv[0].Origin == "https://example.com" && csv[0].Username == "a,b" && csv[0].Password == "p\"w", "CSV quotes and origin filtering");
+var multilinePassword = "line1\r\nline2\nline3\rend\r";
+var multilineCsv = CsvPasswords.Parse("url,username,password\r\nhttps://example.com,user,\"" + multilinePassword + "\"\r\n");
+Check(multilineCsv.Single().Password == multilinePassword, "Password CSV preserves every quoted CR and LF, including the final carriage return");
+Check(CsvPasswords.Parse("url,username,password\nhttps://example.com,user,\"password\r\"").Single().Password == "password\r", "Password CSV preserves a quoted trailing CR in the final record without a line separator");
+foreach (var separator in new[] { "\r\n", "\n", "\r" })
+{
+    var separated = CsvPasswords.Parse("url,username,password" + separator + "https://example.com,a,p1" + separator + "https://other.example,b,p2" + separator);
+    Check(separated.Count == 2 && separated[0].Password == "p1" && separated[1].Origin == "https://other.example", "Password CSV supports " + separator.Replace("\r", "CR").Replace("\n", "LF") + " record separators");
+}
 Check(CrxInstaller.StoreId("https://chromewebstore.google.com/detail/test/aapbdbdomjkkjkaonfhkkikfgjllcleb") == "aapbdbdomjkkjkaonfhkkikfgjllcleb", "Store listing ID");
 Check(CrxInstaller.StoreId("https://evil.example/detail/aapbdbdomjkkjkaonfhkkikfgjllcleb") == null, "Store host validation");
 static byte[] Varint(uint value) { var bytes = new List<byte>(); do { var b = (byte)(value & 127); value >>= 7; bytes.Add((byte)(b | (value > 0 ? 128 : 0))); } while (value > 0); return bytes.ToArray(); }

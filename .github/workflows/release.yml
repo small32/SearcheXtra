@@ -9,7 +9,7 @@ on:
       tag:
         description: Release tag to build
         required: true
-        default: v2.0.2
+        default: v2.0.3
         type: string
 
 permissions:
@@ -50,7 +50,7 @@ jobs:
         run: ./build.sh release
 
       - name: Test bookmark bar, middle-click and extension versions
-        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter 'BookmarkBarTests|MiddleClickTests|ExtensionVersionTests'
+        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter 'BookmarkBarTests|BookmarkManagerTests|MiddleClickTests|ExtensionVersionTests|ExtensionNativeTests|ExtensionLifecycleTests'
 
       - name: Verify and package application
         shell: bash
@@ -74,6 +74,8 @@ jobs:
 
   windows:
     uses: ./.github/workflows/windows.yml
+    with:
+      ref: ${{ inputs.tag || github.ref }}
 
   publish:
     name: Publish release assets

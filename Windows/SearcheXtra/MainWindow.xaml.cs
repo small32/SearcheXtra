@@ -91,7 +91,17 @@ public sealed partial class MainWindow : Window
         else AddTab(Settings.StartPage.Length > 0 ? Settings.StartPage : NewTabUrl());
     }
 
-    private void OnStoreChanged() => DispatcherQueue.TryEnqueue(() => { ApplySettings(); RefreshBookmarkBar(); });
+    private bool settingsRefreshPending, bookmarkRefreshPending;
+    private void OnStoreChanged()
+    {
+        if (settingsRefreshPending) return;
+        settingsRefreshPending = DispatcherQueue.TryEnqueue(() => { settingsRefreshPending = false; ApplySettings(); });
+    }
+    private void RequestBookmarkRefresh()
+    {
+        if (bookmarkRefreshPending || !Settings.BookmarksBar || !Settings.BookmarkWebsiteIcons) return;
+        bookmarkRefreshPending = DispatcherQueue.TryEnqueue(() => { bookmarkRefreshPending = false; RefreshBookmarkBar(); });
+    }
     private void ApplySettings()
     {
         Root.RequestedTheme = Settings.Theme switch { "dark" => ElementTheme.Dark, "light" => ElementTheme.Light, _ => ElementTheme.Default };
@@ -107,7 +117,7 @@ public sealed partial class MainWindow : Window
         SideNew.Content = T("+  New tab", "+  新标签页");
         Address.PlaceholderText = T("Address or search", "网址或搜索");
         SpacesButton.Content = space == "Default" ? T("Default", "默认空间") : space;
-        RefreshBookmarkBar();
+        if (Settings.BookmarksBar) RefreshBookmarkBar();
         foreach (var tab in tabs) { tab.UseIcons = Settings.IconGlyphs; if (views.TryGetValue(tab.Id, out var page) && page.Control.CoreWebView2 is { } core) tab.Favicon = Settings.IconGlyphs ? core.FaviconUri : ""; if (!Settings.ShowsReading) tab.Reading = 0; }
         foreach (var view in views.Values) { view.ApplySettings(); _ = view.UpdateDocumentScriptAsync(); }
         UpdateSidebarFold();
@@ -117,6 +127,7 @@ public sealed partial class MainWindow : Window
 
     private string NewTabUrl(bool isPrivate = false)
     {
+        if (isPrivate && !PageView.SupportsPrivateExtensions) return "";
         if ((!isPrivate || Settings.ExtensionsInPrivate) && Settings.Extensions.FirstOrDefault(e => e.Enabled && e.NewTab.Length > 0) is { } newtab)
             return $"chrome-extension://{newtab.Id}/{newtab.NewTab}";
         return "";
@@ -145,7 +156,10 @@ public sealed partial class MainWindow : Window
         AddMenu(menu, T("Set tab group…", "设置标签组…"), async () => { var name = await PromptAsync(T("Tab group (empty to remove)", "标签组（留空移出分组）"), T("Group name", "组名"), tab.Group); if (name != null) { tab.Group = name; RefreshTabLists(); ScheduleSave(); } });
         AddMenu(menu, T("Close group", "关闭标签组"), () => CloseGroup(tab));
         AddMenu(menu, T("Close", "关闭"), () => CloseTab(tab));
-        tab.PropertyChanged += (_, _) => { if (active == tab) UpdateChrome(); };
+        tab.PropertyChanged += (_, args) => {
+            if (active == tab) UpdateChrome();
+            if (args.PropertyName == nameof(BrowserTab.Favicon) && Settings.BookmarkWebsiteIcons) RequestBookmarkRefresh();
+        };
         tabMenus[tab.Id] = menu;
         RefreshTabLists();
         if (foreground) _ = SelectAsync(tab);
@@ -178,13 +192,8 @@ public sealed partial class MainWindow : Window
             view.OpenLinkRequested += (url, foreground) => AddTab(url, foreground, tab.IsPrivate);
             view.HoveredLink += url => { if (active == tab) Status.Text = url; };
             view.PreviewRequested += async url => await PreviewLinkAsync(url);
-            view.PermissionRequested += async args =>
-            {
-                if (active != tab) { args.State = Microsoft.Web.WebView2.Core.CoreWebView2PermissionState.Deny; return; }
-                var allowed = await ShowCardAsync(new Uri(args.Uri).Host, new TextBlock { Text = T("This site requests: ", "此网站请求：") + SitePermissionName(args.PermissionKind.ToString()), TextWrapping = TextWrapping.Wrap }, T("Allow", "允许")) == ContentDialogResult.Primary;
-                args.State = allowed ? Microsoft.Web.WebView2.Core.CoreWebView2PermissionState.Allow : Microsoft.Web.WebView2.Core.CoreWebView2PermissionState.Deny;
-                if (!tab.IsPrivate) { GetSite(new Uri(args.Uri).Host).Permissions[args.PermissionKind.ToString()] = allowed ? "allow" : "deny"; ScheduleSave(); }
-            };
+            view.PermissionRequested += args => HandleSitePermissionAsync(tab, view, args);
+            view.WebsiteIconChanged += RequestBookmarkRefresh;
             view.DownloadLocationRequested += async args =>
             {
                 var picker = new global::Windows.Storage.Pickers.FileSavePicker { SuggestedFileName = Path.GetFileNameWithoutExtension(args.ResultFilePath) };
@@ -197,7 +206,7 @@ public sealed partial class MainWindow : Window
                 var passwords = await PasswordStore.ReadAsync();
                 if (passwords.Any(p => p == login)) return;
                 if (await ShowCardAsync(T("Save password", "保存密码"), new TextBlock { Text = login.Origin + "\n" + login.Username }, T("Save", "保存")) == ContentDialogResult.Primary)
-                { passwords.RemoveAll(p => p.Origin == login.Origin && p.Username == login.Username); passwords.Add(login); await PasswordStore.WriteAsync(passwords); }
+                { await PasswordStore.SaveAsync(login); }
             };
             views.Add(tab.Id, view);
             view.Control.GotFocus += (_, _) =>
@@ -307,7 +316,7 @@ public sealed partial class MainWindow : Window
     {
         if (tab.Group.Length == 0) return;
         var batch = Guid.NewGuid(); var front = active;
-        foreach (var member in tabs.Where(t => t.Group == tab.Group && t.Space == tab.Space).Reverse().ToArray())
+        foreach (var member in tabs.Where(t => t.Group == tab.Group && t.Space == tab.Space && t.IsPrivate == tab.IsPrivate).Reverse().ToArray())
             CloseTab(member, batch, member == front);
     }
     private void CloseTab(BrowserTab tab, Guid? batch = null, bool wasActive = false)
@@ -321,7 +330,7 @@ public sealed partial class MainWindow : Window
         if (active == tab) active = null;
         RefreshTabLists();
         var next = active ?? tabs.LastOrDefault(t => t.Space == space);
-        if (next != null) _ = SelectAsync(next); else AddTab();
+        if (next != null) _ = SelectAsync(next); else AddTab(isPrivate: tab.IsPrivate);
         ScheduleSave();
     }
     private void Reopen()
@@ -406,7 +415,7 @@ public sealed partial class MainWindow : Window
     private void Reload_Click(object sender, RoutedEventArgs e) => ActiveView?.Control.CoreWebView2?.Reload();
     private async void Home_Click(object sender, RoutedEventArgs e) => await GoHomeAsync();
     private void Reopen_Click(object sender, RoutedEventArgs e) => Reopen();
-    private void NewTab_Click(object sender, RoutedEventArgs e) { AddTab(); FocusAddress(); }
+    private void NewTab_Click(object sender, RoutedEventArgs e) { AddTab(isPrivate: active?.IsPrivate == true); FocusAddress(); }
     private void Tabs_DragCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
     {
         var order = sender.Items.Cast<BrowserTab>().ToList(); var positions = tabs.Select((tab, index) => (tab, index)).Where(x => order.Contains(x.tab)).Select(x => x.index).ToList();

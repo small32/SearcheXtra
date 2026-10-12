@@ -144,6 +144,45 @@ public sealed partial class MainWindow
                 "History menu opens the searchable history panel");
             DismissOverlay();
             CloseTab(restoredOlder); CloseTab(restoredClosed); closedTabs.Clear();
+            var previousBookmarks = store.Bookmarks.ToList();
+            var bookmarkFolder = new Bookmark { Title = "Folder", Children = [new() { Title = "Child", Url = fixture + "child" }] };
+            store.Bookmarks = [new() { Title = "Zulu", Url = fixture + "z" }, bookmarkFolder, new() { Title = "Alpha", Url = fixture + "a" }];
+            RefreshBookmarkBar();
+            var bookmarkContext = (Microsoft.UI.Xaml.Controls.MenuFlyout)((Microsoft.UI.Xaml.Controls.Button)BookmarkRow.Children[1]).ContextFlyout;
+            Check(bookmarkContext.Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutItem>().Any(item => item.Text == T("Rename…", "重命名…")) &&
+                bookmarkContext.Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutItem>().Any(item => item.Text == T("Cut", "剪切")), "Bookmarks bar context menu includes rename and clipboard operations");
+            Check(bookmarkContext.Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutSubItem>().Single().Items.Count == 4,
+                "Bookmarks bar context menu provides visibility, compact spacing and folder icon controls");
+            var tabsBeforeBookmarkOpen = tabs.ToArray();
+            var activeBeforeBookmarkOpen = active;
+            var openBookmarks = bookmarkContext.Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutItem>().Single(item => item.Text == T("Open all (1) bookmarks", "打开全部（1 个）书签"));
+            var openBookmarksPeer = new Microsoft.UI.Xaml.Automation.Peers.MenuFlyoutItemAutomationPeer(openBookmarks);
+            ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)openBookmarksPeer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
+            Check(tabs.Count == tabsBeforeBookmarkOpen.Length + 1 && active == activeBeforeBookmarkOpen, "Bookmarks bar open-all creates background tabs without switching the active page");
+            foreach (var tab in tabs.Where(tab => !tabsBeforeBookmarkOpen.Contains(tab)).ToArray()) CloseTab(tab);
+            closedTabs.Clear();
+            var bookmarkManager = ShowBookmarksAsync(); Root.UpdateLayout();
+            try
+            {
+                var bookmarkList = FindAddressPart<Microsoft.UI.Xaml.Controls.ListView>(OverlayLayer, "BookmarkManagerList")!;
+                Check(bookmarkList.Items.Count == 3 && bookmarkList.SelectionMode == Microsoft.UI.Xaml.Controls.ListViewSelectionMode.Multiple,
+                    "Bookmark manager lists current folder and supports multiple selection");
+                Check(bookmarkList.AllowDrop && bookmarkList.Items.Cast<Microsoft.UI.Xaml.Controls.ListViewItem>().All(item => item.Content is Microsoft.UI.Xaml.Controls.Border { CanDrag: true }), "Each bookmark row has an explicit native drag source");
+                var selectAllButton = FindAddressPart<Microsoft.UI.Xaml.Controls.Button>(OverlayLayer, "BookmarkManagerSelectAll")!;
+                var selectAllPeer = new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(selectAllButton);
+                ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)selectAllPeer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
+                Check(bookmarkList.SelectedItems.Count == 3, "Bookmark manager select-all button selects every current item");
+                var sortButton = FindAddressPart<Microsoft.UI.Xaml.Controls.Button>(OverlayLayer, "BookmarkManagerSort")!;
+                var sortPeer = new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(sortButton);
+                ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)sortPeer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
+                Check(store.Bookmarks[0].Title == "Alpha" && bookmarkFolder.Children![0].Title == "Child",
+                    "Bookmark manager sorts current folder without flattening nested bookmarks");
+                var bookmarkSearch = FindAddressPart<Microsoft.UI.Xaml.Controls.TextBox>(OverlayLayer)!;
+                bookmarkSearch.Text = "child";
+                await Wait(() => bookmarkList.Items.Count == 1);
+                Check(bookmarkList.Items.Count == 1, "Bookmark manager searches inside nested folders");
+            }
+            finally { DismissOverlay(); await bookmarkManager; store.Bookmarks = previousBookmarks; store.Notify(); }
             await SelectAsync(first);
             var firstView = views[first.Id];
             var groupedFirst = AddTab(fixture + "group-first", false, loadBackground: false, group: "Batch group");
@@ -330,6 +369,11 @@ public sealed partial class MainWindow
             await Wait(() => !privateTab.Loading && privateTab.Title == "SearcheXtra fixture");
             Check(views[privateTab.Id].Control.CoreWebView2.Profile.IsInPrivateModeEnabled, "Private tab uses InPrivate profile");
             Check(store.History.Count == historyCount, "Private navigation is excluded from history");
+            NewTab_Click(this, new());
+            Check(active?.IsPrivate == true, "New-tab button preserves private browsing");
+            var newPrivateTab = active!;
+            await SelectAsync(privateTab); CloseTab(newPrivateTab);
+
             await SaveStateAsync();
             Check(store.Session.Tabs.All(t => !t.Url.EndsWith("private")), "Private tabs excluded from persisted session");
             Settings.CompactBookmarksBar = true;
@@ -474,6 +518,10 @@ public sealed partial class MainWindow
             var fillDeadline = Stopwatch.StartNew(); while (await firstCore.ExecuteScriptAsync("document.querySelector('input[type=password]')?.value") != "\"fixture-password\"") { if (fillDeadline.Elapsed > TimeSpan.FromSeconds(10)) throw new TimeoutException("Password autofill timed out"); await Task.Delay(25); }
             Check(await firstCore.ExecuteScriptAsync("document.querySelector('input[type=password]').value") == "\"fixture-password\"", "Saved password fills matching top-level origin");
             Check(!File.ReadAllText(Path.Combine(DataStore.Root, "settings.json")).Contains("fixture-password"), "Passwords are excluded from plain settings JSON");
+            await PasswordStore.SaveAsync(new("https://concurrent.example", "new", "secret"));
+            await PasswordStore.SaveAsync(new(fixture.TrimEnd('/'), "fixture-user", "updated"));
+            Check((await PasswordStore.ReadAsync()).Any(login => login.Origin == "https://concurrent.example"), "Updating a login preserves concurrently added credentials");
+            await PasswordStore.UpdateAsync(logins => logins.RemoveAll(login => login.Origin == "https://concurrent.example"));
             await views[first.Id].ReaderAsync(); Check(await firstCore.ExecuteScriptAsync("!!document.querySelector('#office-reader') && !document.querySelector('nav')") == "true", "Reader uses the macOS article extraction script");
             first.Loading = true; firstCore.Reload(); await Wait(() => !first.Loading); await Task.Delay(100);
             if (Environment.GetEnvironmentVariable("SEARCHEXTRA_TEST_STORE") == "1")
@@ -532,6 +580,9 @@ public sealed partial class MainWindow
                 Check(await firstCore.ExecuteScriptAsync("window.ublockResult") == "\"blocked\"", "Real uBlock Origin MV2 filter blocks a network request: " + await firstCore.ExecuteScriptAsync("window.ublockResult"));
                 CloseTab(dashboard); await SelectAsync(first); await RemoveExtensionAsync(real);
             }
+            await VerifySitePermissionsAsync(fixture, Check);
+            await VerifyBookmarkSiteIconAsync(Check);
+            await VerifyPrivacyAndTitleRegressionsAsync(Check);
             await File.WriteAllTextAsync(reportPath, JsonSerializer.Serialize(new { success = true, checks, measurements }, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (Exception ex)
