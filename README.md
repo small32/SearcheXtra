@@ -40,6 +40,7 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 - **密码与钥匙串。** 登录成功后提示保存密码，点击登录字段时显示已保存账号。密码保存在 macOS 钥匙串中，由系统加密；支持从 Chrome、Arc、Dia、Brave 或 Edge 导入。系统通行密钥功能需要相应的签名和授权配置。
 - **浅色、深色与跟随系统。** 浏览器界面和网页可以随外观设置切换。
 - **书签、历史记录与下载。** 各自提供独立面板，支持搜索和快捷键打开。
+- **超级拖拽。** 两端在“设置 → 超级拖拽”中配置。链接向下拖动后台打开，选中文字向上拖动搜索，图片向下拖动保存。支持四向或八向、修饰键、释放区域规则、站点例外、即时开关和 JSON 导入导出。网页右键菜单可快速开关、排除当前站点并查看规则。搜索、翻译及以图搜图首次使用前请求联网授权；编辑器、地图、画布及自定义拖拽控件保留原生行为。
 - **书签管理器。** 两端设置提供独立入口，支持搜索、导入 HTML、编辑、删除和文件夹管理，并可按名称排序。两端均支持全选、批量删除、拖动调整顺序及拖入文件夹；多选拖动保留原有顺序。
 - **Chrome 扩展。** 在“设置 → 扩展”中粘贴 Chrome 网上应用店链接，或打开扩展页面后点击添加。扩展运行在 WebKit 的扩展引擎上，浏览器补充部分 Chrome API。常用扩展可以固定，也可以加载本地未打包扩展，修改后点击重新载入。此功能需要 macOS 15.4 或更新版本，兼容情况取决于扩展使用的 API。
 - **多窗口与空间。** 可以创建多个窗口，并使用空间管理不同的标签页集合。
@@ -229,6 +230,7 @@ Set **Settings → General → Start page** to choose the page for new windows. 
 - **Passwords and Keychain:** Offers to save passwords after login and shows saved accounts when a login field is selected. macOS Keychain encrypts and stores passwords. Import is supported from Chrome, Arc, Dia, Brave, and Edge. System passkey features require appropriate signing and entitlements.
 - **Appearance:** Light, dark, and system appearance settings apply to the browser and webpages.
 - **Bookmarks, history, and downloads:** Dedicated panels with search and keyboard shortcuts.
+- **Super drag:** Configure on both platforms in Settings → Super drag. Drag links down to open background tabs, selected text up to search, and images down to save. Supports four or eight directions, modifiers, drop-region rules, site exclusions, instant toggles, and JSON import/export. The page context menu provides quick toggles, exclusions, and current rules. Online search, translation, and image search require consent before first use. Editors, maps, canvases, and custom draggable widgets keep their native behavior.
 - **Bookmark manager:** Available from Settings on both platforms, with search, HTML import, editing, deletion, folder management, and sorting by name. Both platforms support select all, bulk deletion, drag reordering, and dropping items into folders. Multi-item dragging preserves the original order.
 - **Chrome extensions:** Install from a Chrome Web Store URL or its listing, pin frequently used extensions, or load an unpacked local extension and reload it after editing. On macOS, extensions use WebKit's extension engine with additional Chrome API compatibility. Support depends on the APIs an extension uses.
 - **Windows and spaces:** Open multiple windows and organize sets of tabs into spaces.

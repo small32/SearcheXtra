@@ -1717,6 +1717,16 @@ final class Browser: NSObject, ObservableObject {
     /// read where they are used.
     private func follow() {
         followStore()
+        SuperDragSettings.shared.$config.dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                for tab in self.tabs+self.parkedTabs+[self.peek].compactMap({$0}) {
+                    tab.superDragRelay.pending=nil
+                    tab.arm(hiding:self.curtain.css(on:self.curtain.host(of:tab.address)))
+                    tab.built?.evaluateJavaScript("window.__sxSuperDrag?.configure("+SuperDragSettings.shared.options+")",in:nil,in:Web.world) { _ in }
+                }
+            }
+        }.store(in:&bag)
         // Spaces turned off: back to the first, whose tabs are the ones there
         // were before (see Spaces.swift).
         prefs.$usesSpaces
@@ -3789,6 +3799,8 @@ final class Browser: NSObject, ObservableObject {
         // it does in every other browser (see MiddleRelay).
         // From a private tab, the new one is private too, as for ⌘-click.
         tab.onMiddleClick = { [weak self] tab, url in self?.open(url, foreground: false, from: tab, mayWait: true) }
+        tab.onSuperDrag = { [weak self] tab,request in self?.performSuperDrag(tab,request) }
+        tab.onSuperDragSettings = { [weak self] in Store.settings.set("superDrag",forKey:"settings.page");self?.tuning=true }
         tab.onCross = { [weak self] tab, url in self?.replace(tab, going: url) }
 
         // The caret in a sign-in box: the accounts kept for this site hang

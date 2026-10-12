@@ -8,7 +8,7 @@ let package = Package(
         .executableTarget(
             name: "SearcheXtra",
             path: "Sources/SearcheXtra",
-            resources: [.copy("Resources/Translations.json"), .copy("Resources/AppIcon.png")],
+            resources: [.copy("Resources/Translations.json"), .copy("Resources/AppIcon.png"), .copy("Resources/SuperDrag.js")],
             // Same reasoning as the canvas app next door: the whole interface is
             // main-thread by nature, and Swift 6's strict isolation buys nothing
             // here but ceremony.

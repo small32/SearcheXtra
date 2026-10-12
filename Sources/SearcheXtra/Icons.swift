@@ -11,8 +11,38 @@ import WebKit
 // arrives, which is a second or so.
 
 @MainActor
-final class Favicons {
+final class Favicons: ObservableObject {
     static let shared = Favicons()
+
+    func fetchBookmark(_ url: URL, privately: Bool) async {
+        guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              let host = Self.site(url), cached(host) == nil,
+              !busy.contains(host), !missing.contains(host) else { return }
+        busy.insert(host)
+        var declared: [[String: String]] = []
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        if let (data, _) = try? await session.data(from: url), let html = String(data: data, encoding: .utf8),
+           let links = try? NSRegularExpression(pattern: "<link\\b[^>]*>", options: .caseInsensitive) {
+            let source = html as NSString
+            for match in links.matches(in: html, range: NSRange(location: 0, length: source.length)) {
+                let tag = source.substring(with: match.range)
+                var attributes: [String: String] = [:]
+                for name in ["rel", "href", "sizes", "type", "media"] {
+                    let pattern = "\\b" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))"
+                    guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+                          let attribute = regex.firstMatch(in: tag, range: NSRange(location: 0, length: (tag as NSString).length)) else { continue }
+                    for index in 1..<attribute.numberOfRanges where attribute.range(at: index).location != NSNotFound {
+                        attributes[name] = (tag as NSString).substring(with: attribute.range(at: index)).replacingOccurrences(of: "&amp;", with: "&")
+                    }
+                }
+                if attributes["rel"]?.lowercased().split(separator: " ").contains("icon") == true { declared.append(attributes) }
+            }
+        }
+        await download(Self.rank(declared, page: url, dark: Self.dark), host: host, key: host, shy: privately)
+    }
 
     /// Called with a host and its icon whenever one arrives, so every tab on
     /// that host can put it on at once.
@@ -114,6 +144,7 @@ final class Favicons {
     func adopt(_ data: Data, for host: String) async {
         guard cached(host) == nil, let image = await Favicons.square(data) else { return }
         memory[host] = image
+        objectWillChange.send()
         Favicons.keep(image, for: host)
         arrived?(host, image)
     }
@@ -178,6 +209,7 @@ final class Favicons {
             else { continue }
             guard let image = await Favicons.square(data) else { continue }
             memory[key] = image
+            objectWillChange.send()
             absent.remove(key)
             if !shy { Favicons.keep(image, for: key) }
             arrived?(host, image)

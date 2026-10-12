@@ -11,7 +11,7 @@ struct TabAddressEditor: View {
             if let url = tab.pageAddress, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
                 SiteInfoButton(browser: browser, tab: tab).frame(width: 20, height: 20)
             }
-            TabAddressField(browser: browser).frame(height: 16)
+            TabAddressField(browser: browser).frame(height: 16).modifier(SuperDragDropZone(browser:browser,region:"address"))
         }
     }
 }

@@ -41,6 +41,7 @@ public sealed partial class MainWindow : Window
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1200, 820));
         ((OverlappedPresenter)AppWindow.Presenter).SetBorderAndTitleBar(true, true);
         SetupTitleBar();
+        Root.Loaded += (_,_) => SetupSuperDragDropZones();
         Root.ActualThemeChanged += (_, _) => { SetupGlyphs(); UpdateTitleBarColors(); };
         WindowsIntegration.SetWindowIcon(this);
         saveTimer = DispatcherQueue.CreateTimer();
@@ -190,6 +191,8 @@ public sealed partial class MainWindow : Window
             view.DownloadStarted += download => { downloads.Add(download); RefreshPinnedExtensions(); Status.Text = T("Downloading: ", "正在下载：") + download.Name; download.Operation.StateChanged += (_, _) => { if (download.Operation.State == Microsoft.Web.WebView2.Core.CoreWebView2DownloadState.Completed && !tab.IsPrivate) { store.Downloads.RemoveAll(d => d.Path == download.Path); store.Downloads.Insert(0, new(download.Path, download.Operation.Uri, DateTimeOffset.Now)); ScheduleSave(); } }; };
             view.NewWindowTarget += async _ => { var child = AddTab("", true, tab.IsPrivate); return (await GetViewAsync(child)).Control.CoreWebView2; };
             view.OpenLinkRequested += (url, foreground) => AddTab(url, foreground, tab.IsPrivate);
+            view.SuperDragRequested += request => ExecuteSuperDragAsync(tab,view,request);
+            view.SuperDragSettingsRequested += () => {Settings.SettingsPage="superDrag";Menu_Click(this,new());};
             view.HoveredLink += url => { if (active == tab) Status.Text = url; };
             view.PreviewRequested += async url => await PreviewLinkAsync(url);
             view.PermissionRequested += args => HandleSitePermissionAsync(tab, view, args);

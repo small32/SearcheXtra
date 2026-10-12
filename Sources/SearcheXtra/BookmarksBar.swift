@@ -20,7 +20,7 @@ struct BookmarksBar: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: browser.prefs.compactBookmarksBar ? 0 : 2) {
                 ForEach(bookmarks.roots) { node in
-                    Item(node: node, compact: browser.prefs.compactBookmarksBar, folderIcons: browser.prefs.bookmarkBarFolderIcons, websiteIcons: browser.prefs.bookmarkWebsiteIcons) { anchor in
+                    Item(node: node, browser: browser, compact: browser.prefs.compactBookmarksBar, folderIcons: browser.prefs.bookmarkBarFolderIcons, websiteIcons: browser.prefs.bookmarkWebsiteIcons) { anchor in
                         if node.isFolder {
                             BookmarkMenu.shared.popUp(node, in: browser, from: anchor)
                         } else if let text = node.url, let url = URL(string: text) {
@@ -30,7 +30,7 @@ struct BookmarksBar: View {
                     .contextMenu { contextMenu(for: node) }
                     .overlay {
                         if let url = node.url.flatMap(URL.init(string:)) {
-                            MiddleClick { browser.pickBookmark(url, inNewTab: true) }
+                            MiddleClick { browser.open(url, foreground: false, from: browser.active, mayWait: true) }
                         }
                     }
                 }
@@ -44,6 +44,7 @@ struct BookmarksBar: View {
             Rectangle().fill(Palette.hairline).frame(height: 1)
         }
         .contextMenu { contextMenu(for: nil) }
+        .modifier(SuperDragDropZone(browser:browser,region:"bookmarks"))
     }
 
     @ViewBuilder
@@ -101,12 +102,14 @@ struct BookmarksBar: View {
 
     private struct Item: View {
         let node: Bookmark
+        let browser: Browser
         let compact: Bool
         let folderIcons: Bool
         let websiteIcons: Bool
         let act: (NSView?) -> Void
         @State private var hovering = false
         @State private var anchor: NSView?
+        @ObservedObject private var favicons = Favicons.shared
 
         var body: some View {
             HStack(spacing: compact ? 3 : 6) {
@@ -115,7 +118,7 @@ struct BookmarksBar: View {
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(Palette.ink)
                 } else if !node.isFolder && websiteIcons {
-                    Mark(icon: Favicons.shared.cached(node.site ?? ""), letter: String((node.host ?? "•").prefix(1)).uppercased(), size: 13)
+                    Mark(icon: favicons.cached(node.site ?? ""), letter: String((node.host ?? "•").prefix(1)).uppercased(), size: 13)
                 }
                 Text(node.title)
                     .font(.system(size: 12))
@@ -133,21 +136,34 @@ struct BookmarksBar: View {
             .frame(height: 22)
             .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(hovering ? Palette.hover : .clear))
             .contentShape(Rectangle())
-            .background(MenuAnchor { anchor = $0 })
+            .background(MenuAnchor(node: node, browser: browser) { anchor = $0 })
             .onTapGesture { act(anchor) }
             .onHover { hovering = $0 }
             .help(node.url ?? node.title)
+            .task(id: websiteIcons) {
+                if websiteIcons, let url = node.url.flatMap(URL.init(string:)) {
+                    await favicons.fetchBookmark(url, privately: browser.active?.shy == true)
+                }
+            }
         }
     }
 
     private struct MenuAnchor: NSViewRepresentable {
+        let node: Bookmark
+        let browser: Browser
         let ready: (NSView) -> Void
         func makeNSView(context: Context) -> NSView {
             let view = NSView()
+            BookmarkMenu.shared.registerBarAnchor(view, folder: node, browser: browser)
             DispatchQueue.main.async { ready(view) }
             return view
         }
-        func updateNSView(_ view: NSView, context: Context) {}
+        func updateNSView(_ view: NSView, context: Context) {
+            BookmarkMenu.shared.registerBarAnchor(view, folder: node, browser: browser)
+        }
+        static func dismantleNSView(_ view: NSView, coordinator: ()) {
+            BookmarkMenu.shared.removeBarAnchor(view)
+        }
     }
 }
 

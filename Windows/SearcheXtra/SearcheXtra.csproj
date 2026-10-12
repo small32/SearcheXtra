@@ -19,6 +19,7 @@
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
   <ItemGroup>
+    <Content Include="../../Sources/SearcheXtra/Resources/SuperDrag.js" Link="Assets/SuperDrag.js" CopyToOutputDirectory="PreserveNewest" />
     <Content Update="Assets/reader.js" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../Sources/SearcheXtra/Resources/Translations.json" Link="Assets/Translations.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="AppIcon.ico" CopyToOutputDirectory="PreserveNewest" />

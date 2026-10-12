@@ -8,7 +8,7 @@ namespace SearcheXtra.Windows;
 
 public sealed partial class MainWindow
 {
-    private static readonly (string, string, string)[] SettingsPages = { ("general", "General", "通用"), ("tabs", "Tabs", "标签页"), ("shortcuts", "Shortcuts", "快捷键"), ("bookmarks", "Bookmark manager", "书签管理器"), ("extensions", "Extensions", "扩展"), ("passwords", "Passwords", "密码"), ("downloads", "Downloads", "下载"), ("privacy", "Privacy", "隐私"), ("about", "About", "关于") };
+    private static readonly (string, string, string)[] SettingsPages = { ("general", "General", "通用"), ("tabs", "Tabs", "标签页"), ("shortcuts", "Shortcuts", "快捷键"), ("superDrag", "Super drag", "超级拖拽"), ("bookmarks", "Bookmark manager", "书签管理器"), ("extensions", "Extensions", "扩展"), ("passwords", "Passwords", "密码"), ("downloads", "Downloads", "下载"), ("privacy", "Privacy", "隐私"), ("about", "About", "关于") };
 
     private async Task ShowSettingsAsync()
     {
@@ -126,7 +126,13 @@ public sealed partial class MainWindow
                 break;
             case "bookmarks":
                 ActionRow("Bookmark manager", "书签管理器", T("Open", "打开"), async () => { DismissOverlay(); await ShowBookmarksAsync(); }, T("Import, edit, delete and organize bookmarks and folders.", "导入、编辑、删除及整理书签和文件夹。"));
+                card = new StackPanel();
+                body.Children.Add(new Border { CornerRadius = new(12), BorderBrush = Brush("Hairline"), BorderThickness = new(1), Child = card });
+                Toggle("Bookmarks bar folder icons", "书签栏文件夹图标", Settings.BookmarkBarFolderIcons, value => { Settings.BookmarkBarFolderIcons = value; RefreshBookmarkBar(); });
+                Toggle("Show bookmark website icons", "书签显示网站图标", Settings.BookmarkWebsiteIcons, value => { Settings.BookmarkWebsiteIcons = value; RefreshBookmarkBar(); });
                 break;
+            case "superDrag":
+                BuildSuperDragSettings(body); break;
             case "shortcuts":
                 BuildShortcutSettings(card); break;
             case "extensions":

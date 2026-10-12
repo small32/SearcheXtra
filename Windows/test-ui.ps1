@@ -12,7 +12,7 @@ try {
         Stop-Process -Id $taskProcess.Id
         throw "UI tests timed out. Data: $taskTestRoot"
     }
-    if (-not (Test-Path -LiteralPath $env:SEARCHEXTRA_SMOKE_TEST)) { throw "No UI test report. Data: $taskTestRoot" }
+    if (-not (Test-Path -LiteralPath $env:SEARCHEXTRA_SMOKE_TEST)) { throw "No UI test report. Exit code: $($taskProcess.ExitCode). Data: $taskTestRoot" }
     $taskReport = Get-Content -LiteralPath $env:SEARCHEXTRA_SMOKE_TEST -Raw | ConvertFrom-Json
     if ($taskReport -is [array] -or $taskReport.success -ne $true) { throw "UI test report failed or is invalid: $($taskReport.error). Report: $env:SEARCHEXTRA_SMOKE_TEST" }
     Write-Host "PASS: $($taskReport.checks.Count) WebView2 integration checks"

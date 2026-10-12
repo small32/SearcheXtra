@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace SearcheXtra.Windows;
 
-public sealed class PageView : IDisposable
+public sealed partial class PageView : IDisposable
 {
     private static Task<CoreWebView2Environment>? environment;
     private readonly BrowserTab tab;
@@ -144,6 +144,7 @@ public sealed class PageView : IDisposable
         var site = Uri.TryCreate(tab.Url, UriKind.Absolute, out var uri) ? store.Settings.Sites.GetValueOrDefault(uri.Host) : null;
         _ = core.ExecuteScriptAsync("if(document.documentElement)document.documentElement.style.zoom=" + JsonSerializer.Serialize(site?.Zoom ?? store.Settings.PageZoom));
         _ = core.ExecuteScriptAsync("window.__searchPrefs=" + JsonSerializer.Serialize(ScriptOptions()));
+        _ = core.ExecuteScriptAsync("window.__sxSuperDrag?.configure(" + SuperDragOptions() + ")");
     }
     private void NavigationStarting(CoreWebView2 sender, CoreWebView2NavigationStartingEventArgs args)
     {
@@ -187,6 +188,7 @@ public sealed class PageView : IDisposable
     }
     private void ContextMenuRequested(CoreWebView2 sender, CoreWebView2ContextMenuRequestedEventArgs args)
     {
+        AddSuperDragContextMenu(sender,args);
         if (!args.ContextMenuTarget.HasLinkUri) return;
         var link = args.ContextMenuTarget.LinkUri;
         var original = args.MenuItems.FirstOrDefault(item => item.Name is "openLinkInNewWindow" or "openLinkInNewTab");
@@ -238,6 +240,7 @@ public sealed class PageView : IDisposable
         {
             using var doc = JsonDocument.Parse(args.WebMessageAsJson);
             var type = doc.RootElement.GetProperty("type").GetString();
+            if (type == "super-drag") { await ReceiveSuperDragAsync(doc.RootElement); return; }
             if (type == "store-install")
             {
                 // Derive the ID from the trusted top-level store URL, never from page data.
@@ -268,7 +271,7 @@ public sealed class PageView : IDisposable
         try
         {
             if (disposed || Control.CoreWebView2 is not { } core) return;
-            var source = PageScripts.StoreBridge(new Strings(store.Settings).Text("Add to SearcheXtra", "添加至 SearcheXtra")) + PageScripts.HiddenRules(store.HiddenElements) + (store.Settings.BlockTrackers && (!Uri.TryCreate(tab.Url, UriKind.Absolute, out var page) || store.Settings.Sites.GetValueOrDefault(page.Host)?.BlockTrackers != false) ? PageScripts.Ads : "") + PageScripts.Capture + PageScripts.Features + "window.__searchPrefs=" + JsonSerializer.Serialize(ScriptOptions());
+            var source = SuperDragScript() + PageScripts.StoreBridge(new Strings(store.Settings).Text("Add to SearcheXtra", "添加至 SearcheXtra")) + PageScripts.HiddenRules(store.HiddenElements) + (store.Settings.BlockTrackers && (!Uri.TryCreate(tab.Url, UriKind.Absolute, out var page) || store.Settings.Sites.GetValueOrDefault(page.Host)?.BlockTrackers != false) ? PageScripts.Ads : "") + PageScripts.Capture + PageScripts.Features + ";window.__searchPrefs=" + JsonSerializer.Serialize(ScriptOptions()) + ";";
             if (source == documentScriptSource) return;
             var added = await core.AddScriptToExecuteOnDocumentCreatedAsync(source);
             if (disposed) return;

@@ -28,7 +28,7 @@ enum Web {
     /// included, and registering a name twice is a hard crash.
     @MainActor static func release(_ controller: WKUserContentController) {
         for name in [ScrollRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name,
-                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, IconRelay.name] {
+                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, IconRelay.name, SuperDragRelay.name] {
             controller.removeScriptMessageHandler(forName: name, contentWorld: world)
             controller.removeScriptMessageHandler(forName: name, contentWorld: .page)
         }
@@ -471,6 +471,9 @@ final class Tab: ObservableObject, Identifiable {
     /// The middle button was let go over a link. The browser opens it in a
     /// tab of its own beside this one, without leaving the page you are on.
     var onMiddleClick: ((Tab, URL) -> Void)?
+    var onSuperDrag: ((Tab, SuperDragRequest) -> Void)?
+    var onSuperDragSettings: (() -> Void)?
+    let superDragRelay = SuperDragRelay()
     /// Sent where this tab's view can't go: from an extension's page to the
     /// web or another extension, or from the web to an extension's page.
     /// WebKit keeps each kind of view to its own pages, so the tab has to be
@@ -608,6 +611,7 @@ final class Tab: ObservableObject, Identifiable {
             guard let self else { return }
             self.onSearch?(self, text)
         }
+        web.onSuperDragSettings = { [weak self] in self?.onSuperDragSettings?() }
         web.holdForFirstFrame()
         // Pages follow the appearance of the window they are drawn in, and the
         // window follows Settings › Appearance — so a site that honours
@@ -638,6 +642,8 @@ final class Tab: ObservableObject, Identifiable {
         hovered.tab = self
         controller.add(hovered, contentWorld: .defaultClient, name: HoveredLink.name)
         controller.add(middles, contentWorld: Web.world, name: MiddleRelay.name)
+        superDragRelay.tab = self
+        controller.add(superDragRelay,contentWorld:Web.world,name:SuperDragRelay.name)
         Shield.shared.protect(controller, for: address?.host)
         built = web
         // A tab muted before it went to sleep wakes muted.
@@ -731,6 +737,7 @@ final class Tab: ObservableObject, Identifiable {
         guard let built else { return }
         let controller = built.configuration.userContentController
         controller.removeAllUserScripts()
+        controller.addUserScript(WKUserScript(source:SuperDragSettings.shared.script,injectionTime:.atDocumentStart,forMainFrameOnly:true,in:Web.world))
         controller.addUserScript(
             WKUserScript(source: ScrollRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
         )
@@ -1514,6 +1521,7 @@ final class PageView: WKWebView {
     /// The page's own right-click menu. WebKit puts extensions' items for the
     /// page in it itself; Search adding them again showed each one twice.
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
+        addSuperDragMenu(menu)
         super.willOpenMenu(menu, with: event)
         // WebKit names it for a window, but a new window's page arrives here
         // as a new tab (Browser's createWebViewWith), so it says so. The tab
@@ -1561,6 +1569,7 @@ final class PageView: WKWebView {
     static var picking: String?
     var searchName: (() -> String?)?
     var onSearch: ((String) -> Void)?
+    var onSuperDragSettings: (() -> Void)?
     private var selection: String?
 
     /// The words selected where the right-click was, read when the menu

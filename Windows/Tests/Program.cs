@@ -178,4 +178,25 @@ Check(CrxInstaller.StoreVersion(updateXml, id) == "2.0.17", "Store version comes
 Check(CrxInstaller.StoreVersion($"<gupdate><app appid='{id}' status='ok'><updatecheck status='noupdate'/></app></gupdate>", id) == null, "Store no-update response is recognized");
 Check(Reject(() => CrxInstaller.StoreVersion($"<gupdate><app appid='{id}' status='error'/></gupdate>", id)), "Malformed or failed store checks are not reported as latest");
 if (args.Length == 2 && args[0] == "--store-probe") { var folder = await CrxInstaller.FetchAsync(args[1], Path.Combine(DataStore.Root, "store")); Console.WriteLine("Verified Chrome store package: " + folder); }
+bool RejectDrag(Action action) { try { action(); return false; } catch (FormatException) { return true; } }
+var dragConfig = new SuperDragConfig(); dragConfig.Validate();
+var dragPage = "https://example.com/page";
+var dragRequest = new SuperDragRequest(Object: "link",Value:"https://other.example/path",Dx:0,Dy:30,Direction:"down");
+Check(SuperDrag.Resolve(dragConfig,dragRequest,dragPage)?.Action == "openBackgroundTab", "Link down defaults to background");
+Check(SuperDrag.Resolve(dragConfig,dragRequest with { Object="text",Value="hello",Dy=-30 },dragPage)?.Action == "search", "Text up defaults to search");
+Check(SuperDrag.Resolve(dragConfig,dragRequest with { Object="image" },dragPage)?.Action == "saveImage", "Image down defaults to save");
+Check(SuperDrag.Resolve(dragConfig,dragRequest with { Dy=9 },dragPage) == null, "Subthreshold drags retain native behavior");
+Check(SuperDrag.Resolve(dragConfig,dragRequest with { Modifier="shift" },dragPage) == null, "Unmapped modifier does not run a default rule");
+Check(!SuperDrag.EnabledOn(dragConfig,"https://docs.google.com/document"), "Editor exclusion applies before actions");
+Check(SuperDrag.EnabledOn(dragConfig,"https://evil-docs.google.com"), "Domain suffix exception includes only real subdomains");
+Check(SuperDrag.EnabledOn(dragConfig,"https://docs.google.com.evil.example/"), "Domain exceptions respect boundaries");
+Check(!SuperDrag.EnabledOn(dragConfig,"chrome-extension://fixture/page.html"), "Special pages degrade to native behavior");
+Check(SuperDrag.Resolve(dragConfig,dragRequest with { Value="javascript:alert(1)" },dragPage)==null, "Drag URLs cannot execute scripts");
+foreach (var (dx,dy,direction) in new (double,double,string)[]{(0,-50,"up"),(50,-50,"upRight"),(50,0,"right"),(50,50,"downRight"),(0,50,"down"),(-50,50,"downLeft"),(-50,0,"left"),(-50,-50,"upLeft")}) Check(SuperDrag.Direction(dx,dy,"8-way")==direction,"Eight-way direction "+direction);
+Check(SuperDrag.Resolve(dragConfig,dragRequest with { Dx=25,Dy=40 },dragPage)?.Action=="openBackgroundTab", "Diagonals use dominant cardinal defaults");
+var importedDrag = JsonSerializer.Deserialize<SuperDragConfig>(JsonSerializer.Serialize(dragConfig,SuperDrag.Json),SuperDrag.Json)!; importedDrag.Validate();
+Check(importedDrag.Rules.SequenceEqual(dragConfig.Rules) && importedDrag.Exceptions.SequenceEqual(dragConfig.Exceptions), "Cross-platform JSON configuration round trip");
+Check(RejectDrag(()=>{var invalid=new SuperDragConfig {MinDistance=0};invalid.Validate();}),"Invalid drag settings are rejected");
+Check(RejectDrag(()=>{var invalid=new SuperDragConfig();invalid.Rules.Add(invalid.Rules[0]);invalid.Validate();}),"Duplicate drag mappings are rejected");
+Check(SuperDrag.Resolve(new SuperDragConfig {Enabled=false},dragRequest,dragPage)==null,"Disabled super drag stops all actions");
 Console.WriteLine($"PASS: {count} checks. Isolated test data: {DataStore.Root}");

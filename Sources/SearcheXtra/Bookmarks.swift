@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 // Bookmarks: folders and sites, kept in a small file.
@@ -1326,11 +1327,6 @@ struct BookmarksPanel: View {
                 Hunt(text: $query, prompt: L10n.text("Bookmarks.0248"), focus: $hunting)
                     .onSubmit(openFirst)
 
-                Toggle(L10n.text("bookmarks.bar.folderIcons"), isOn: $prefs.bookmarkBarFolderIcons)
-                .toggleStyle(.switch)
-                Toggle(L10n.text("bookmarks.bar.websiteIcons"), isOn: $prefs.bookmarkWebsiteIcons)
-                .toggleStyle(.switch)
-
                 HStack(spacing: 10) {
                     Pill(L10n.text("bookmarks.manager.new")) { bookmarks.askNewBookmark() }
                     Button(L10n.text("bookmarks.manager.selectAll")) {
@@ -1543,6 +1539,22 @@ struct BookmarksPanel: View {
 @MainActor
 final class BookmarkMenu: NSObject, NSMenuDelegate {
     static let shared = BookmarkMenu()
+    private struct BarAnchor {
+        weak var view: NSView?
+        weak var browser: Browser?
+        let folder: Bookmark
+    }
+    private var barAnchors: [ObjectIdentifier: BarAnchor] = [:]
+    private var middleConsumed = false
+    private var iconWatches: [ObjectIdentifier: AnyCancellable] = [:]
+
+    func registerBarAnchor(_ view: NSView, folder: Bookmark, browser: Browser) {
+        if folder.isFolder {
+            barAnchors[ObjectIdentifier(view)] = BarAnchor(view: view, browser: browser, folder: folder)
+        } else { removeBarAnchor(view) }
+    }
+
+    func removeBarAnchor(_ view: NSView) { barAnchors.removeValue(forKey: ObjectIdentifier(view)) }
 
     private weak var browser: Browser?
     private var watch: [Any] = []
@@ -1641,6 +1653,7 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
     /// The top of the list, after SwiftUI's items, in place of any left
     /// from the last time.
     private func fill(_ menu: NSMenu) {
+        iconWatches.removeAll()
         for item in menu.items where item.tag == Self.mark { menu.removeItem(item) }
         folders = [:]
         guard let roots = browser?.bookmarks.roots, !roots.isEmpty else { return }
@@ -1653,7 +1666,68 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
     /// A folder of the bookmarks bar, opened as a menu at the pointer: the
     /// same items as the menu bar's, folders opening as they are reached.
     func popUp(_ folder: Bookmark, in browser: Browser, from anchor: NSView? = nil) {
+        var next: BarAnchor?
+        var activeMenu: NSMenu?
+        var middleDown = false
+        var middleItem: NSMenuItem?
+        middleConsumed = false
+        let monitoring = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown, .otherMouseUp]) { [weak self, weak browser] event in
+            MainActor.assumeIsolated {
+                guard event.buttonNumber == 2, let self, let browser else { return event }
+                if event.type == .otherMouseDown {
+                    middleDown = true
+                    middleItem = activeMenu.flatMap(self.highlightedBookmark)
+                    return middleItem == nil ? event : nil
+                }
+                middleDown = false
+                guard let item = middleItem, item === activeMenu.flatMap(self.highlightedBookmark),
+                      let destination = item.representedObject as? Destination, !self.middleConsumed else { return event }
+                self.middleConsumed = true
+                activeMenu?.cancelTracking()
+                DispatchQueue.main.async { browser.open(destination.url, foreground: false, from: browser.active, mayWait: true) }
+                return nil
+            }
+        }
+        // Native menus run their own tracking loop; SwiftUI hover callbacks do not run there.
+        let tracking = Timer(timeInterval: 0.05, repeats: true) { [weak self, weak anchor, weak browser] timer in
+            MainActor.assumeIsolated {
+                guard let self, let browser, next == nil else { return }
+                let down = NSEvent.pressedMouseButtons & 4 != 0
+                if down && !middleDown { middleItem = activeMenu.flatMap(self.highlightedBookmark) }
+                if !down && middleDown, let item = middleItem,
+                   item === activeMenu.flatMap(self.highlightedBookmark),
+                   let destination = item.representedObject as? Destination, !self.middleConsumed {
+                    self.middleConsumed = true
+                    activeMenu?.cancelTracking()
+                    DispatchQueue.main.async {
+                        browser.open(destination.url, foreground: false, from: browser.active, mayWait: true)
+                    }
+                }
+                middleDown = down
+                guard let anchor, let window = anchor.window else { return }
+                let point = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+                for candidate in self.barAnchors.values {
+                    guard let view = candidate.view, view !== anchor, view.window === window,
+                          candidate.browser === browser, !view.isHiddenOrHasHiddenAncestor,
+                          view.visibleRect.contains(view.convert(point, from: nil)) else { continue }
+                    next = candidate
+                    timer.invalidate()
+                    activeMenu?.cancelTracking()
+                    break
+                }
+            }
+        }
+        RunLoop.main.add(tracking, forMode: .eventTracking)
+        defer {
+            tracking.invalidate()
+            if let monitoring { NSEvent.removeMonitor(monitoring) }
+            iconWatches.removeAll()
+            if let next, let view = next.view, let browser = next.browser {
+                DispatchQueue.main.async { self.popUp(next.folder, in: browser, from: view) }
+            }
+        }
         let menu = NSMenu(title: folder.title)
+        activeMenu = menu
         if browser.prefs.compactBookmarksBar { menu.font = .systemFont(ofSize: NSFont.smallSystemFontSize) }
         let made = items(for: folder.children ?? [], barBrowser: browser)
         if made.isEmpty {
@@ -1674,12 +1748,20 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
         }
     }
 
+    private func highlightedBookmark(_ menu: NSMenu) -> NSMenuItem? {
+        guard let item = menu.highlightedItem else { return nil }
+        if let submenu = item.submenu { return highlightedBookmark(submenu) }
+        return item.representedObject is Destination ? item : nil
+    }
+
     private func items(for nodes: [Bookmark], barBrowser: Browser? = nil) -> [NSMenuItem] {
         nodes.compactMap { node in
             let item: NSMenuItem
             if node.isFolder {
                 item = NSMenuItem(title: node.title, action: nil, keyEquivalent: "")
-                item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+                if barBrowser?.prefs.bookmarkBarFolderIcons != false {
+                    item.image = NSImage(systemSymbolName: "folder", accessibilityDescription: nil)
+                }
                 let sub = NSMenu(title: node.title)
                 if barBrowser?.prefs.compactBookmarksBar == true { sub.font = .systemFont(ofSize: NSFont.smallSystemFontSize) }
                 sub.delegate = self
@@ -1691,10 +1773,29 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
                 item.representedObject = Destination(url: url, barBrowser: barBrowser)
                 // The site's icon, as the bar wears it: a folder opened from
                 // the bar, or the Bookmarks menu, had none (idea 183).
-                if let icon = Favicons.shared.cached(node.site ?? "") {
+                if barBrowser?.prefs.bookmarkWebsiteIcons != false, let icon = Favicons.shared.cached(node.site ?? "") {
                     let small = icon.copy() as? NSImage ?? icon
                     small.size = NSSize(width: 16, height: 16)
                     item.image = small
+                }
+                if let barBrowser, barBrowser.prefs.bookmarkWebsiteIcons {
+                    iconWatches[ObjectIdentifier(item)] = Favicons.shared.objectWillChange.sink { [weak item, weak barBrowser] _ in
+                        MainActor.assumeIsolated {
+                            guard let item, let barBrowser, barBrowser.prefs.bookmarkWebsiteIcons,
+                                  let icon = Favicons.shared.cached(node.site ?? "")?.copy() as? NSImage else { return }
+                            let size: CGFloat = barBrowser.prefs.compactBookmarksBar ? 13 : 16
+                            icon.size = NSSize(width: size, height: size)
+                            item.image = icon
+                        }
+                    }
+                    Task { [weak item, weak barBrowser] in
+                        await Favicons.shared.fetchBookmark(url, privately: barBrowser?.active?.shy == true)
+                        guard let item, let barBrowser, barBrowser.prefs.bookmarkWebsiteIcons,
+                              let icon = Favicons.shared.cached(node.site ?? "")?.copy() as? NSImage else { return }
+                        let size: CGFloat = barBrowser.prefs.compactBookmarksBar ? 13 : 16
+                        icon.size = NSSize(width: size, height: size)
+                        item.image = icon
+                    }
                 }
             } else {
                 return nil
@@ -1724,7 +1825,11 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
     @objc private func open(_ item: NSMenuItem) {
         guard let destination = item.representedObject as? Destination else { return }
         if let barBrowser = destination.barBrowser {
-            barBrowser.visitBookmarkBar(destination.url)
+            if middleConsumed { return }
+            if NSApp.currentEvent?.buttonNumber == 2 {
+                middleConsumed = true
+                barBrowser.open(destination.url, foreground: false, from: barBrowser.active, mayWait: true)
+            } else { barBrowser.visitBookmarkBar(destination.url) }
         } else {
             browser?.visit(destination.url)
         }
