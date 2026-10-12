@@ -1720,10 +1720,12 @@ final class Browser: NSObject, ObservableObject {
         SuperDragSettings.shared.$config.dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self else { return }
-                for tab in self.tabs+self.parkedTabs+[self.peek].compactMap({$0}) {
-                    tab.superDragRelay.pending=nil
-                    tab.arm(hiding:self.curtain.css(on:self.curtain.host(of:tab.address)))
-                    tab.built?.evaluateJavaScript("window.__sxSuperDrag?.configure("+SuperDragSettings.shared.options+")",in:nil,in:Web.world) { _ in }
+                let pages = self.tabs + self.parkedTabs + [self.peekTab].compactMap { $0 }
+                let script = "window.__sxSuperDrag?.configure(" + SuperDragSettings.shared.options + ")"
+                for tab in pages {
+                    tab.superDragRelay.pending = nil
+                    tab.arm(hiding: self.curtain.css(on: self.curtain.host(of: tab.address)))
+                    tab.built?.evaluateJavaScript(script, in: nil, in: Web.world) { _ in }
                 }
             }
         }.store(in:&bag)
