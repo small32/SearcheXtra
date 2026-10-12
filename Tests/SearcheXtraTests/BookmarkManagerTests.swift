@@ -21,6 +21,7 @@ final class BookmarkManagerTests: XCTestCase {
         bookmarks.sortByName(in: target.id)
         XCTAssertEqual(bookmarks.bookmark(target.id)?.children?.map(\.id), [a.id, z.id])
         XCTAssertEqual(bookmarks.bookmark(untouched.id)?.children?.map(\.id), [otherZ.id, otherA.id])
+        Disk.drain()
         XCTAssertEqual(Bookmarks().bookmark(target.id)?.children?.map(\.id), [a.id, z.id])
         bookmarks.sortByName()
         XCTAssertEqual(bookmarks.roots.map(\.id), [untouched.id, target.id])
