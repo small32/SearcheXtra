@@ -3,7 +3,11 @@ import UniformTypeIdentifiers
 struct FlowDragSettingsPage:View {
     @ObservedObject private var settings=FlowDragSettings.shared
     let browser:Browser
-    @State private var page="overview",object="text",newPattern="",exceptions="",status=""
+    @State private var page = "overview"
+    @State private var object = "text"
+    @State private var newPattern = ""
+    @State private var exceptions = ""
+    @State private var status = ""
     @State private var customURLs:[String:String]=[:]
     @FocusState private var focusedURL:String?
     private func l(_ key:String)->String {L10n.text("flowDrag."+key)}

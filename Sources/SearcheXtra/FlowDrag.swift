@@ -23,9 +23,22 @@ struct FlowDragConfig: Codable,Equatable {
     var excludedSites:[String]=[]
     var rules:[FlowDragRule]=[.init(object:"text",pattern:"→",action:"search"),.init(object:"link",pattern:"→",action:"openTab"),.init(object:"image",pattern:"→",action:"openImage")]
     func validate() throws {
-        guard distanceThreshold.isFinite,(1...200).contains(distanceThreshold),rules.count<=200,Set(rules.map(\.id)).count==rules.count,
-            rules.allSatisfy({FlowDrag.objects.contains($0.object)&&FlowDrag.validPattern($0.pattern)&&FlowDrag.actions($0.object).contains($0.action)&&FlowDrag.positions.contains($0.position)&&FlowDrag.engines.contains($0.engine)&&($0.engine != "custom" || $0.url.contains("%s")&&FlowDrag.web($0.url.replacingOccurrences(of:"%s",with:"x")))&& !$0.subdir.hasPrefix("/") && !$0.subdir.contains(":") && !$0.subdir.components(separatedBy:CharacterSet(charactersIn:"/\\")).contains(where:{$0==".." || $0=="."})}),
-            excludedSites.allSatisfy({!$0.isEmpty && !$0.contains("/") && !$0.contains(" ") && URL(string:"https://"+$0)?.host != nil}) else {throw FlowDrag.Invalid()}
+        let validRules = rules.allSatisfy { rule in
+            let validEngine = rule.engine != "custom" || (
+                rule.url.contains("%s") && FlowDrag.web(rule.url.replacingOccurrences(of: "%s", with: "x"))
+            )
+            let validSubdirectory = !rule.subdir.hasPrefix("/") && !rule.subdir.contains(":") &&
+                !rule.subdir.components(separatedBy: CharacterSet(charactersIn: "/\\")).contains(where: { $0 == ".." || $0 == "." })
+            return FlowDrag.objects.contains(rule.object) && FlowDrag.validPattern(rule.pattern) &&
+                FlowDrag.actions(rule.object).contains(rule.action) && FlowDrag.positions.contains(rule.position) &&
+                FlowDrag.engines.contains(rule.engine) && validEngine && validSubdirectory
+        }
+        let validSites = excludedSites.allSatisfy { site in
+            !site.isEmpty && !site.contains("/") && !site.contains(" ") && URL(string: "https://" + site)?.host != nil
+        }
+        guard distanceThreshold.isFinite, (1...200).contains(distanceThreshold), rules.count <= 200,
+              Set(rules.map(\.id)).count == rules.count, validRules, validSites
+        else { throw FlowDrag.Invalid() }
     }
 }
 struct FlowDragRequest: Codable,Equatable {
