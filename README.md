@@ -34,13 +34,13 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 - **标签页与固定标签页。** 常用页面可以固定，显示为字母或网站图标。上次会话的标签页会恢复，切换到对应标签页时才创建网页视图。`⌘K` 按名称查找已打开的标签页。
 - **分屏浏览。** 在“设置 → 标签页”中启用分屏，将标签页拖到页面边缘，或选择“标签页 → 拆分当前页面”。拖动分隔线调整宽度，带边框的页面接收操作指令。分屏组合和宽度随空间保存，重启后可以恢复。
 - **阅读模式。** `⇧⌘R` 提取文章正文，减少页面干扰。
+- **超级拖拽。** 在“设置 → 标签页 → 超级拖拽”中分别配置文字、链接和图片。参考 FlowMouse 的方向序列与兜底规则，支持后台搜索、打开位置、复制、收藏、保存图片及以图搜图；可导入 FlowMouse 的拖拽规则。详见[双语说明](docs/FLOW_DRAG.md)。
 - **隐藏网页元素。** 按下 `⇧⌘H` 后点击 Cookie 提示、订阅浮层或其他元素。隐藏规则按网站保存，下次访问时在页面绘制前生效。
 - **广告与跟踪拦截。** 在网络请求阶段拦截第三方跟踪器和广告网络。默认启用，也可以按网站关闭。
 - **画中画。** `⇧⌘P` 将视频放入悬浮窗口，切换应用时仍可观看。
 - **密码与钥匙串。** 登录成功后提示保存密码，点击登录字段时显示已保存账号。密码保存在 macOS 钥匙串中，由系统加密；支持从 Chrome、Arc、Dia、Brave 或 Edge 导入。系统通行密钥功能需要相应的签名和授权配置。
 - **浅色、深色与跟随系统。** 浏览器界面和网页可以随外观设置切换。
 - **书签、历史记录与下载。** 各自提供独立面板，支持搜索和快捷键打开。
-- **超级拖拽。** 两端在“设置 → 超级拖拽”中配置。链接向下拖动后台打开，选中文字向上拖动搜索，图片向下拖动保存。支持四向或八向、修饰键、释放区域规则、站点例外、即时开关和 JSON 导入导出。网页右键菜单可快速开关、排除当前站点并查看规则。搜索、翻译及以图搜图首次使用前请求联网授权；编辑器、地图、画布及自定义拖拽控件保留原生行为。
 - **书签管理器。** 两端设置提供独立入口，支持搜索、导入 HTML、编辑、删除和文件夹管理，并可按名称排序。两端均支持全选、批量删除、拖动调整顺序及拖入文件夹；多选拖动保留原有顺序。
 - **Chrome 扩展。** 在“设置 → 扩展”中粘贴 Chrome 网上应用店链接，或打开扩展页面后点击添加。扩展运行在 WebKit 的扩展引擎上，浏览器补充部分 Chrome API。常用扩展可以固定，也可以加载本地未打包扩展，修改后点击重新载入。此功能需要 macOS 15.4 或更新版本，兼容情况取决于扩展使用的 API。
 - **多窗口与空间。** 可以创建多个窗口，并使用空间管理不同的标签页集合。
@@ -69,7 +69,9 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 
 ## 常用快捷键
 
-在 **设置 → 标签页** 中可启用“紧凑书签栏”，缩小书签、图标与文字的间距。“书签栏打开方式”可选择“默认”（当前标签页）、“新建后台标签页”或“新建前台标签页”，也适用于书签栏文件夹中的书签。设置立即生效并保存在本机；中键点击仍在后台新建标签页，按住 Shift 中键点击则切换到新标签页。
+在 **设置 → 标签页** 中可启用“紧凑书签栏”，缩小书签、图标与文字的间距。“书签栏打开方式”可选择“默认”（当前标签页）、“新建后台标签页”或“新建前台标签页”，也适用于书签栏文件夹中的书签。设置立即生效并保存在本机；中键点击始终在后台新建标签页，不切换当前页面。
+
+书签栏、文件夹下拉菜单和书签管理器自动加载并缓存网页图标，包括尚未访问过的书签。“书签显示网站图标”默认开启，关闭后隐藏图标。
 
 | 操作 | 快捷键 |
 |---|---|
@@ -230,7 +232,7 @@ Set **Settings → General → Start page** to choose the page for new windows. 
 - **Passwords and Keychain:** Offers to save passwords after login and shows saved accounts when a login field is selected. macOS Keychain encrypts and stores passwords. Import is supported from Chrome, Arc, Dia, Brave, and Edge. System passkey features require appropriate signing and entitlements.
 - **Appearance:** Light, dark, and system appearance settings apply to the browser and webpages.
 - **Bookmarks, history, and downloads:** Dedicated panels with search and keyboard shortcuts.
-- **Super drag:** Configure on both platforms in Settings → Super drag. Drag links down to open background tabs, selected text up to search, and images down to save. Supports four or eight directions, modifiers, drop-region rules, site exclusions, instant toggles, and JSON import/export. The page context menu provides quick toggles, exclusions, and current rules. Online search, translation, and image search require consent before first use. Editors, maps, canvases, and custom draggable widgets keep their native behavior.
+- **Super drag:** Configure text, link and image drags in Settings → Tabs → Super drag. FlowMouse-style direction sequences and fallback rules support background search, tab positions, clipboard actions, bookmarks, image saving and reverse image search. FlowMouse drag rules can be imported. See the [bilingual guide](docs/FLOW_DRAG.md).
 - **Bookmark manager:** Available from Settings on both platforms, with search, HTML import, editing, deletion, folder management, and sorting by name. Both platforms support select all, bulk deletion, drag reordering, and dropping items into folders. Multi-item dragging preserves the original order.
 - **Chrome extensions:** Install from a Chrome Web Store URL or its listing, pin frequently used extensions, or load an unpacked local extension and reload it after editing. On macOS, extensions use WebKit's extension engine with additional Chrome API compatibility. Support depends on the APIs an extension uses.
 - **Windows and spaces:** Open multiple windows and organize sets of tabs into spaces.
@@ -251,7 +253,9 @@ Ad blocking, element hiding, reader mode, picture in picture, and password manag
 
 ### Bookmarks and macOS shortcuts
 
-In **Settings → Tabs**, Compact bookmarks bar reduces spacing between bookmarks, icons, and text. Bookmarks bar opening behavior can be Default (current tab), New background tab, or New foreground tab, including bookmarks inside folders. Settings take effect immediately and are saved locally. Middle-click opens a background tab; Shift + middle-click switches to the new tab.
+In **Settings → Tabs**, Compact bookmarks bar reduces spacing between bookmarks, icons, and text. Bookmarks bar opening behavior can be Default (current tab), New background tab, or New foreground tab, including bookmarks inside folders. Settings take effect immediately and are saved locally. Middle-click always opens a background tab and keeps the current page selected.
+
+The bookmarks bar, folder dropdowns, and bookmark manager automatically load and cache website icons, including bookmarks whose pages have not been visited. Show bookmark website icons is enabled by default; turning it off hides the icons.
 
 | Action | Shortcut |
 |---|---|

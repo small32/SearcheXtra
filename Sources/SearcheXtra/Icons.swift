@@ -1,4 +1,5 @@
 import ImageIO
+import Combine
 import SwiftUI
 import WebKit
 
@@ -13,36 +14,7 @@ import WebKit
 @MainActor
 final class Favicons: ObservableObject {
     static let shared = Favicons()
-
-    func fetchBookmark(_ url: URL, privately: Bool) async {
-        guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-              let host = Self.site(url), cached(host) == nil,
-              !busy.contains(host), !missing.contains(host) else { return }
-        busy.insert(host)
-        var declared: [[String: String]] = []
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 8
-        let session = URLSession(configuration: config)
-        defer { session.invalidateAndCancel() }
-        if let (data, _) = try? await session.data(from: url), let html = String(data: data, encoding: .utf8),
-           let links = try? NSRegularExpression(pattern: "<link\\b[^>]*>", options: .caseInsensitive) {
-            let source = html as NSString
-            for match in links.matches(in: html, range: NSRange(location: 0, length: source.length)) {
-                let tag = source.substring(with: match.range)
-                var attributes: [String: String] = [:]
-                for name in ["rel", "href", "sizes", "type", "media"] {
-                    let pattern = "\\b" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))"
-                    guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
-                          let attribute = regex.firstMatch(in: tag, range: NSRange(location: 0, length: (tag as NSString).length)) else { continue }
-                    for index in 1..<attribute.numberOfRanges where attribute.range(at: index).location != NSNotFound {
-                        attributes[name] = (tag as NSString).substring(with: attribute.range(at: index)).replacingOccurrences(of: "&amp;", with: "&")
-                    }
-                }
-                if attributes["rel"]?.lowercased().split(separator: " ").contains("icon") == true { declared.append(attributes) }
-            }
-        }
-        await download(Self.rank(declared, page: url, dark: Self.dark), host: host, key: host, shy: privately)
-    }
+    let objectWillChange = ObservableObjectPublisher()
 
     /// Called with a host and its icon whenever one arrives, so every tab on
     /// that host can put it on at once.
@@ -53,6 +25,20 @@ final class Favicons: ObservableObject {
     private var missing: Set<String> = []
     /// Keys with no file on disk, as far as `known` has looked.
     private var absent: Set<String> = []
+    private var bookmarkMissing: Set<String> = []
+    private var bookmarkQueue: [(URL, String, String, CheckedContinuation<Void, Never>)] = []
+    private var bookmarkDownloads = 0
+    private var bookmarkWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+    private let session: URLSession
+
+    init(session: URLSession? = nil) {
+        if let session { self.session = session }
+        else {
+            let config = URLSessionConfiguration.ephemeral
+            config.timeoutIntervalForRequest = 8
+            self.session = URLSession(configuration: config)
+        }
+    }
 
     private static var folder: URL { Store.folder.appendingPathComponent("icons", isDirectory: true) }
 
@@ -61,6 +47,7 @@ final class Favicons: ObservableObject {
     func forgetAll() {
         try? FileManager.default.removeItem(at: Favicons.folder)
         missing.removeAll()
+        bookmarkMissing.removeAll()
         absent.removeAll()
         if #available(macOS 15.4, *) { ExtensionShims.forgetIcons() }
     }
@@ -143,10 +130,87 @@ final class Favicons: ObservableObject {
     /// kept as if the site had handed it over, unless one is already here.
     func adopt(_ data: Data, for host: String) async {
         guard cached(host) == nil, let image = await Favicons.square(data) else { return }
-        memory[host] = image
         objectWillChange.send()
+        memory[host] = image
         Favicons.keep(image, for: host)
         arrived?(host, image)
+    }
+
+    /// Imported bookmarks need their icons before anyone visits them. Share
+    /// the tab cache, and limit background discovery to four sites at a time.
+    func fetch(for url: URL) async {
+        guard ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              let host = Favicons.site(url), cached(host) == nil,
+              !bookmarkMissing.contains(host)
+        else { return }
+        if busy.contains(host) {
+            await withCheckedContinuation { bookmarkWaiters[host, default: []].append($0) }
+            return
+        }
+        busy.insert(host)
+        let key = Favicons.key(host, dark: Favicons.dark)
+        await withCheckedContinuation { done in
+            bookmarkQueue.append((url, host, key, done))
+            discoverBookmarks()
+        }
+    }
+
+    private func discoverBookmarks() {
+        while bookmarkDownloads < 4, !bookmarkQueue.isEmpty {
+            let (page, host, key, done) = bookmarkQueue.removeFirst()
+            bookmarkDownloads += 1
+            Task {
+                var candidates = Favicons.rank([], page: page, dark: Favicons.dark)
+                if let (data, response) = try? await session.data(from: page),
+                   (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true,
+                   data.count < 2_000_000,
+                   let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) {
+                    candidates = Favicons.candidates(in: html, page: response.url ?? page, dark: key.hasSuffix("@dark"))
+                }
+                await download(candidates, host: host, key: key, shy: false, bookmark: true)
+                bookmarkDownloads -= 1
+                done.resume()
+                discoverBookmarks()
+            }
+        }
+    }
+
+    /// Read the same link declarations as the tab probe without creating or
+    /// navigating a WebView. Relative icon paths follow the final page URL.
+    static func candidates(in html: String, page: URL, dark: Bool) -> [URL] {
+        guard let links = try? NSRegularExpression(pattern: #"<(?:link|base)\b[^>]*>"#, options: .caseInsensitive),
+              let attributes = try? NSRegularExpression(pattern: #"([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#, options: .caseInsensitive)
+        else { return rank([], page: page, dark: dark) }
+        var declared: [[String: String]] = []
+        var base = page
+        for match in links.matches(in: html, range: NSRange(html.startIndex..., in: html)) {
+            guard let range = Range(match.range, in: html) else { continue }
+            let tag = String(html[range])
+            var entry: [String: String] = [:]
+            for attribute in attributes.matches(in: tag, range: NSRange(tag.startIndex..., in: tag)) {
+                guard let nameRange = Range(attribute.range(at: 1), in: tag),
+                      let valueRange = (2...4).compactMap({ Range(attribute.range(at: $0), in: tag) }).first
+                else { continue }
+                let name = tag[nameRange].lowercased()
+                var value = String(tag[valueRange])
+                for (entity, replacement) in [("&quot;", "\""), ("&#39;", "'"), ("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&")] {
+                    value = value.replacingOccurrences(of: entity, with: replacement)
+                }
+                entry[name] = name == "href" ? value : value.lowercased()
+            }
+            if tag.lowercased().hasPrefix("<base") {
+                if let href = entry["href"], let url = URL(string: href, relativeTo: page)?.absoluteURL,
+                   ["http", "https"].contains(url.scheme?.lowercased() ?? "") { base = url }
+                continue
+            }
+            if entry["rel"]?.split(whereSeparator: { $0.isWhitespace }).contains(where: { $0 == "icon" || $0 == "apple-touch-icon" || $0 == "apple-touch-icon-precomposed" }) == true {
+                declared.append(entry)
+            }
+        }
+        for index in declared.indices {
+            if let href = declared[index]["href"] { declared[index]["href"] = URL(string: href, relativeTo: base)?.absoluteURL.absoluteString }
+        }
+        return rank(declared, page: page, dark: dark)
     }
 
     /// Asks the page which icon it wants to be known by, fetches it, and keeps
@@ -195,21 +259,26 @@ final class Favicons: ObservableObject {
         return .any
     }
 
-    private func download(_ candidates: [URL], host: String, key: String, shy: Bool) async {
-        defer { busy.remove(host) }
-        let session = URLSession(configuration: {
+    private func download(_ candidates: [URL], host: String, key: String, shy: Bool, bookmark: Bool = false) async {
+        defer {
+            busy.remove(host)
+            bookmarkWaiters.removeValue(forKey: host)?.forEach { $0.resume() }
+        }
+        let session: URLSession
+        if bookmark { session = self.session }
+        else {
             let config = URLSessionConfiguration.ephemeral
             config.timeoutIntervalForRequest = 8
-            return config
-        }())
+            session = URLSession(configuration: config)
+        }
         for candidate in candidates {
             guard let (data, response) = try? await session.data(from: candidate),
                   (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
                   data.count > 60, data.count < 2_000_000
             else { continue }
             guard let image = await Favicons.square(data) else { continue }
-            memory[key] = image
             objectWillChange.send()
+            memory[key] = image
             absent.remove(key)
             if !shy { Favicons.keep(image, for: key) }
             arrived?(host, image)
@@ -217,7 +286,8 @@ final class Favicons: ObservableObject {
         }
         // Not asked again this session: hammering a site for an icon it
         // doesn't have is exactly the kind of thing a quiet browser doesn't do.
-        missing.insert(host)
+        if bookmark { bookmarkMissing.insert(host) }
+        else { missing.insert(host) }
     }
 
     /// The kinds of picture a site's icon may be. Anything else a site sends
@@ -349,6 +419,21 @@ final class Favicons: ObservableObject {
       return out;
     })();
     """
+}
+
+/// Bookmark rows observe arrivals themselves, including icons discovered by
+/// another row, an import or an open tab. The cached icon is shown immediately.
+struct BookmarkMark: View {
+    let node: Bookmark
+    var size: CGFloat = 16
+    @ObservedObject private var icons = Favicons.shared
+
+    var body: some View {
+        Mark(icon: icons.cached(node.site ?? ""), letter: String((node.host ?? "•").prefix(1)).uppercased(), size: size)
+            .task(id: node.url) {
+                if let url = node.url.flatMap(URL.init(string:)) { await icons.fetch(for: url) }
+            }
+    }
 }
 
 /// What stands for a page when there is no room for its title: the site's

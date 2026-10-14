@@ -41,7 +41,6 @@ public sealed partial class MainWindow : Window
         AppWindow.Resize(new global::Windows.Graphics.SizeInt32(1200, 820));
         ((OverlappedPresenter)AppWindow.Presenter).SetBorderAndTitleBar(true, true);
         SetupTitleBar();
-        Root.Loaded += (_,_) => SetupSuperDragDropZones();
         Root.ActualThemeChanged += (_, _) => { SetupGlyphs(); UpdateTitleBarColors(); };
         WindowsIntegration.SetWindowIcon(this);
         saveTimer = DispatcherQueue.CreateTimer();
@@ -92,16 +91,11 @@ public sealed partial class MainWindow : Window
         else AddTab(Settings.StartPage.Length > 0 ? Settings.StartPage : NewTabUrl());
     }
 
-    private bool settingsRefreshPending, bookmarkRefreshPending;
+    private bool settingsRefreshPending;
     private void OnStoreChanged()
     {
         if (settingsRefreshPending) return;
         settingsRefreshPending = DispatcherQueue.TryEnqueue(() => { settingsRefreshPending = false; ApplySettings(); });
-    }
-    private void RequestBookmarkRefresh()
-    {
-        if (bookmarkRefreshPending || !Settings.BookmarksBar || !Settings.BookmarkWebsiteIcons) return;
-        bookmarkRefreshPending = DispatcherQueue.TryEnqueue(() => { bookmarkRefreshPending = false; RefreshBookmarkBar(); });
     }
     private void ApplySettings()
     {
@@ -159,7 +153,6 @@ public sealed partial class MainWindow : Window
         AddMenu(menu, T("Close", "关闭"), () => CloseTab(tab));
         tab.PropertyChanged += (_, args) => {
             if (active == tab) UpdateChrome();
-            if (args.PropertyName == nameof(BrowserTab.Favicon) && Settings.BookmarkWebsiteIcons) RequestBookmarkRefresh();
         };
         tabMenus[tab.Id] = menu;
         RefreshTabLists();
@@ -191,12 +184,11 @@ public sealed partial class MainWindow : Window
             view.DownloadStarted += download => { downloads.Add(download); RefreshPinnedExtensions(); Status.Text = T("Downloading: ", "正在下载：") + download.Name; download.Operation.StateChanged += (_, _) => { if (download.Operation.State == Microsoft.Web.WebView2.Core.CoreWebView2DownloadState.Completed && !tab.IsPrivate) { store.Downloads.RemoveAll(d => d.Path == download.Path); store.Downloads.Insert(0, new(download.Path, download.Operation.Uri, DateTimeOffset.Now)); ScheduleSave(); } }; };
             view.NewWindowTarget += async _ => { var child = AddTab("", true, tab.IsPrivate); return (await GetViewAsync(child)).Control.CoreWebView2; };
             view.OpenLinkRequested += (url, foreground) => AddTab(url, foreground, tab.IsPrivate);
-            view.SuperDragRequested += request => ExecuteSuperDragAsync(tab,view,request);
-            view.SuperDragSettingsRequested += () => {Settings.SettingsPage="superDrag";Menu_Click(this,new());};
             view.HoveredLink += url => { if (active == tab) Status.Text = url; };
             view.PreviewRequested += async url => await PreviewLinkAsync(url);
             view.PermissionRequested += args => HandleSitePermissionAsync(tab, view, args);
-            view.WebsiteIconChanged += RequestBookmarkRefresh;
+            view.FlowDragRequested += request=>ExecuteFlowDragAsync(tab,view,request);
+            view.WebsiteIconChanged += () => { _ = AdoptBookmarkIconAsync(view, tab); };
             view.DownloadLocationRequested += async args =>
             {
                 var picker = new global::Windows.Storage.Pickers.FileSavePicker { SuggestedFileName = Path.GetFileNameWithoutExtension(args.ResultFilePath) };

@@ -8,7 +8,7 @@ namespace SearcheXtra.Windows;
 
 public sealed partial class MainWindow
 {
-    private static readonly (string, string, string)[] SettingsPages = { ("general", "General", "通用"), ("tabs", "Tabs", "标签页"), ("shortcuts", "Shortcuts", "快捷键"), ("superDrag", "Super drag", "超级拖拽"), ("bookmarks", "Bookmark manager", "书签管理器"), ("extensions", "Extensions", "扩展"), ("passwords", "Passwords", "密码"), ("downloads", "Downloads", "下载"), ("privacy", "Privacy", "隐私"), ("about", "About", "关于") };
+    private static readonly (string, string, string)[] SettingsPages = { ("general", "General", "通用"), ("tabs", "Tabs", "标签页"), ("shortcuts", "Shortcuts", "快捷键"), ("bookmarks", "Bookmark manager", "书签管理器"), ("extensions", "Extensions", "扩展"), ("passwords", "Passwords", "密码"), ("downloads", "Downloads", "下载"), ("privacy", "Privacy", "隐私"), ("about", "About", "关于") };
 
     private async Task ShowSettingsAsync()
     {
@@ -34,10 +34,11 @@ public sealed partial class MainWindow
         }
         void Render(string page)
         {
-            if (!buttons.ContainsKey(page)) page = "general";
+            if (page != "flowDrag" && !buttons.ContainsKey(page)) page = "general";
             Settings.SettingsPage = page; ScheduleSave(); body.Children.Clear(); scroll.ChangeView(null, 0, null);
-            foreach (var entry in pages) { buttons[entry.Item1].Opacity = entry.Item1 == page ? 1 : .58; buttons[entry.Item1].Background = Brush(entry.Item1 == page ? "Ground" : "Wash", entry.Item1 == page ? 1 : 0); buttons[entry.Item1].FontWeight = entry.Item1 == page ? Microsoft.UI.Text.FontWeights.Medium : Microsoft.UI.Text.FontWeights.Normal; }
-            var name = pages.First(p => p.Item1 == page); title.Text = T(name.Item2, name.Item3);
+            var selection=page=="flowDrag"?"tabs":page;
+            foreach (var entry in pages) { buttons[entry.Item1].Opacity = entry.Item1 == selection ? 1 : .58; buttons[entry.Item1].Background = Brush(entry.Item1 == selection ? "Ground" : "Wash", entry.Item1 == selection ? 1 : 0); buttons[entry.Item1].FontWeight = entry.Item1 == selection ? Microsoft.UI.Text.FontWeights.Medium : Microsoft.UI.Text.FontWeights.Normal; }
+            var name = pages.First(p => p.Item1 == selection); title.Text = page=="flowDrag"?strings.Key("flowDrag.title"):T(name.Item2, name.Item3);
             BuildSettingsPage(page, body, Render);
         }
         Render(Settings.SettingsPage);
@@ -106,6 +107,7 @@ public sealed partial class MainWindow
                 Toggle("Let scripts drive SearcheXtra", "允许脚本控制 SearcheXtra", Settings.Bench, value => Settings.Bench = value);
                 break;
             case "tabs":
+                ActionRow("Super drag", "超级拖拽", T("Open", "打开"),()=>render("flowDrag"));
                 Toggle("Sidebar", "侧边栏", Settings.Sidebar, value => { Settings.Sidebar = value; render(page); });
                 if (Settings.Sidebar) { Choice("Sidebar position", "侧边栏位置", [T("Left", "左侧"), T("Right", "右侧")], Settings.SidebarRight ? 1 : 0, i => Settings.SidebarRight = i == 1); Toggle("Pinned tabs as rows", "固定标签页使用列表", Settings.ListsPins, value => { Settings.ListsPins = value; RefreshTabLists(); }); }
                 if (!Settings.Sidebar) Toggle("Navigation buttons on the left", "左侧显示导航按钮", Settings.NavigationLeft, value => Settings.NavigationLeft = value);
@@ -126,15 +128,11 @@ public sealed partial class MainWindow
                 break;
             case "bookmarks":
                 ActionRow("Bookmark manager", "书签管理器", T("Open", "打开"), async () => { DismissOverlay(); await ShowBookmarksAsync(); }, T("Import, edit, delete and organize bookmarks and folders.", "导入、编辑、删除及整理书签和文件夹。"));
-                card = new StackPanel();
-                body.Children.Add(new Border { CornerRadius = new(12), BorderBrush = Brush("Hairline"), BorderThickness = new(1), Child = card });
-                Toggle("Bookmarks bar folder icons", "书签栏文件夹图标", Settings.BookmarkBarFolderIcons, value => { Settings.BookmarkBarFolderIcons = value; RefreshBookmarkBar(); });
-                Toggle("Show bookmark website icons", "书签显示网站图标", Settings.BookmarkWebsiteIcons, value => { Settings.BookmarkWebsiteIcons = value; RefreshBookmarkBar(); });
                 break;
-            case "superDrag":
-                BuildSuperDragSettings(body); break;
             case "shortcuts":
                 BuildShortcutSettings(card); break;
+            case "flowDrag":
+                body.Children.Clear();BuildFlowDragSettings(body,render);break;
             case "extensions":
                 ActionRow("Chrome Web Store", "Chrome 扩展商店", T("Browse", "浏览"), () => { DismissOverlay(); AddTab("https://chromewebstore.google.com/"); });
                 Input("Store link or extension ID", "商店链接或扩展 ID", "", async value => await InstallStoreExtensionAsync(value), "https://chromewebstore.google.com/detail/…");

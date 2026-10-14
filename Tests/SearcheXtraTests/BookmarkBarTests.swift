@@ -65,6 +65,62 @@ final class BookmarkBarTests: XCTestCase {
         XCTAssertEqual(browser.tabs.filter { tab in opened.contains { $0.id == tab.id } }.map { $0.id }, opened.map { $0.id })
     }
 
+    func testExplicitNewTabPickAlwaysStaysInBackgroundAndKeepsListOpen() {
+        Shared.prefs.lazyTabs = true
+        for mode in BookmarkBarOpening.allCases {
+            Shared.prefs.bookmarkBarOpening = mode
+            let browser = Browser(record: WindowRecord(), opensStartPage: false)
+            defer { for tab in browser.tabs { tab.close() } }
+            let original = URL(string: "http://127.0.0.1:1/original")!
+            browser.visit(original)
+            let source = browser.active!
+            browser.bookmarking = true
+            browser.bookmarksOpen = true
+            let url = URL(string: "http://127.0.0.1:1/bookmark")!
+            browser.pickBookmark(url, inNewTab: true)
+            XCTAssertEqual(browser.tabs.count, 2)
+            XCTAssertEqual(browser.activeID, source.id)
+            XCTAssertEqual(source.address, original)
+            XCTAssertEqual(browser.tabs.first { $0.id != source.id }?.pending, url)
+            XCTAssertTrue(browser.bookmarking)
+            XCTAssertTrue(browser.bookmarksOpen)
+        }
+    }
+
+    func testExplicitBackgroundBookmarkKeepsPrivateStore() {
+        Shared.prefs.lazyTabs = true
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        defer { for tab in browser.tabs { tab.close() } }
+        browser.newShyTab()
+        let source = browser.active!
+        source.setAddressOptimistically(URL(string: "https://private.example/original")!)
+        let opened = browser.openBookmarkInBackground(URL(string: "https://private.example/bookmark")!)
+        XCTAssertEqual(browser.activeID, source.id)
+        XCTAssertTrue(opened.shy)
+        XCTAssertTrue(opened.store === source.store)
+        XCTAssertFalse(opened.store.isPersistent)
+    }
+
+    func testBookmarkFolderPopupStaysBelowBarAndCloses() {
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        defer { for tab in browser.tabs { tab.close() } }
+        let folder = browser.bookmarks.insert(.folder("Popup test", [.site("Bookmark", URL(string: "https://example.com")!)]), into: nil)
+        defer { browser.bookmarks.remove(folder.id); BookmarkBarPanel.hide() }
+        let window = NSWindow(contentRect: NSRect(x: 160, y: 200, width: 600, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
+        let anchor = NSView(frame: NSRect(x: 20, y: 350, width: 100, height: 22))
+        window.contentView?.addSubview(anchor)
+        BookmarkBarPanel.show(folder, in: browser, from: anchor)
+        XCTAssertTrue(BookmarkBarPanel.isShown)
+        let panel = window.childWindows?.first
+        XCTAssertNotNil(panel)
+        XCTAssertTrue(panel!.isVisible)
+        let spot = window.convertToScreen(anchor.convert(anchor.bounds, to: nil))
+        XCTAssertLessThanOrEqual(panel!.frame.maxY, spot.minY)
+        BookmarkBarPanel.hide()
+        XCTAssertFalse(BookmarkBarPanel.isShown)
+        XCTAssertTrue(window.childWindows?.isEmpty ?? true)
+    }
+
     func testExtensionResultCountsRejectNegativeValues() throws {
         guard #available(macOS 15.4, *) else { throw XCTSkip("Extensions require macOS 15.4") }
         XCTAssertThrowsError(try ExtensionShims.resultLimit(-1, default: 10))

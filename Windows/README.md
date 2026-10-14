@@ -6,7 +6,7 @@ Windows 版使用 C# / .NET 8、WinUI 3 和 WebView2，与 macOS 的 Swift 源�
 
 - **仅支持 Windows 10 1809（build 17763）及更新版本，包含 Windows 11。**
 - **仅支持 x86_64 / x64 系统。** 不提供 x86 或 ARM64 构建；启动时检查系统架构。
-- 推荐运行 `SearcheXtra-2.0.5-win-x64-setup.exe` 安装。安装器检测 .NET 8 x64、Windows App SDK 1.8 x64 和 WebView2；缺失时从微软下载并安装，已有兼容版本会跳过。补装 .NET 时需要管理员权限和网络。
+- 推荐运行 `SearcheXtra-2.1.0-win-x64-setup.exe` 安装。安装器检测 .NET 8 x64、Windows App SDK 1.8 x64 和 WebView2；缺失时从微软下载并安装，已有兼容版本会跳过。补装 .NET 时需要管理员权限和网络。
 - ZIP 为依赖系统运行库的便携包，需先安装上述运行库；解压整个目录后运行 `SearcheXtra.exe`。
 - 应用目录不携带 .NET 或 Windows App SDK 运行库，只保留必要的托管接口、部署引导库与应用依赖。共享运行库不会随卸载应用而删除。
 - 此本地构建未作代码签名。
@@ -94,8 +94,8 @@ Remove-Item Env:SEARCHEXTRA_TEST_MV2_PACKAGE
 
 ```text
 Windows/artifacts/win-x64/SearcheXtra.exe
-Windows/artifacts/SearcheXtra-2.0.5-win-x64.zip
-Windows/artifacts/SearcheXtra-2.0.5-win-x64-setup.exe
+Windows/artifacts/SearcheXtra-2.1.0-win-x64.zip
+Windows/artifacts/SearcheXtra-2.1.0-win-x64-setup.exe
 Windows/artifacts/SHA256SUMS.txt
 ```
 

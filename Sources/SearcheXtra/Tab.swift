@@ -28,7 +28,7 @@ enum Web {
     /// included, and registering a name twice is a hard crash.
     @MainActor static func release(_ controller: WKUserContentController) {
         for name in [ScrollRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name,
-                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, IconRelay.name, SuperDragRelay.name] {
+                     StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, IconRelay.name, FlowDragRelay.name] {
             controller.removeScriptMessageHandler(forName: name, contentWorld: world)
             controller.removeScriptMessageHandler(forName: name, contentWorld: .page)
         }
@@ -471,9 +471,6 @@ final class Tab: ObservableObject, Identifiable {
     /// The middle button was let go over a link. The browser opens it in a
     /// tab of its own beside this one, without leaving the page you are on.
     var onMiddleClick: ((Tab, URL) -> Void)?
-    var onSuperDrag: ((Tab, SuperDragRequest) -> Void)?
-    var onSuperDragSettings: (() -> Void)?
-    let superDragRelay = SuperDragRelay()
     /// Sent where this tab's view can't go: from an extension's page to the
     /// web or another extension, or from the web to an extension's page.
     /// WebKit keeps each kind of view to its own pages, so the tab has to be
@@ -487,6 +484,9 @@ final class Tab: ObservableObject, Identifiable {
     private let veils_ = VeilRelay()
     private let forms = FormRelay()
     private let images = ImageRelay()
+    let flowDrag=FlowDragRelay()
+    func refreshFlowDrag() {guard let web=built else{return};flowDrag.configure(web);arm(hiding:veils)}
+    var onFlowDrag:((Tab,FlowDragRequest)->Void)?
     private let shop = StoreRelay()
     private let iconChanges = IconRelay()
     private let middles = MiddleRelay()
@@ -611,7 +611,6 @@ final class Tab: ObservableObject, Identifiable {
             guard let self else { return }
             self.onSearch?(self, text)
         }
-        web.onSuperDragSettings = { [weak self] in self?.onSuperDragSettings?() }
         web.holdForFirstFrame()
         // Pages follow the appearance of the window they are drawn in, and the
         // window follows Settings › Appearance — so a site that honours
@@ -635,6 +634,8 @@ final class Tab: ObservableObject, Identifiable {
         controller.add(relay, contentWorld: Web.world, name: ScrollRelay.name)
         controller.add(veils_, contentWorld: Web.world, name: VeilRelay.name)
         controller.add(images, contentWorld: Web.world, name: ImageRelay.name)
+        flowDrag.tab=self
+        controller.add(flowDrag,contentWorld:Web.world,name:FlowDragRelay.name)
         controller.add(shop, contentWorld: Web.world, name: StoreRelay.name)
         controller.add(iconChanges, contentWorld: Web.world, name: IconRelay.name)
         controller.add(forms, contentWorld: Web.world, name: FormRelay.name)
@@ -642,8 +643,6 @@ final class Tab: ObservableObject, Identifiable {
         hovered.tab = self
         controller.add(hovered, contentWorld: .defaultClient, name: HoveredLink.name)
         controller.add(middles, contentWorld: Web.world, name: MiddleRelay.name)
-        superDragRelay.tab = self
-        controller.add(superDragRelay,contentWorld:Web.world,name:SuperDragRelay.name)
         Shield.shared.protect(controller, for: address?.host)
         built = web
         // A tab muted before it went to sleep wakes muted.
@@ -737,7 +736,6 @@ final class Tab: ObservableObject, Identifiable {
         guard let built else { return }
         let controller = built.configuration.userContentController
         controller.removeAllUserScripts()
-        controller.addUserScript(WKUserScript(source:SuperDragSettings.shared.script,injectionTime:.atDocumentStart,forMainFrameOnly:true,in:Web.world))
         controller.addUserScript(
             WKUserScript(source: ScrollRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
         )
@@ -763,6 +761,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: ImageRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
         )
+        controller.addUserScript(WKUserScript(source:FlowDragSettings.script,injectionTime:.atDocumentStart,forMainFrameOnly:false,in:Web.world))
         // The store's "Add to Search" only where Search can add extensions.
         // Before macOS 15.4 it was drawn all the same, and pressing it did
         // nothing at all; Settings › Extensions says what they need instead.
@@ -1521,7 +1520,6 @@ final class PageView: WKWebView {
     /// The page's own right-click menu. WebKit puts extensions' items for the
     /// page in it itself; Search adding them again showed each one twice.
     override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {
-        addSuperDragMenu(menu)
         super.willOpenMenu(menu, with: event)
         // WebKit names it for a window, but a new window's page arrives here
         // as a new tab (Browser's createWebViewWith), so it says so. The tab
@@ -1569,7 +1567,6 @@ final class PageView: WKWebView {
     static var picking: String?
     var searchName: (() -> String?)?
     var onSearch: ((String) -> Void)?
-    var onSuperDragSettings: (() -> Void)?
     private var selection: String?
 
     /// The words selected where the right-click was, read when the menu

@@ -8,7 +8,7 @@ public enum BookmarkOpening { Default, Background, Foreground }
 public sealed record Login(string Origin, string Username, string Password);
 public sealed class BrowserSettings
 {
-    public SuperDragConfig SuperDrag { get; set; } = new();
+    public FlowDragConfig FlowDrag {get;set;}=new();
     public string Language { get; set; } = "system";
     public string Theme { get; set; } = "system";
     public bool Sidebar { get; set; }

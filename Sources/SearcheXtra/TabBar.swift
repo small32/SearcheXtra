@@ -188,12 +188,7 @@ struct TabBar: View {
         .onAppear { SpaceSwipe.shared.start(for: browser) }
         // A link dragged onto the row opens there.
         .onDrop(of: [.url, .text], isTargeted: $landing) { providers in
-            if let tab=browser.active,let pending=tab.superDragRelay.pending,
-               SuperDragSettings.shared.config.rules.contains(where:{$0.object==pending.object && $0.region=="tabs"}),
-               let request=tab.superDragRelay.take("tabs"),SuperDrag.resolve(SuperDragSettings.shared.config,request,page:tab.address) != nil {
-                browser.performSuperDrag(tab,request);return true
-            }
-            return browser.take(providers)
+            browser.take(providers)
         }
         .background {
             ZStack {

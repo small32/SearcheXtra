@@ -10,83 +10,6 @@ namespace SearcheXtra.Windows;
 
 public sealed partial class MainWindow
 {
-    private MenuFlyout? openBookmarkFolderMenu;
-    private readonly Dictionary<string, Task<string?>> bookmarkIconRequests = new();
-    private readonly Dictionary<string, Task<Microsoft.UI.Xaml.Media.ImageSource?>> bookmarkImages = new();
-
-    private Task<Microsoft.UI.Xaml.Media.ImageSource?> LoadBookmarkIconAsync(string address)
-    {
-        var site = new Uri(address).GetLeftPart(UriPartial.Authority);
-        var known = views.Values.FirstOrDefault(page => AddressParser.IsWeb(page.Control.CoreWebView2?.Source ?? "") && new Uri(page.Control.CoreWebView2!.Source).GetLeftPart(UriPartial.Authority) == site)?.WebsiteIcon;
-        var key = address + "|" + known;
-        if (bookmarkImages.TryGetValue(key, out var pending)) return pending;
-        return bookmarkImages[key] = Load();
-        async Task<Microsoft.UI.Xaml.Media.ImageSource?> Load()
-        {
-            var candidates = new List<string>();
-            if (AddressParser.IsWeb(known ?? "")) candidates.Add(known!);
-            candidates.Add(site + "/favicon.ico");
-            for (var index = 0; index < candidates.Count; index++) {
-                try {
-                    using var client = new HttpClient(new HttpClientHandler { UseCookies = false }) { Timeout = TimeSpan.FromSeconds(8) };
-                    using var response = await client.GetAsync(candidates[index]);
-                    response.EnsureSuccessStatusCode();
-                    var bytes = await response.Content.ReadAsByteArrayAsync();
-                    using var stream = new global::Windows.Storage.Streams.InMemoryRandomAccessStream();
-                    using (var writer = new global::Windows.Storage.Streams.DataWriter(stream)) {
-                        writer.WriteBytes(bytes); await writer.StoreAsync(); writer.DetachStream();
-                    }
-                    stream.Seek(0);
-                    if (response.Content.Headers.ContentType?.MediaType == "image/svg+xml" || new Uri(candidates[index]).AbsolutePath.EndsWith(".svg", StringComparison.OrdinalIgnoreCase)) {
-                        var svg = new Microsoft.UI.Xaml.Media.Imaging.SvgImageSource();
-                        if (await svg.SetSourceAsync(stream) == Microsoft.UI.Xaml.Media.Imaging.SvgImageSourceLoadStatus.Success) return svg;
-                    } else {
-                        var bitmap = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
-                        await bitmap.SetSourceAsync(stream);
-                        if (bitmap.PixelWidth > 0 && bitmap.PixelHeight > 0) return bitmap;
-                    }
-                } catch (HttpRequestException) { } catch (TaskCanceledException) { } catch (System.Runtime.InteropServices.COMException) { } catch (ArgumentException) { }
-                if (index == candidates.Count - 1 && await BookmarkDeclaredIconAsync(address) is { } declared && !candidates.Contains(declared)) candidates.Add(declared);
-            }
-            return null;
-        }
-    }
-
-    private async void SetBookmarkIcon(Image image, TextBlock fallback, string address)
-    {
-        if (await LoadBookmarkIconAsync(address) is { } source) {
-            image.Source = source;
-            fallback.Visibility = Visibility.Collapsed;
-        }
-    }
-
-    private async void SetBookmarkMenuIcon(MenuFlyoutItem item, string address)
-    {
-        if (await LoadBookmarkIconAsync(address) is { } source && Settings.BookmarkWebsiteIcons)
-            item.Icon = new ImageIcon { Source = source };
-    }
-
-    private Task<string?> BookmarkDeclaredIconAsync(string address)
-    {
-        if (bookmarkIconRequests.TryGetValue(address, out var request)) return request;
-        return bookmarkIconRequests[address] = Load();
-        async Task<string?> Load()
-        {
-            try {
-                using var client = new HttpClient(new HttpClientHandler { UseCookies = false }) { Timeout = TimeSpan.FromSeconds(8) };
-                var html = await client.GetStringAsync(address);
-                foreach (System.Text.RegularExpressions.Match tag in System.Text.RegularExpressions.Regex.Matches(html, @"<link\b[^>]*>", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) {
-                    string Attribute(string name) {
-                        var match = System.Text.RegularExpressions.Regex.Match(tag.Value, "\\b" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                        return System.Net.WebUtility.HtmlDecode(match.Groups.Cast<System.Text.RegularExpressions.Group>().Skip(1).FirstOrDefault(group => group.Success)?.Value ?? "");
-                    }
-                    if (!Attribute("rel").Split(' ').Contains("icon", StringComparer.OrdinalIgnoreCase)) continue;
-                    if (Uri.TryCreate(new Uri(address), Attribute("href"), out var icon) && AddressParser.IsWeb(icon.AbsoluteUri)) return icon.AbsoluteUri;
-                }
-            } catch (HttpRequestException) { } catch (TaskCanceledException) { }
-            return null;
-        }
-    }
     private async Task<string?> PromptAsync(string title, string placeholder, string value = "")
     {
         var box = new TextBox { PlaceholderText = placeholder, Text = value, MinWidth = 320 };
@@ -95,12 +18,11 @@ public sealed partial class MainWindow
 
     private void RefreshBookmarkBar()
     {
-        openBookmarkFolderMenu?.Hide();
-        openBookmarkFolderMenu = null;
         BookmarkRow.Children.Clear();
         BookmarkRow.Spacing = Settings.CompactBookmarksBar ? 0 : 2;
         BookmarkRow.Padding = new(Settings.CompactBookmarksBar ? 6 : 10, 2, Settings.CompactBookmarksBar ? 6 : 10, 2);
         BookmarkRow.ContextFlyout = BookmarkBarContextMenu(null);
+        BookmarkScroller.ContextFlyout = BookmarkBarContextMenu(null);
         foreach (var node in store.Bookmarks)
         {
             var button = new Button { Padding = new(Settings.CompactBookmarksBar ? 4 : 8, 3, Settings.CompactBookmarksBar ? 4 : 8, 3), MaxWidth = 190, Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new(0) };
@@ -108,24 +30,17 @@ public sealed partial class MainWindow
             if (node.Children != null) {
                 if (Settings.BookmarkBarFolderIcons) row.Children.Add(Glyph("folder"));
             } else if (Settings.BookmarkWebsiteIcons && node.Url is { } address && AddressParser.IsWeb(address)) {
-                var site = new Uri(address);
-                var icon = new Image { Width = 13, Height = 13 };
-                var fallback = new TextBlock { Text = site.Host.Replace("www.", "")[..1].ToUpperInvariant(), FontSize = 10, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-                var mark = new Grid { Width = 13, Height = 13 };
-                mark.Children.Add(fallback); mark.Children.Add(icon);
-                SetBookmarkIcon(icon, fallback, address);
-                row.Children.Add(mark);
+                row.Children.Add(BookmarkWebsiteIcon(address, 13));
             }
             row.Children.Add(new TextBlock { Text = node.Title, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis });
             button.Content = row;
-            button.ContextFlyout = BookmarkBarContextMenu(node);
+            BindBookmarkInteractions(button, node);
             ToolTipService.SetToolTip(button, node.Url ?? node.Title);
             if (node.Children != null)
             {
-                var menu = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft, OverlayInputPassThroughElement = BookmarkRow };
+                var menu = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft };
                 foreach (var item in BookmarkMenuItems(node.Children)) menu.Items.Add(item);
                 menu.Opening += (_, _) => {
-                    openBookmarkFolderMenu = menu;
                     var bottom = button.TransformToVisual(Root).TransformPoint(new(0, button.ActualHeight)).Y;
                     var style = new Style(typeof(MenuFlyoutPresenter));
                     style.Setters.Add(new Setter(FrameworkElement.MaxHeightProperty, Math.Max(1, Root.ActualHeight - bottom - 16)));
@@ -133,16 +48,9 @@ public sealed partial class MainWindow
                     if (Settings.CompactBookmarksBar) style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(4)));
                     menu.MenuFlyoutPresenterStyle = style;
                 };
-                menu.Closed += (_, _) => { if (openBookmarkFolderMenu == menu) openBookmarkFolderMenu = null; };
-                button.PointerEntered += (_, _) => {
-                    if (openBookmarkFolderMenu is not { } current || current == menu) return;
-                    current.Hide();
-                    menu.ShowAt(button);
-                };
                 button.Flyout = menu;
             }
             else button.Click += (_, _) => OpenBookmark(node.Url!);
-            if (node.Url != null) EnableBookmarkMiddleClick(button, node.Url);
             BookmarkRow.Children.Add(button);
         }
     }
@@ -153,6 +61,8 @@ public sealed partial class MainWindow
             if (node.Children != null)
             {
                 var sub = new MenuFlyoutSubItem { Text = node.Title };
+                if (Settings.BookmarkBarFolderIcons) sub.Icon = new FontIcon { Glyph = "\uE8B7", FontSize = 13 };
+                BindBookmarkInteractions(sub, node);
                 CompactBookmarkMenuItem(sub);
                 foreach (var child in BookmarkMenuItems(node.Children)) sub.Items.Add(child);
                 yield return sub;
@@ -160,32 +70,18 @@ public sealed partial class MainWindow
             else
             {
                 var item = new MenuFlyoutItem { Text = node.Title };
+                if (Settings.BookmarkWebsiteIcons && node.Url is { } url && AddressParser.IsWeb(url)) {
+                    item.Icon = new FontIcon { Glyph = "\uE774", FontSize = 13 };
+                    BindBookmarkIcon(item, url, source => {
+                        item.Icon = source == null ? new FontIcon { Glyph = "\uE774", FontSize = 13 } : new ImageIcon { Source = source };
+                    });
+                }
+                BindBookmarkInteractions(item, node);
                 CompactBookmarkMenuItem(item);
                 item.Click += (_, _) => OpenBookmark(node.Url!);
-                if (node.Url is { } address) {
-                    EnableBookmarkMiddleClick(item, address);
-                    if (Settings.BookmarkWebsiteIcons && AddressParser.IsWeb(address)) SetBookmarkMenuIcon(item, address);
-                }
                 yield return item;
             }
         }
-    }
-    private void EnableBookmarkMiddleClick(UIElement element, string address)
-    {
-        var pressed = false;
-        element.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, args) => {
-            if (!args.GetCurrentPoint(element).Properties.IsMiddleButtonPressed) return;
-            pressed = true; args.Handled = true;
-        }), true);
-        element.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, args) => {
-            if (!pressed) return;
-            pressed = false; args.Handled = true;
-            var point = args.GetCurrentPoint(element);
-            if (element is FrameworkElement view && point.Position.X >= 0 && point.Position.Y >= 0 && point.Position.X < view.ActualWidth && point.Position.Y < view.ActualHeight)
-                AddTab(address, false, active?.IsPrivate == true);
-        }), true);
-        element.PointerCanceled += (_, _) => pressed = false;
-        element.PointerExited += (_, _) => pressed = false;
     }
     private void CompactBookmarkMenuItem(Control item)
     {
@@ -219,6 +115,14 @@ public sealed partial class MainWindow
     {
         var panel = new StackPanel { Spacing = 10, Width = Math.Min(620, Math.Max(280, Root.ActualWidth - 100)) };
         var search = new TextBox { PlaceholderText = T("Search bookmarks", "搜索书签") };
+        var folderIconOption = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        folderIconOption.Children.Add(new TextBlock { Text = T("Bookmarks bar folder icons", "书签栏文件夹图标"), VerticalAlignment = VerticalAlignment.Center });
+        var folderIconSwitch = new ToggleSwitch { IsOn = Settings.BookmarkBarFolderIcons, OnContent = "", OffContent = "" };
+        folderIconSwitch.Toggled += (_, _) => { Settings.BookmarkBarFolderIcons = folderIconSwitch.IsOn; RefreshBookmarkBar(); ScheduleSave(); };
+        folderIconOption.Children.Add(folderIconSwitch);
+        folderIconOption.Children.Add(new TextBlock { Text = T("Show bookmark website icons", "书签显示网站图标"), VerticalAlignment = VerticalAlignment.Center });
+        var websiteIconSwitch = new ToggleSwitch { IsOn = Settings.BookmarkWebsiteIcons, OnContent = "", OffContent = "" };
+        folderIconOption.Children.Add(websiteIconSwitch);
         var list = new ListView { Name = "BookmarkManagerList", Height = Math.Clamp(Root.ActualHeight - 370, 100, 360), SelectionMode = ListViewSelectionMode.Multiple, AllowDrop = true, IsSwipeEnabled = false };
         Bookmark? currentFolder = BookmarkImport.Flatten(store.Bookmarks).FirstOrDefault(node => node.Id == folderId && node.Children != null);
         var folderRail = new StackPanel { Spacing = 4, Width = 160 };
@@ -244,6 +148,12 @@ public sealed partial class MainWindow
         list.DragOver += (_, args) => { args.AcceptedOperation = CanDrop(currentFolder) ? global::Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move : global::Windows.ApplicationModel.DataTransfer.DataPackageOperation.None; args.Handled = true; };
         list.Drop += (_, args) => { if (CanDrop(currentFolder)) DropOn(currentFolder); args.Handled = true; };
         List<Bookmark> Current() => currentFolder?.Children ?? store.Bookmarks;
+        async Task ManagerDialog(Func<Task> action) {
+            var folder = currentFolder?.Id;
+            DismissOverlay();
+            await action();
+            await ShowBookmarksAsync(folder);
+        }
         void Changed() { store.Notify(); ScheduleSave(); Refresh(); }
         List<Bookmark>? Parent(Bookmark item, List<Bookmark> nodes) => nodes.Contains(item) ? nodes : nodes.Select(b => b.Children == null ? null : Parent(item, b.Children)).FirstOrDefault(p => p != null);
         List<Bookmark> Selected() => list.SelectedItems.OfType<ListViewItem>().Select(item => (Bookmark)item.Tag).ToList();
@@ -270,12 +180,21 @@ public sealed partial class MainWindow
             }
             void Folders(IEnumerable<Bookmark> nodes, int depth) { foreach (var folder in nodes.Where(b => b.Children != null)) { FolderButton(folder, depth); Folders(folder.Children!, depth + 1); } }
             FolderButton(null, 0); Folders(store.Bookmarks, 1);
+            list.ContextFlyout = BookmarkBarContextMenu(currentFolder, Refresh, ManagerDialog);
             filtered = (search.Text.Trim().Length == 0 ? Current() : BookmarkImport.Flatten(store.Bookmarks).Where(b => b.Title.Contains(search.Text.Trim(), StringComparison.OrdinalIgnoreCase) || (b.Url?.Contains(search.Text.Trim(), StringComparison.OrdinalIgnoreCase) ?? false))).ToList();
             list.ItemsSource = filtered.Select(node => {
-                var label = new Border { CanDrag = true, Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), Padding = new(4), Child = new TextBlock { Text = (node.Children != null ? "▱ " : "") + node.Title + "\n" + node.Url, TextTrimming = TextTrimming.CharacterEllipsis } };
+                var row = new Grid();
+                row.ColumnDefinitions.Add(new() { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });
+                UIElement? icon = node.Children != null ? Glyph("folder") : Settings.BookmarkWebsiteIcons && node.Url is { } address && AddressParser.IsWeb(address) ? BookmarkWebsiteIcon(address, 16) : null;
+                if (icon != null) { row.Children.Add(icon); if (icon is FrameworkElement mark) mark.Margin = new(0, 0, 8, 0); }
+                var text = new TextBlock { Text = node.Title + (node.Url == null ? "" : "\n" + node.Url), TextTrimming = TextTrimming.CharacterEllipsis };
+                Grid.SetColumn(text, 1); row.Children.Add(text);
+                var label = new Border { CanDrag = true, Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), Padding = new(4), Child = row };
                 label.DragStarting += (_, args) => BeginDrag(node, args);
                 label.DropCompleted += (_, _) => draggingBookmarks.Clear();
                 var item = new ListViewItem { Tag = node, AllowDrop = true, HorizontalContentAlignment = HorizontalAlignment.Stretch, Content = label };
+                BindBookmarkInteractions(item, node, Refresh, ManagerDialog);
                 (Bookmark? folder, int? index) Target(DragEventArgs args) {
                     var y = args.GetPosition(item).Y / Math.Max(1, item.ActualHeight);
                     if (node.Children != null && y >= .25 && y <= .75) return (node, null);
@@ -288,6 +207,7 @@ public sealed partial class MainWindow
                 return item;
             }).ToList();
         }
+        websiteIconSwitch.Toggled += (_, _) => { Settings.BookmarkWebsiteIcons = websiteIconSwitch.IsOn; RefreshBookmarkBar(); Refresh(); ScheduleSave(); };
         list.DoubleTapped += (_, _) => {
             if (list.SelectedIndex < 0) return;
             var node = filtered[list.SelectedIndex];
@@ -365,7 +285,7 @@ public sealed partial class MainWindow
         foreach (var button in new[] { selectAll, open, edit, remove, up, down }) buttons.Children.Add(button);
         var tools = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         foreach (var button in new[] { add, create, sort, import, export }) tools.Children.Add(button);
-        panel.Children.Add(search); panel.Children.Add(tools); panel.Children.Add(content); panel.Children.Add(buttons);
+        panel.Children.Add(search); panel.Children.Add(folderIconOption); panel.Children.Add(tools); panel.Children.Add(content); panel.Children.Add(buttons);
         var scroll = new ScrollViewer { Content = panel, Width = panel.Width, MaxHeight = Math.Max(120, Root.ActualHeight - 150), HorizontalScrollBarVisibility = ScrollBarVisibility.Auto };
         await ShowCardAsync(T("Bookmark manager", "书签管理器"), scroll, fitWindow: true);
     }

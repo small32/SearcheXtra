@@ -46,12 +46,11 @@ public sealed partial class MainWindow
                                 {
                                     using var stream = client.GetStream();
                                     var request = new byte[4096];
-                                    var length=await stream.ReadAsync(request,cancellation.Token);
-                                    if (length == 0) return;
+                                    var requestLength=await stream.ReadAsync(request,cancellation.Token);if(requestLength==0)return;
                                     var html = "<!doctype html><html><head><title>SearcheXtra fixture</title></head><body><nav>Navigation fixture</nav><article><h1>Local browser test</h1><p>Native Windows shell, WebView2 content. " + new string('x', 500) + "</p><p>Article paragraph " + new string('y', 400) + "</p><input value='original'><form><input autocomplete='username'><input type='password'></form><div id='hide-me'>Hidden element fixture</div></article></body></html>";
-                                    var isDragImage=Encoding.ASCII.GetString(request,0,length).StartsWith("GET /super-drag.png ");
-                                    var body = isDragImage ? await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory,"Assets","AppIcon.png")):Encoding.UTF8.GetBytes(html);
-                                    var header = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: {(isDragImage ? "image/png":"text/html; charset=utf-8")}\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+                                    var image=Encoding.ASCII.GetString(request,0,requestLength).StartsWith("GET /flow-image.png ");
+                                    var body=image?await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory,"Assets","AppIcon.png")):Encoding.UTF8.GetBytes(html);
+                                    var header=Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: {(image?"image/png":"text/html; charset=utf-8")}\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
                                     await stream.WriteAsync(header, cancellation.Token); await stream.WriteAsync(body, cancellation.Token);
                                 }
                                 catch (OperationCanceledException) { }
@@ -64,13 +63,9 @@ public sealed partial class MainWindow
                 }
             });
             var fixture = $"http://127.0.0.1:{port}/";
-            if (Environment.GetEnvironmentVariable("SEARCHEXTRA_SUPER_DRAG_TEST_ONLY") == "1") {
-                await Task.Delay(250);
-                await VerifySuperDragAsync(fixture,Check);
-                await VerifyBookmarkMiddleInputAsync(fixture,Check);
-                await File.WriteAllTextAsync(reportPath,JsonSerializer.Serialize(new { success=true,checks,measurements }));
-                return;
-            }
+            if(Environment.GetEnvironmentVariable("SEARCHEXTRA_BOOKMARK_ICON_TEST_ONLY")=="1"){await Task.Delay(250);await VerifyBookmarkIconsAsync(Check);await VerifyBookmarkSiteIconAsync(Check);await File.WriteAllTextAsync(reportPath,JsonSerializer.Serialize(new{success=true,checks,measurements}));return;}
+            if(Environment.GetEnvironmentVariable("SEARCHEXTRA_BOOKMARK_TEST_ONLY")=="1"){await Task.Delay(250);await VerifyBookmarkInteractionsAsync(fixture,Check);await File.WriteAllTextAsync(reportPath,JsonSerializer.Serialize(new{success=true,checks,measurements}));return;}
+            if(Environment.GetEnvironmentVariable("SEARCHEXTRA_FLOW_DRAG_TEST_ONLY")=="1"){await Task.Delay(250);await VerifyFlowDragAsync(fixture,Check);await File.WriteAllTextAsync(reportPath,JsonSerializer.Serialize(new{success=true,checks,measurements}));return;}
             var watch = Stopwatch.StartNew();
             var first = AddTab(fixture, false);
             await SelectAsync(first);
@@ -591,8 +586,6 @@ public sealed partial class MainWindow
             }
             await VerifySitePermissionsAsync(fixture, Check);
             await VerifyBookmarkSiteIconAsync(Check);
-            await VerifyBookmarkMiddleInputAsync(fixture, Check);
-            await VerifySuperDragAsync(fixture,Check);
             await VerifyPrivacyAndTitleRegressionsAsync(Check);
             await File.WriteAllTextAsync(reportPath, JsonSerializer.Serialize(new { success = true, checks, measurements }, new JsonSerializerOptions { WriteIndented = true }));
         }

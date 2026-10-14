@@ -1717,18 +1717,6 @@ final class Browser: NSObject, ObservableObject {
     /// read where they are used.
     private func follow() {
         followStore()
-        SuperDragSettings.shared.$config.dropFirst().sink { [weak self] _ in
-            DispatchQueue.main.async {
-                guard let self else { return }
-                let pages = self.tabs + self.parkedTabs + [self.peekTab].compactMap { $0 }
-                let script = "window.__sxSuperDrag?.configure(" + SuperDragSettings.shared.options + ")"
-                for tab in pages {
-                    tab.superDragRelay.pending = nil
-                    tab.arm(hiding: self.curtain.css(on: self.curtain.host(of: tab.address)))
-                    tab.built?.evaluateJavaScript(script, in: nil, in: Web.world) { _ in }
-                }
-            }
-        }.store(in:&bag)
         // Spaces turned off: back to the first, whose tabs are the ones there
         // were before (see Spaces.swift).
         prefs.$usesSpaces
@@ -3488,20 +3476,14 @@ final class Browser: NSObject, ObservableObject {
         }
     }
 
-    /// A bookmark picked from the button's list or the full one. Either
-    /// goes as the page starts: the list off the button used to stay open
-    /// over the page it had just sent you to. A middle-click opens it in a
-    /// new tab behind this one and leaves the list open for the next; with
-    /// ⇧ it goes to the new tab, and the list closes.
+    /// Ordinary picks close the list. Explicit new-tab picks stay behind
+    /// the current page and leave the list open for the next bookmark.
     func pickBookmark(_ url: URL, inNewTab: Bool = false) {
-        let foreground = !inNewTab || NSApp.currentEvent?.modifierFlags.contains(.shift) == true
-        if foreground {
+        if inNewTab {
+            openBookmarkInBackground(url)
+        } else {
             bookmarking = false
             bookmarksOpen = false
-        }
-        if inNewTab {
-            open(url, foreground: foreground, from: active, mayWait: true)
-        } else {
             visit(url)
         }
     }
@@ -3760,6 +3742,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func prepare(_ tab: Tab) {
+        tab.onFlowDrag={ [weak self] source,request in self?.performFlowDrag(source,request) }
         tab.delegate = self
         // With two pages up, the keys going to the other one — Tab walked
         // past the last field of this one — make it the focused page, so the
@@ -3801,8 +3784,6 @@ final class Browser: NSObject, ObservableObject {
         // it does in every other browser (see MiddleRelay).
         // From a private tab, the new one is private too, as for ⌘-click.
         tab.onMiddleClick = { [weak self] tab, url in self?.open(url, foreground: false, from: tab, mayWait: true) }
-        tab.onSuperDrag = { [weak self] tab,request in self?.performSuperDrag(tab,request) }
-        tab.onSuperDragSettings = { [weak self] in Store.settings.set("superDrag",forKey:"settings.page");self?.tuning=true }
         tab.onCross = { [weak self] tab, url in self?.replace(tab, going: url) }
 
         // The caret in a sign-in box: the accounts kept for this site hang

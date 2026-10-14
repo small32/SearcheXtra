@@ -148,7 +148,6 @@ public sealed partial class MainWindow
         var server = new TcpListener(IPAddress.Loopback, 0);
         using var cancellation = new CancellationTokenSource();
         var png = await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.png"));
-        var ico = await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "AppIcon.ico"));
         server.Start();
         var fixture = $"http://127.0.0.1:{((IPEndPoint)server.LocalEndpoint).Port}/";
         var serving = Task.Run(async () =>
@@ -166,11 +165,9 @@ public sealed partial class MainWindow
                             {
                                 using var stream = client.GetStream();
                                 var request = new byte[4096]; var length = await stream.ReadAsync(request, cancellation.Token);
-                                var text = Encoding.ASCII.GetString(request, 0, length);
-                                var icon = text.StartsWith("GET /custom.png ");
-                                var rootIcon = text.StartsWith("GET /favicon.ico ");
-                                var body = icon ? png : rootIcon ? ico : Encoding.UTF8.GetBytes("<!doctype html><head><title>Bookmark icon fixture</title><link rel=icon href=/custom.png></head><body>Bookmark icon</body>");
-                                var header = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: {(icon ? "image/png" : rootIcon ? "image/x-icon" : "text/html")}\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+                                var icon = Encoding.ASCII.GetString(request, 0, length).StartsWith("GET /custom.png ");
+                                var body = icon ? png : Encoding.UTF8.GetBytes("<!doctype html><head><title>Bookmark icon fixture</title><link rel=icon href=/custom.png></head><body>Bookmark icon</body>");
+                                var header = Encoding.ASCII.GetBytes($"HTTP/1.1 200 OK\r\nContent-Type: {(icon ? "image/png" : "text/html")}\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
                                 await stream.WriteAsync(header, cancellation.Token); await stream.WriteAsync(body, cancellation.Token);
                             }
                             catch (IOException) { }
@@ -187,15 +184,6 @@ public sealed partial class MainWindow
         {
             Settings.IconGlyphs = false; Settings.BookmarksBar = true; Settings.BookmarkWebsiteIcons = true;
             store.Bookmarks = [new() { Title = "Site icon", Url = fixture }]; ApplySettings();
-            var unvisited = await LoadBookmarkIconAsync(fixture);
-            check(unvisited is Microsoft.UI.Xaml.Media.Imaging.BitmapImage { PixelWidth: > 0, PixelHeight: > 0 }, "Unvisited bookmark ICO is decoded into visible pixels");
-            var nested = (MenuFlyoutItem)BookmarkMenuItems(store.Bookmarks).Single();
-            var nestedDeadline = DateTime.UtcNow.AddSeconds(10);
-            while (nested.Icon is not ImageIcon && DateTime.UtcNow < nestedDeadline) await Task.Delay(25);
-            check(nested.Icon is ImageIcon { Source: Microsoft.UI.Xaml.Media.Imaging.BitmapImage { PixelWidth: > 0 } }, "Folder dropdown bookmark receives a decoded website icon");
-            Settings.BookmarkWebsiteIcons = false;
-            check(((MenuFlyoutItem)BookmarkMenuItems(store.Bookmarks).Single()).Icon == null, "Website icon switch also hides folder dropdown icons");
-            Settings.BookmarkWebsiteIcons = true;
             tab = AddTab(fixture, false); await SelectAsync(tab); var core = (await GetViewAsync(tab)).Control.CoreWebView2;
             var deadline = DateTime.UtcNow.AddSeconds(15);
             Image? image;
@@ -203,11 +191,11 @@ public sealed partial class MainWindow
             {
                 Root.UpdateLayout();
                 image = BookmarkRow.Children.Count > 0 ? FindAddressPart<Image>(BookmarkRow.Children[0]) : null;
-                if (core.FaviconUri == fixture + "custom.png" && image?.Source == await LoadBookmarkIconAsync(fixture) && image?.Source is Microsoft.UI.Xaml.Media.Imaging.BitmapImage { PixelWidth: > 0 } && !tab.Loading) break;
+                if (core.FaviconUri == fixture + "custom.png" && image?.Source is Microsoft.UI.Xaml.Media.Imaging.BitmapImage { PixelWidth: > 0 } && BookmarkIcons.Shared.SourceUrl(fixture) == fixture + "custom.png" && !tab.Loading) break;
                 if (DateTime.UtcNow > deadline) throw new TimeoutException("Bookmark site icon did not update");
                 await Task.Delay(25);
             } while (true);
-            check(image!.Source == await LoadBookmarkIconAsync(fixture), "Real site icon refreshes bookmarks while tabs show letters");
+            check(image!.Source is Microsoft.UI.Xaml.Media.Imaging.BitmapImage { PixelWidth: > 0 } && BookmarkIcons.Shared.SourceUrl(fixture) == fixture + "custom.png", "Real site icon refreshes bookmarks while tabs show letters");
             check(tab.Favicon == "" && tab.LetterDisplay == "B", "Letter mode remains active after the real favicon update");
         }
         finally

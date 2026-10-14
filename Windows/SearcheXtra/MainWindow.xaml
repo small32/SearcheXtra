@@ -44,7 +44,7 @@
     <Button x:Name="TopSettings" Style="{StaticResource Quiet}" Content="☷" Click="Settings_Click" ToolTipService.ToolTip="Settings"/>
    </StackPanel>
   </Grid>
-  <ScrollViewer x:Name="BookmarkScroller" Grid.Row="1" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled"><StackPanel x:Name="BookmarkRow" Orientation="Horizontal" Spacing="2" Padding="10,2"/></ScrollViewer>
+  <ScrollViewer x:Name="BookmarkScroller" Grid.Row="1" MinHeight="28" Background="Transparent" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled"><StackPanel x:Name="BookmarkRow" Background="Transparent" Orientation="Horizontal" Spacing="2" Padding="10,2"/></ScrollViewer>
   <Grid Grid.Row="2" x:Name="Body"><Grid.ColumnDefinitions><ColumnDefinition x:Name="SidebarColumn" Width="0"/><ColumnDefinition Width="*"/><ColumnDefinition x:Name="RightSidebarColumn" Width="0"/></Grid.ColumnDefinitions>
    <Grid x:Name="Sidebar" Visibility="Collapsed" Padding="10,0" BorderBrush="{ThemeResource Hairline}" BorderThickness="0,0,1,0">
     <Grid.RowDefinitions><RowDefinition Height="52"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="34"/></Grid.RowDefinitions>

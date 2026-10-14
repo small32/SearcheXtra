@@ -1,4 +1,87 @@
 {
+  "bookmarks.context.open": {"en":"Open","zh-Hans":"打开"},
+  "bookmarks.context.openTab": {"en":"Open in new tab","zh-Hans":"在新标签页中打开"},
+  "bookmarks.context.openOneWindow": {"en":"Open in new window","zh-Hans":"在新窗口中打开"},
+  "bookmarks.context.openOnePrivate": {"en":"Open in private window","zh-Hans":"在无痕窗口中打开"},
+  "bookmarks.context.edit": {"en":"Edit bookmark…","zh-Hans":"修改书签…"},
+  "flowDrag.engine.google_translate": {"en":"Google Translate","zh-Hans":"Google 翻译"},
+  "flowDrag.engine.bing_translate": {"en":"Bing Translate","zh-Hans":"Bing 翻译"},
+  "flowDrag.engine.yahoo": {"en":"Yahoo!","zh-Hans":"Yahoo!"},
+  "flowDrag.engine.yahoo_jp": {"en":"Yahoo! JAPAN","zh-Hans":"Yahoo! JAPAN"},
+  "flowDrag.engine.naver": {"en":"Naver","zh-Hans":"Naver"},
+  "flowDrag.engine.seznam": {"en":"Seznam","zh-Hans":"Seznam"},
+  "flowDrag.title": {"en":"Super drag","zh-Hans":"超级拖拽"},
+  "flowDrag.enabled": {"en":"Enable super drag","zh-Hans":"启用超级拖拽"},
+  "flowDrag.hints": {"en":"Show drag action hints","zh-Hans":"显示超级拖拽动作提示"},
+  "flowDrag.threshold": {"en":"Minimum drag distance","zh-Hans":"阈值（最小拖拽距离）"},
+  "flowDrag.short": {"en":"Short","zh-Hans":"短"},
+  "flowDrag.long": {"en":"Long","zh-Hans":"长"},
+  "flowDrag.configure": {"en":"Configure actions","zh-Hans":"配置动作"},
+  "flowDrag.exceptions": {"en":"Manage exceptions","zh-Hans":"管理例外情况"},
+  "flowDrag.exceptionsHelp": {"en":"Excluded domains, one per line","zh-Hans":"例外域名，每行一个"},
+  "flowDrag.excludeCurrent": {"en":"Exclude current website","zh-Hans":"排除当前网站"},
+  "flowDrag.advanced": {"en":"Advanced settings","zh-Hans":"高级设置"},
+  "flowDrag.trail": {"en":"Show drag trail","zh-Hans":"显示拖拽轨迹"},
+  "flowDrag.ignoreEditable": {"en":"Keep drag and drop in input fields","zh-Hans":"保留输入框内的原生拖放"},
+  "flowDrag.enable.text": {"en":"Text drag","zh-Hans":"文字拖拽"},
+  "flowDrag.enable.link": {"en":"Link drag","zh-Hans":"链接拖拽"},
+  "flowDrag.enable.image": {"en":"Image drag","zh-Hans":"图片拖拽"},
+  "flowDrag.object": {"en":"Dragged content","zh-Hans":"拖拽对象"},
+  "flowDrag.object.text": {"en":"Text","zh-Hans":"文字"},
+  "flowDrag.object.link": {"en":"Links","zh-Hans":"链接"},
+  "flowDrag.object.image": {"en":"Images","zh-Hans":"图片"},
+  "flowDrag.background": {"en":"Open in background","zh-Hans":"在后台打开"},
+  "flowDrag.private": {"en":"Open privately","zh-Hans":"无痕打开"},
+  "flowDrag.position": {"en":"Open position","zh-Hans":"打开位置"},
+  "flowDrag.position.current": {"en":"Current tab","zh-Hans":"当前标签页"},
+  "flowDrag.position.left": {"en":"Left of current tab","zh-Hans":"当前标签页左侧"},
+  "flowDrag.position.right": {"en":"Right of current tab","zh-Hans":"当前标签页右侧"},
+  "flowDrag.position.first": {"en":"First tab","zh-Hans":"最左侧标签页"},
+  "flowDrag.position.last": {"en":"Last tab","zh-Hans":"最右侧标签页"},
+  "flowDrag.autoDetectUrl": {"en":"Open detected URLs directly","zh-Hans":"自动识别网址并直接打开"},
+  "flowDrag.preferLink": {"en":"Prefer the image's surrounding link","zh-Hans":"优先打开图片指向的链接"},
+  "flowDrag.customUrl": {"en":"Custom search URL (%s = query)","zh-Hans":"自定义搜索网址（%s 表示搜索内容）"},
+  "flowDrag.markdown": {"en":"Copy as Markdown","zh-Hans":"复制为 Markdown 链接"},
+  "flowDrag.subdir": {"en":"Download subfolder","zh-Hans":"下载子文件夹"},
+  "flowDrag.folder": {"en":"Bookmark folder","zh-Hans":"书签文件夹"},
+  "flowDrag.rootFolder": {"en":"Bookmarks bar","zh-Hans":"书签栏"},
+  "flowDrag.actionOptions": {"en":"Action options","zh-Hans":"动作选项"},
+  "flowDrag.patternHelp": {"en":"Direction sequence (↑→) or fallback (*)","zh-Hans":"方向序列（如 ↑→），或兜底规则（*）"},
+  "flowDrag.add": {"en":"Add rule","zh-Hans":"添加规则"},
+  "flowDrag.remove": {"en":"Remove rule","zh-Hans":"删除规则"},
+  "flowDrag.reset": {"en":"Reset","zh-Hans":"重置"},
+  "flowDrag.import": {"en":"Import","zh-Hans":"导入"},
+  "flowDrag.export": {"en":"Export","zh-Hans":"导出"},
+  "flowDrag.done": {"en":"Super drag: done","zh-Hans":"超级拖拽：已完成"},
+  "flowDrag.failed": {"en":"The drag action failed.","zh-Hans":"拖拽动作执行失败。"},
+  "flowDrag.saved": {"en":"Saved","zh-Hans":"已保存"},
+  "flowDrag.invalid": {"en":"Check the direction, search URL or folder.","zh-Hans":"请检查方向、搜索网址或文件夹。"},
+  "flowDrag.action.none": {"en":"No action","zh-Hans":"无动作"},
+  "flowDrag.action.search": {"en":"Search text","zh-Hans":"搜索文字"},
+  "flowDrag.action.copy": {"en":"Copy text","zh-Hans":"复制文字"},
+  "flowDrag.action.openTab": {"en":"Open link","zh-Hans":"打开链接"},
+  "flowDrag.action.openImage": {"en":"Open image","zh-Hans":"打开图片"},
+  "flowDrag.action.openLink": {"en":"Open image link","zh-Hans":"打开图片指向的链接"},
+  "flowDrag.action.copyLink": {"en":"Copy link URL","zh-Hans":"复制链接网址"},
+  "flowDrag.action.copyLinkText": {"en":"Copy link text","zh-Hans":"复制链接文字"},
+  "flowDrag.action.copyLinkAndText": {"en":"Copy link text and URL","zh-Hans":"复制链接文字和网址"},
+  "flowDrag.action.bookmarkLink": {"en":"Bookmark link","zh-Hans":"收藏链接"},
+  "flowDrag.action.copyImageUrl": {"en":"Copy image URL","zh-Hans":"复制图片网址"},
+  "flowDrag.action.saveImage": {"en":"Save image","zh-Hans":"保存图片"},
+  "flowDrag.action.imageSearch": {"en":"Reverse image search","zh-Hans":"以图搜图"},
+  "flowDrag.engine.system": {"en":"Default search engine","zh-Hans":"预设搜索引擎"},
+  "flowDrag.engine.custom": {"en":"Custom engine","zh-Hans":"自定义搜索引擎"},
+  "flowDrag.engine.baidu": {"en":"Baidu","zh-Hans":"百度"},
+  "flowDrag.engine.google": {"en":"Google","zh-Hans":"Google"},
+  "flowDrag.engine.bing": {"en":"Microsoft Bing","zh-Hans":"Microsoft Bing"},
+  "flowDrag.engine.360": {"en":"360","zh-Hans":"360"},
+  "flowDrag.engine.sogou": {"en":"Sogou","zh-Hans":"搜狗"},
+  "flowDrag.engine.duckduckgo": {"en":"DuckDuckGo","zh-Hans":"DuckDuckGo"},
+  "flowDrag.engine.tineye": {"en":"TinEye","zh-Hans":"TinEye"},
+  "flowDrag.engine.yandex": {"en":"Yandex","zh-Hans":"Yandex"},
+  "flowDrag.engine.saucenao": {"en":"SauceNAO","zh-Hans":"SauceNAO"},
+  "flowDrag.engine.iqdb": {"en":"IQDB","zh-Hans":"IQDB"},
+  "flowDrag.engine.trace": {"en":"Trace.moe","zh-Hans":"Trace.moe"},
   "bookmarks.bar.websiteIcons": {
     "en": "Show bookmark website icons",
     "zh-Hans": "书签显示网站图标"
@@ -5286,313 +5369,5 @@
   "updates.github.detail": {
     "en": "Download the latest SearcheXtra release and replace the application",
     "zh-Hans": "下载最新版 SearcheXtra 并替换应用"
-  },
-  "superDrag.title": {
-    "en": "Super drag",
-    "zh-Hans": "超级拖拽"
-  },
-  "superDrag.enabled": {
-    "en": "Enable super drag",
-    "zh-Hans": "启用超级拖拽"
-  },
-  "superDrag.instructions": {
-    "en": "Drag links down to open in the background, text up to search, and images down to save. Editors and custom draggable widgets keep their native behavior.",
-    "zh-Hans": "向下拖动链接后台打开，向上拖动选中文字搜索，向下拖动图片保存。编辑器和自定义拖拽控件保留原生行为。"
-  },
-  "superDrag.distance": {
-    "en": "Minimum distance (px)",
-    "zh-Hans": "最小拖拽距离（像素）"
-  },
-  "superDrag.directions": {
-    "en": "Direction mode",
-    "zh-Hans": "方向模式"
-  },
-  "superDrag.4-way": {
-    "en": "4 directions",
-    "zh-Hans": "4 向"
-  },
-  "superDrag.8-way": {
-    "en": "8 directions",
-    "zh-Hans": "8 向"
-  },
-  "superDrag.hints": {
-    "en": "Show direction and result hints",
-    "zh-Hans": "显示方向和结果提示"
-  },
-  "superDrag.remote": {
-    "en": "Allow online search and translation",
-    "zh-Hans": "允许联网搜索和翻译"
-  },
-  "superDrag.privacy": {
-    "en": "Content stays local until you allow an online action. Search, translation and image search send only the dragged content to the selected service. Diagnostic exports contain no text, URLs or history.",
-    "zh-Hans": "内容默认在本地处理。允许联网操作后，搜索、翻译及以图搜图只向所选服务发送拖拽的内容。诊断导出不包含文字、网址或历史记录。"
-  },
-  "superDrag.translationService": {
-    "en": "Translation URL (%s = content)",
-    "zh-Hans": "翻译服务网址（%s 表示内容）"
-  },
-  "superDrag.imageService": {
-    "en": "Image search URL (%s = image URL)",
-    "zh-Hans": "以图搜图网址（%s 表示图片网址）"
-  },
-  "superDrag.exceptions": {
-    "en": "Excluded domains (one per line)",
-    "zh-Hans": "例外域名（每行一个）"
-  },
-  "superDrag.exceptSite": {
-    "en": "Exclude the current site",
-    "zh-Hans": "禁用当前网站的超级拖拽"
-  },
-  "superDrag.rules": {
-    "en": "Drag rules",
-    "zh-Hans": "拖拽规则"
-  },
-  "superDrag.object": {
-    "en": "Object",
-    "zh-Hans": "对象"
-  },
-  "superDrag.direction": {
-    "en": "Direction",
-    "zh-Hans": "方向"
-  },
-  "superDrag.modifier": {
-    "en": "Modifier keys",
-    "zh-Hans": "修饰键"
-  },
-  "superDrag.region": {
-    "en": "Drop region",
-    "zh-Hans": "释放区域"
-  },
-  "superDrag.action": {
-    "en": "Action",
-    "zh-Hans": "操作"
-  },
-  "superDrag.newRule": {
-    "en": "New rule",
-    "zh-Hans": "新建规则"
-  },
-  "superDrag.saveRule": {
-    "en": "Save rule",
-    "zh-Hans": "保存规则"
-  },
-  "superDrag.remove": {
-    "en": "Remove rule",
-    "zh-Hans": "删除规则"
-  },
-  "superDrag.reset": {
-    "en": "Restore defaults",
-    "zh-Hans": "恢复默认"
-  },
-  "superDrag.import": {
-    "en": "Import JSON",
-    "zh-Hans": "导入 JSON"
-  },
-  "superDrag.export": {
-    "en": "Export JSON",
-    "zh-Hans": "导出 JSON"
-  },
-  "superDrag.diagnostics": {
-    "en": "Export diagnostics",
-    "zh-Hans": "导出诊断"
-  },
-  "superDrag.saved": {
-    "en": "Saved; changes apply immediately.",
-    "zh-Hans": "已保存，修改立即生效。"
-  },
-  "superDrag.invalid": {
-    "en": "Invalid settings or duplicate rule. Check the domain, service URL and rule.",
-    "zh-Hans": "设置无效或规则重复，请检查域名、服务网址和规则。"
-  },
-  "superDrag.done": {
-    "en": "Super drag: done",
-    "zh-Hans": "超级拖拽：已完成"
-  },
-  "superDrag.failed": {
-    "en": "Super drag failed. Check the URL or download folder.",
-    "zh-Hans": "超级拖拽失败，请检查网址或下载目录。"
-  },
-  "superDrag.consent": {
-    "en": "This action sends the dragged text or image URL to your selected search or translation service. Allow online actions?",
-    "zh-Hans": "此操作会将拖拽的文字或图片网址发送给所选搜索或翻译服务。允许联网操作吗？"
-  },
-  "superDrag.allow": {
-    "en": "Allow",
-    "zh-Hans": "允许"
-  },
-  "superDrag.cancel": {
-    "en": "Cancel",
-    "zh-Hans": "取消"
-  },
-  "superDrag.up": {
-    "en": "Up",
-    "zh-Hans": "上"
-  },
-  "superDrag.down": {
-    "en": "Down",
-    "zh-Hans": "下"
-  },
-  "superDrag.left": {
-    "en": "Left",
-    "zh-Hans": "左"
-  },
-  "superDrag.right": {
-    "en": "Right",
-    "zh-Hans": "右"
-  },
-  "superDrag.upLeft": {
-    "en": "Up-left",
-    "zh-Hans": "左上"
-  },
-  "superDrag.upRight": {
-    "en": "Up-right",
-    "zh-Hans": "右上"
-  },
-  "superDrag.downLeft": {
-    "en": "Down-left",
-    "zh-Hans": "左下"
-  },
-  "superDrag.downRight": {
-    "en": "Down-right",
-    "zh-Hans": "右下"
-  },
-  "superDrag.text": {
-    "en": "Selected text",
-    "zh-Hans": "选中文字"
-  },
-  "superDrag.link": {
-    "en": "Link",
-    "zh-Hans": "链接"
-  },
-  "superDrag.image": {
-    "en": "Image",
-    "zh-Hans": "图片"
-  },
-  "superDrag.element": {
-    "en": "Element text",
-    "zh-Hans": "普通元素文字"
-  },
-  "superDrag.page": {
-    "en": "Page",
-    "zh-Hans": "网页"
-  },
-  "superDrag.address": {
-    "en": "Address field",
-    "zh-Hans": "地址栏"
-  },
-  "superDrag.tabs": {
-    "en": "Tab bar",
-    "zh-Hans": "标签栏"
-  },
-  "superDrag.bookmarks": {
-    "en": "Bookmarks bar",
-    "zh-Hans": "书签栏"
-  },
-  "superDrag.none": {
-    "en": "None",
-    "zh-Hans": "无"
-  },
-  "superDrag.search": {
-    "en": "Search",
-    "zh-Hans": "搜索"
-  },
-  "superDrag.siteSearch": {
-    "en": "Search this site",
-    "zh-Hans": "站内搜索"
-  },
-  "superDrag.copy": {
-    "en": "Copy",
-    "zh-Hans": "复制"
-  },
-  "superDrag.translate": {
-    "en": "Translate",
-    "zh-Hans": "翻译"
-  },
-  "superDrag.openForegroundTab": {
-    "en": "Open foreground tab",
-    "zh-Hans": "前台新标签打开"
-  },
-  "superDrag.openBackgroundTab": {
-    "en": "Open background tab",
-    "zh-Hans": "后台新标签打开"
-  },
-  "superDrag.download": {
-    "en": "Download target",
-    "zh-Hans": "下载目标"
-  },
-  "superDrag.saveImage": {
-    "en": "Save image",
-    "zh-Hans": "保存图片"
-  },
-  "superDrag.imageSearch": {
-    "en": "Search by image",
-    "zh-Hans": "以图搜图"
-  },
-  "superDrag.bookmark": {
-    "en": "Add bookmark",
-    "zh-Hans": "添加书签"
-  },
-  "superDrag.ctrl": {
-    "en": "Ctrl",
-    "zh-Hans": "Ctrl"
-  },
-  "superDrag.alt": {
-    "en": "Alt / Option",
-    "zh-Hans": "Alt / Option"
-  },
-  "superDrag.shift": {
-    "en": "Shift",
-    "zh-Hans": "Shift"
-  },
-  "superDrag.meta": {
-    "en": "Command / Win",
-    "zh-Hans": "Command / Win"
-  },
-  "superDrag.ctrl+alt": {
-    "en": "Ctrl + Alt / Option",
-    "zh-Hans": "Ctrl + Alt / Option"
-  },
-  "superDrag.ctrl+shift": {
-    "en": "Ctrl + Shift",
-    "zh-Hans": "Ctrl + Shift"
-  },
-  "superDrag.alt+shift": {
-    "en": "Alt / Option + Shift",
-    "zh-Hans": "Alt / Option + Shift"
-  },
-  "superDrag.shift+meta": {
-    "en": "Shift + Command / Win",
-    "zh-Hans": "Shift + Command / Win"
-  },
-  "superDrag.alt+meta": {
-    "en": "Alt / Option + Command / Win",
-    "zh-Hans": "Alt / Option + Command / Win"
-  },
-  "superDrag.ctrl+meta": {
-    "en": "Ctrl + Command / Win",
-    "zh-Hans": "Ctrl + Command / Win"
-  },
-  "superDrag.ctrl+alt+shift": {
-    "en": "Ctrl + Alt / Option + Shift",
-    "zh-Hans": "Ctrl + Alt / Option + Shift"
-  },
-  "superDrag.alt+shift+meta": {
-    "en": "Alt / Option + Shift + Command / Win",
-    "zh-Hans": "Alt / Option + Shift + Command / Win"
-  },
-  "superDrag.ctrl+shift+meta": {
-    "en": "Ctrl + Shift + Command / Win",
-    "zh-Hans": "Ctrl + Shift + Command / Win"
-  },
-  "superDrag.ctrl+alt+meta": {
-    "en": "Ctrl + Alt / Option + Command / Win",
-    "zh-Hans": "Ctrl + Alt / Option + Command / Win"
-  },
-  "superDrag.ctrl+alt+shift+meta": {
-    "en": "Ctrl + Alt / Option + Shift + Command / Win",
-    "zh-Hans": "Ctrl + Alt / Option + Shift + Command / Win"
-  },
-  "superDrag.settings": {
-    "en": "Super drag settings",
-    "zh-Hans": "超级拖拽设置"
   }
 }

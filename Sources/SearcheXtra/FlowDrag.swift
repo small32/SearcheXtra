@@ -1,0 +1,182 @@
+import AppKit
+import SwiftUI
+import WebKit
+struct FlowDragRule: Codable,Equatable,Identifiable {
+    var object:String
+    var pattern:String
+    var action:String
+    var engine="system"
+    var url=""
+    var active=true
+    var position="right"
+    var incognito=false
+    var autoDetectUrl=true
+    var preferLink=false
+    var asMarkdown=false
+    var folderId=""
+    var subdir=""
+    var id:String {object+"|"+pattern}
+}
+struct FlowDragConfig: Codable,Equatable {
+    var enabled=true,enableText=true,enableLink=true,enableImage=true,showHints=true,showTrail=false,ignoreEditable=true
+    var distanceThreshold:Double=20
+    var excludedSites:[String]=[]
+    var rules:[FlowDragRule]=[.init(object:"text",pattern:"→",action:"search"),.init(object:"link",pattern:"→",action:"openTab"),.init(object:"image",pattern:"→",action:"openImage")]
+    func validate() throws {
+        guard distanceThreshold.isFinite,(1...200).contains(distanceThreshold),rules.count<=200,Set(rules.map(\.id)).count==rules.count,
+            rules.allSatisfy({FlowDrag.objects.contains($0.object)&&FlowDrag.validPattern($0.pattern)&&FlowDrag.actions($0.object).contains($0.action)&&FlowDrag.positions.contains($0.position)&&FlowDrag.engines.contains($0.engine)&&($0.engine != "custom" || $0.url.contains("%s")&&FlowDrag.web($0.url.replacingOccurrences(of:"%s",with:"x")))&& !$0.subdir.hasPrefix("/") && !$0.subdir.contains(":") && !$0.subdir.components(separatedBy:CharacterSet(charactersIn:"/\\")).contains(where:{$0==".." || $0=="."})}),
+            excludedSites.allSatisfy({!$0.isEmpty && !$0.contains("/") && !$0.contains(" ") && URL(string:"https://"+$0)?.host != nil}) else {throw FlowDrag.Invalid()}
+    }
+}
+struct FlowDragRequest: Codable,Equatable {
+    var phase:String
+    var id:String
+    var object:String
+    var pattern:String
+    var text:String
+    var linkUrl:String
+    var imageUrl:String
+    var linkText:String
+    var pageUrl:String
+}
+enum FlowDrag {
+    struct Invalid:Error {}
+    static let objects=["text","link","image"],positions=["current","left","right","first","last"],engines=["system","baidu","google","google_translate","bing","bing_translate","360","sogou","duckduckgo","yahoo","yahoo_jp","naver","seznam","tineye","yandex","saucenao","iqdb","trace","custom"]
+    static func enginesFor(_ type:String)->[String] {type=="image" ? ["system","google","bing","tineye","yandex","saucenao","iqdb","trace","custom"]:engines.filter{!["tineye","saucenao","iqdb","trace"].contains($0)}}
+    static func actions(_ type:String)->[String] {type=="text" ? ["none","search","copy"]:type=="link" ? ["none","openTab","copyLink","copyLinkText","copyLinkAndText","bookmarkLink"]:["none","openImage","openLink","copyImageUrl","saveImage","imageSearch"]}
+    static func validPattern(_ value:String)->Bool {value=="*" || !value.isEmpty&&value.count<=32&&value.allSatisfy{"↑↓←→".contains($0)}}
+    static func enabled(_ c:FlowDragConfig,_ p:FlowDragRequest)->Bool {
+        guard c.enabled,objects.contains(p.object),p.object=="text" ? c.enableText:p.object=="link" ? c.enableLink:c.enableImage,let u=URL(string:p.pageUrl),["http","https"].contains(u.scheme ?? ""),let host=u.host else{return false}
+        return !c.excludedSites.contains{host==$0 || host.hasSuffix("."+$0)}
+    }
+    static func resolve(_ c:FlowDragConfig,_ p:FlowDragRequest)->FlowDragRule? {enabled(c,p)&&validPattern(p.pattern) ? c.rules.first{$0.object==p.object&&$0.pattern==p.pattern} ?? c.rules.first{$0.object==p.object&&$0.pattern=="*"}:nil}
+    static func web(_ value:String)->Bool {URL(string:value).map{["http","https"].contains($0.scheme ?? "") && $0.host != nil} ?? false}
+    static func template(_ engine:String,current:String,custom:String,image:Bool=false)->String {
+        switch engine {
+        case "custom":return custom
+        case "baidu":return "https://www.baidu.com/s?wd=%s"
+        case "google":return image ? "https://lens.google.com/uploadbyurl?url=%s":"https://www.google.com/search?q=%s"
+        case "bing":return image ? "https://www.bing.com/images/searchbyimage?cbir=sbi&imgurl=%s":"https://www.bing.com/search?q=%s"
+        case "360":return "https://www.so.com/s?q=%s"
+        case "sogou":return "https://www.sogou.com/web?query=%s"
+        case "duckduckgo":return "https://duckduckgo.com/?q=%s"
+        case "google_translate":return "https://translate.google.com/?sl=auto&text=%s"
+        case "bing_translate":return "https://www.bing.com/translator/?text=%s"
+        case "yahoo":return "https://search.yahoo.com/search?p=%s"
+        case "yahoo_jp":return "https://search.yahoo.co.jp/search?p=%s"
+        case "naver":return "https://search.naver.com/search.naver?query=%s"
+        case "seznam":return "https://search.seznam.cz/?q=%s"
+        case "tineye":return "https://tineye.com/search?url=%s"
+        case "yandex":return image ? "https://yandex.com/images/search?rpt=imageview&url=%s":"https://yandex.com/search/?text=%s"
+        case "saucenao":return "https://saucenao.com/search.php?url=%s"
+        case "iqdb":return "https://iqdb.org/?url=%s"
+        case "trace":return "https://trace.moe/?url=%s"
+        default:return image ? "https://lens.google.com/uploadbyurl?url=%s":current
+        }
+    }
+}
+@MainActor final class FlowDragSettings:ObservableObject {
+    static let shared=FlowDragSettings()
+    @Published var config=FlowDragConfig() {didSet {if let data=try? JSONEncoder().encode(config){Store.settings.set(data,forKey:"flowDrag.config")};for browser in Browsers.all {for tab in browser.tabs + browser.parkedTabs + [browser.peekTab].compactMap({$0}) {tab.refreshFlowDrag()}}}}
+    init() {if let data=Store.settings.data(forKey:"flowDrag.config"),let value=try? JSONDecoder().decode(FlowDragConfig.self,from:data),(try? value.validate()) != nil {config=value}}
+    static var source:String {Bundle.module.url(forResource:"FlowDrag",withExtension:"js").flatMap{try? String(contentsOf:$0,encoding:.utf8)} ?? ""}
+    static var options:String {
+        let labels=Dictionary(uniqueKeysWithValues:FlowDrag.objects.flatMap(FlowDrag.actions).reduce(into:Set<String>()){$0.insert($1)}.map{($0,L10n.text("flowDrag.action."+$0))})
+        guard let data=try? JSONSerialization.data(withJSONObject:["config":JSONSerialization.jsonObject(with:JSONEncoder().encode(shared.config)),"labels":labels,"pointerDrag":true]),let text=String(data:data,encoding:.utf8) else{return "{}"}
+        return text
+    }
+    static var script:String {"(function(){"+source+";sxInstallFlowDrag("+options+",p=>webkit.messageHandlers.officeFlowDrag.postMessage(p));})();"}
+}
+final class FlowDragRelay:NSObject,WKScriptMessageHandler {
+    static let name="officeFlowDrag"
+    weak var tab:Tab?
+    private var pending:FlowDragRequest?
+    private var started=Date()
+    private var frames:[WKFrameInfo]=[]
+    func userContentController(_ controller:WKUserContentController,didReceive message:WKScriptMessage) {
+        MainActor.assumeIsolated {
+            guard let tab,let body=message.body as? [String:Any],let data=try? JSONSerialization.data(withJSONObject:body),let p=try? JSONDecoder().decode(FlowDragRequest.self,from:data) else{return}
+            if p.phase=="cancel" {if pending?.id==p.id {pending=nil};return}
+            guard let page=URL(string:p.pageUrl),let origin=page.host,origin==message.frameInfo.securityOrigin.host else{return}
+            if p.phase=="ready" {
+                if message.frameInfo.isMainFrame {frames.removeAll()}
+                frames.append(message.frameInfo)
+                // Settings may have changed while this document was loading.
+                // Its document-start script is a snapshot; refresh each frame
+                // after the installed bridge announces that it is ready.
+                if let web=tab.built {configure(web,in:message.frameInfo)}
+                return
+            }
+            guard FlowDrag.enabled(FlowDragSettings.shared.config,p) else{return}
+            if p.phase=="begin" {pending=p;started=Date();return}
+            guard p.phase=="perform",var previous=pending,Date().timeIntervalSince(started)<120 else{return}
+            var current=p;previous.phase="";previous.pattern="";current.phase="";current.pattern=""
+            guard current==previous else{return};pending=nil
+            tab.onFlowDrag?(tab,p)
+        }
+    }
+    @MainActor func configure(_ web:WKWebView) {
+        configure(web,in:nil)
+        for frame in frames where !frame.isMainFrame {configure(web,in:frame)}
+    }
+    @MainActor private func configure(_ web:WKWebView,in frame:WKFrameInfo?) {
+        let script="window.__sxFlowDrag?.configure("+FlowDragSettings.options+")"
+        web.evaluateJavaScript(script,in:frame,in:Web.world){_ in}
+    }
+}
+extension Browser {
+    func performFlowDrag(_ source:Tab,_ p:FlowDragRequest) {
+        guard tabs.contains(where:{$0.id==source.id}),let r=FlowDrag.resolve(FlowDragSettings.shared.config,p),r.action != "none" else{return}
+        var target:URL?,copy:String?
+        switch r.action {
+        case "search":target=r.autoDetectUrl ? Address.url(from:p.text).flatMap{FlowDrag.web($0.absoluteString) ? $0:nil}:nil;if target==nil {target=Engine.url(for:p.text,template:FlowDrag.template(r.engine,current:prefs.engine.template(custom:prefs.customEngine),custom:r.url))}
+        case "openTab":target=URL(string:p.linkUrl)
+        case "openImage":target=URL(string:r.preferLink&&FlowDrag.web(p.linkUrl) ? p.linkUrl:p.imageUrl)
+        case "openLink":target=URL(string:FlowDrag.web(p.linkUrl) ? p.linkUrl:p.imageUrl)
+        case "imageSearch":target=Engine.url(for:p.imageUrl,template:FlowDrag.template(r.engine,current:"",custom:r.url,image:true))
+        case "copy":copy=p.text
+        case "copyLink":copy=p.linkUrl
+        case "copyImageUrl":copy=p.imageUrl
+        case "copyLinkText":copy=p.linkText
+        case "copyLinkAndText":copy=r.asMarkdown ? "["+p.linkText.replacingOccurrences(of:"\\",with:"\\\\").replacingOccurrences(of:"[",with:"\\[").replacingOccurrences(of:"]",with:"\\]")+"]("+p.linkUrl+")":p.linkText+"\n"+p.linkUrl
+        case "bookmarkLink":if let u=URL(string:p.linkUrl),FlowDrag.web(p.linkUrl),let node=bookmarks.add(u,title:p.linkText),let folder=UUID(uuidString:r.folderId){bookmarks.move(node.id,into:folder)}
+        case "saveImage":if let u=URL(string:p.imageUrl),FlowDrag.web(p.imageUrl){saveFlowDragImage(u,source:source,subdir:r.subdir)};return
+        default:break
+        }
+        if let copy {NSPasteboard.general.clearContents();NSPasteboard.general.setString(copy,forType:.string)}
+        if let target,FlowDrag.web(target.absoluteString) {
+            let privately=source.shy || r.incognito
+            if r.position=="current",privately==source.shy {select(source);source.go(to:target)}
+            else {
+                let opened:Tab
+                if r.incognito && !source.shy {newShyTab();guard let fresh=active else{return};opened=fresh;opened.go(to:target);if !r.active {select(source)}} else {opened=open(target,foreground:r.active,from:source,mayWait:false)}
+                if let index=tabs.firstIndex(where:{$0.id==source.id}) {
+                    let place=r.position=="first" ? 0:r.position=="last" ? tabs.count-1:r.position=="left" ? index:index+1
+                    move(opened,to:min(place,tabs.count-1))
+                }
+            }
+        }
+        announce(L10n.text("flowDrag.done"))
+    }
+    private func saveFlowDragImage(_ url:URL,source:Tab,subdir:String) {
+        if subdir.isEmpty {if let web=source.built {downloadImage(at:url,from:web)};return}
+        source.store.httpCookieStore.getAllCookies { [weak self] cookies in
+            Task { @MainActor in
+                guard let self else{return}
+                do {
+                    let configuration=URLSessionConfiguration.ephemeral
+                    cookies.forEach{configuration.httpCookieStorage?.setCookie($0)}
+                    let session=URLSession(configuration:configuration);defer{session.finishTasksAndInvalidate()}
+                    let (data,response)=try await session.data(for:URLRequest(url:url))
+                    guard let http=response as? HTTPURLResponse,(200..<300).contains(http.statusCode) else{throw FlowDrag.Invalid()}
+                    var name=URL(fileURLWithPath:response.suggestedFilename ?? url.lastPathComponent).lastPathComponent;if name.isEmpty||name=="."||name==".." {name="image"}
+                    let directory=self.prefs.downloads.appendingPathComponent(subdir,isDirectory:true);try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+                    var destination=directory.appendingPathComponent(name);var i=1
+                    while FileManager.default.fileExists(atPath:destination.path){destination=directory.appendingPathComponent((name as NSString).deletingPathExtension+" (\(i))"+((name as NSString).pathExtension.isEmpty ? "":"."+(name as NSString).pathExtension));i+=1}
+                    try data.write(to:destination,options:.withoutOverwriting)
+                    self.announce(L10n.text("flowDrag.done"))
+                } catch {self.announce(L10n.text("flowDrag.failed"))}
+            }
+        }
+    }
+}

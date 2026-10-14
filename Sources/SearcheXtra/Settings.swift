@@ -19,14 +19,14 @@ struct SettingsPanel: View {
     @State private var page: Page = Page(rawValue: Store.settings.string(forKey: "settings.page") ?? "") ?? .general
 
     enum Page: String, CaseIterable, Identifiable {
-        case general, tabs, shortcuts, superDrag, bookmarks, extensions, passwords, downloads, privacy, about
+        case general, tabs, shortcuts, bookmarks, extensions, passwords, downloads, privacy, about, flowDrag
         var id: String { rawValue }
         var title: String {
             switch self {
             case .general: return L10n.text("Settings.0692")
             case .tabs: return L10n.text("Settings.0693")
+            case .flowDrag: return L10n.text("flowDrag.title")
             case .shortcuts: return L10n.text("Settings.0694")
-            case .superDrag: return L10n.text("superDrag.title")
             case .bookmarks: return L10n.text("bookmarks.manager.title")
             case .extensions: return L10n.text("Settings.0695")
             case .passwords: return L10n.text("Settings.0696")
@@ -39,8 +39,8 @@ struct SettingsPanel: View {
             switch self {
             case .general: return "macwindow"
             case .tabs: return "rectangle.split.3x1"
+            case .flowDrag: return "hand.draw"
             case .shortcuts: return "keyboard"
-            case .superDrag: return "hand.draw"
             case .bookmarks: return "book"
             case .extensions: return "puzzlepiece.extension"
             case .passwords: return "key"
@@ -84,7 +84,7 @@ struct SettingsPanel: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 14)
                 .padding(.bottom, 12)
-            ForEach(Page.allCases) { item in
+            ForEach(Page.allCases.filter{$0 != .flowDrag}) { item in
                 PageRow(page: item, on: page == item) { page = item }
             }
             Spacer(minLength: 0)
@@ -145,10 +145,13 @@ struct SettingsPanel: View {
                     switch page {
                     case .general: general
                     case .tabs:
+                        Card {Line(L10n.text("flowDrag.title"),""){Pill(L10n.text("Settings.0786")){page = .flowDrag}}}
                         tabs
                         if !prefs.sidebar { toolbar }
                     case .shortcuts: ShortcutsPage(browser: browser, store: .shared)
-                    case .superDrag: SuperDragSettingsPage(browser:browser)
+                    case .flowDrag:
+                        Button("← "+L10n.text("Settings.0693")){page = .tabs}.buttonStyle(.plain)
+                        FlowDragSettingsPage(browser:browser)
                     case .bookmarks:
                         Card {
                             Line(L10n.text("bookmarks.manager.title"), L10n.text("bookmarks.manager.detail")) {
@@ -156,15 +159,6 @@ struct SettingsPanel: View {
                                     browser.tuning = false
                                     browser.bookmarking = true
                                 }
-                            }
-                        }
-                        Card {
-                            Line(L10n.text("bookmarks.bar.folderIcons"), "") {
-                                Switch(on: $prefs.bookmarkBarFolderIcons)
-                            }
-                            Rule()
-                            Line(L10n.text("bookmarks.bar.websiteIcons"), "") {
-                                Switch(on: $prefs.bookmarkWebsiteIcons)
                             }
                         }
                     case .extensions: ExtensionsPage(browser: browser)
