@@ -49,6 +49,9 @@ jobs:
       - name: Build Release for ARM64
         run: ./build.sh release
 
+      - name: Launch packaged app without build resources
+        run: bash Tests/verify-macos-app-launch.sh build/SearcheXtra.app "$(swift build -c release --arch arm64 -Xswiftc -Osize --show-bin-path)/SearcheXtra_SearcheXtra.bundle"
+
       - name: Test bookmark bar, middle-click and extension versions
         run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter 'BookmarkBarTests|BookmarkIconTests|BookmarkManagerTests|MiddleClickTests|ExtensionVersionTests|ExtensionNativeTests|ExtensionLifecycleTests|FlowDragTests'
 

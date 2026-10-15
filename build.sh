@@ -74,7 +74,8 @@ BINARY="$(swift build "${SWIFTFLAGS[@]}" --show-bin-path)/SearcheXtra"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BINARY" "$APP/Contents/MacOS/$NAME"
-# SwiftPM's Bundle.module resolves this sibling resource bundle in the installed app.
+# Installed apps resolve this bundle through L10n.resourceBundle. SwiftPM's
+# generated Bundle.module accessor may only know the executable and build paths.
 cp -R "$(dirname "$BINARY")/SearcheXtra_SearcheXtra.bundle" "$APP/Contents/Resources/"
 cp -R Localization/*.lproj "$APP/Contents/Resources/"
 # The AppleScript dictionary (Scripting.swift): read-only, tabs' addresses
