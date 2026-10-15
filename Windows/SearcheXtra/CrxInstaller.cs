@@ -75,22 +75,25 @@ public static class CrxInstaller
         var zip = await Task.Run(() => VerifiedZip(bytes, id), cancellation);
         var folder = Path.Combine(root, id, Guid.NewGuid().ToString("N"));
         await Task.Run(() => Unpack(zip, folder), cancellation);
-        PreserveId(folder, id, bytes);
+        await Task.Run(() => PreserveId(folder, id, bytes), cancellation);
         return folder;
     }
     public static async Task<string> ImportAsync(string path, string root, CancellationToken cancellation = default)
     {
         var bytes = await File.ReadAllBytesAsync(path, cancellation); var folder = Path.Combine(root, "local", Guid.NewGuid().ToString("N"));
-        if (Path.GetExtension(path).Equals(".crx", StringComparison.OrdinalIgnoreCase))
+        return await Task.Run(() =>
         {
-            var id = PackageId(bytes); var zip = VerifiedZip(bytes, id); Unpack(zip, folder); PreserveId(folder, id, bytes); return folder;
-        }
-        if (!Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Choose a CRX or ZIP extension.");
-        Unpack(bytes, folder, requireManifest: false);
-        if (File.Exists(Path.Combine(folder, "manifest.json"))) return folder;
-        var manifests = Directory.GetFiles(folder, "manifest.json", SearchOption.AllDirectories);
-        if (manifests.Length != 1) throw new InvalidDataException("ZIP must contain one extension manifest.");
-        return Path.GetDirectoryName(manifests[0])!;
+            if (Path.GetExtension(path).Equals(".crx", StringComparison.OrdinalIgnoreCase))
+            {
+                var id = PackageId(bytes); var zip = VerifiedZip(bytes, id); Unpack(zip, folder); PreserveId(folder, id, bytes); return folder;
+            }
+            if (!Path.GetExtension(path).Equals(".zip", StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("Choose a CRX or ZIP extension.");
+            Unpack(bytes, folder, requireManifest: false);
+            if (File.Exists(Path.Combine(folder, "manifest.json"))) return folder;
+            var manifests = Directory.GetFiles(folder, "manifest.json", SearchOption.AllDirectories);
+            if (manifests.Length != 1) throw new InvalidDataException("ZIP must contain one extension manifest.");
+            return Path.GetDirectoryName(manifests[0])!;
+        }, cancellation);
     }
     public static string PackageId(byte[] crx)
     {

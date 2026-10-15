@@ -90,6 +90,9 @@ struct SiteDetails: View {
                             else { browser.transientSitePermissions[key] = value == 1 }
                         } else if value == 0 { Store.settings.removeObject(forKey: "capture." + key) }
                         else { Store.settings.set(value == 1, forKey: "capture." + key) }
+                        if !tab.shy, permissionID == "notifications", value == 1 {
+                            SiteNotifications.shared.authorize()
+                        }
                         status = L10n.text("site.reload")
                     })) {
                         Text(L10n.text("site.ask")).tag(0)

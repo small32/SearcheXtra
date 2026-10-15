@@ -1128,6 +1128,10 @@ final class Browser: NSObject, ObservableObject {
         where key.hasPrefix("capture.") || key.hasPrefix(Grounded.prefix) {
             Store.settings.removeObject(forKey: key)
         }
+        transientSitePermissions.removeAll()
+        for browser in Browsers.all where browser !== self {
+            browser.transientSitePermissions.removeAll()
+        }
         SiteNotifications.shared.objectWillChange.send()
         announce(L10n.text("Browser.0325"))
     }
@@ -2702,7 +2706,7 @@ final class Browser: NSObject, ObservableObject {
 
         if tabs.count == 1 {
             if tab.isBlank {
-                NSApp.keyWindow?.performClose(nil)
+                window?.performClose(nil)
             } else {
                 let fresh = Tab(shy: tab.shy, configuration: Web.configuration(shy: tab.shy, space: spaceID,
                     store: tab.shy ? tab.store : nil))
@@ -4755,7 +4759,10 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
               let page = webView.url, let scheme = page.scheme, let host = page.host(),
               Browser.origin(scheme, host, page.port ?? 0) == site
         else { return decisionHandler(false) }
-        if let remembered = SiteNotifications.choices[site] { return decisionHandler(remembered) }
+        if let remembered = SiteNotifications.choices[site] {
+            if remembered { SiteNotifications.shared.authorize() }
+            return decisionHandler(remembered)
+        }
         ask(from: webView, show: { [weak self] in
             guard let self else { return decisionHandler(false) }
             guard decide == nil else { return decisionHandler(false) }
@@ -4997,10 +5004,13 @@ extension Browser: WKDownloadDelegate {
         mimeType: String?,
         originatingURL: URL?
     ) {
-        guard let data, let file = whereToSave(suggestedFilename ?? "") else { return }
+        guard let data else { return }
+        let privately = !webView.configuration.websiteDataStore.isPersistent || anyTab(for: webView)?.shy == true
+        guard let file = whereToSave(suggestedFilename ?? "") else { return }
         do {
             try data.write(to: file)
-            saved(file, from: originatingURL)
+            if privately { announce(L10n.text("Browser.0369", file.lastPathComponent)) }
+            else { saved(file, from: originatingURL) }
         } catch {
             announce(L10n.text("Browser.0370"))
         }

@@ -166,7 +166,18 @@ public sealed partial class MainWindow
                 break;
             case "about":
                 Line("SearcheXtra", ReleaseUpdates.Version + " · Windows x86_64\nWinUI 3 · WebView2");
-                ActionRow("Updates", "更新", T("Check", "检查"), async () => { var result = await ReleaseUpdates.LatestAsync(); DismissOverlay(); if (await ShowCardAsync(T("Updates", "更新"), new TextBlock { Text = result, TextWrapping = TextWrapping.Wrap }, T("Open releases", "打开发布页")) == ContentDialogResult.Primary) AddTab("https://github.com/small32/SearcheXtra/releases"); });
+                ActionRow("Updates", "更新", T("Check", "检查"), async () => {
+                    string result;
+                    try { result = await ReleaseUpdates.LatestAsync(); }
+                    catch (Exception error) when (error is HttpRequestException or OperationCanceledException or System.Text.Json.JsonException or InvalidOperationException or KeyNotFoundException)
+                    {
+                        Status.Text = T("Could not check for updates. Check your connection and try again.", "检查更新失败，请检查网络连接后重试。");
+                        return;
+                    }
+                    if (closing) return;
+                    DismissOverlay();
+                    if (await ShowCardAsync(T("Updates", "更新"), new TextBlock { Text = result, TextWrapping = TextWrapping.Wrap }, T("Open releases", "打开发布页")) == ContentDialogResult.Primary) AddTab("https://github.com/small32/SearcheXtra/releases");
+                });
                 ActionRow("Source code", "源代码", "GitHub", () => { DismissOverlay(); AddTab("https://github.com/small32/SearcheXtra"); });
                 Line(T("License", "许可证"), "GPL-3.0"); break;
         }

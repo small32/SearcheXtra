@@ -27,13 +27,26 @@ public sealed partial class MainWindow
         "WindowManagement" => T("Window management", "窗口管理"),
         _ => T("Other site permissions", "其他网站权限")
     };
-    private async Task PreviewLinkAsync(string url)
+    private readonly Dictionary<Guid, (BrowserTab Tab, PageView View, BrowserTab Owner)> previewViews = [];
+    private async Task PreviewLinkAsync(string url, BrowserTab? from = null)
     {
-        if (ActiveView?.Control.CoreWebView2 is not { } source) return;
-        var preview = new WebView2 { Width = 720, Height = 500 };
+        var owner = from ?? active;
+        if (owner == null || closing) return;
+        var tab = new BrowserTab { Url = url, IsPrivate = owner.IsPrivate, Space = owner.Space };
+        using var page = new PageView(tab, store, () => { }, link => { DismissOverlay(); AddTab(link, true, tab.IsPrivate, inSpace: tab.Space); }, recordVisits: false);
+        var preview = page.Control;
+        preview.Width = 720; preview.Height = 500; preview.Visibility = Visibility.Visible;
+        page.FlowDragRequested += request => ExecuteFlowDragAsync(tab, page, request);
+        page.OpenLinkRequested += (link, foreground) => { if (foreground) DismissOverlay(); AddTab(link, foreground, tab.IsPrivate, inSpace: tab.Space); };
+        previewViews[tab.Id] = (tab, page, owner);
         var pending = ShowCardAsync(T("Link preview", "链接预览"), preview, T("Open in tab", "在标签页中打开"));
-        try { var options = source.Environment.CreateCoreWebView2ControllerOptions(); options.ProfileName = source.Profile.ProfileName; options.IsInPrivateModeEnabled = active?.IsPrivate == true; await preview.EnsureCoreWebView2Async(source.Environment, options); preview.CoreWebView2.Navigate(url); if (await pending == ContentDialogResult.Primary) AddTab(preview.CoreWebView2.Source, true, active?.IsPrivate == true); }
-        finally { preview.Close(); }
+        try
+        {
+            await page.InitializeAsync();
+            if (await pending == ContentDialogResult.Primary && !page.IsDisposed && !closing)
+                AddTab(tab.Url, true, tab.IsPrivate, inSpace: tab.Space);
+        }
+        finally { previewViews.Remove(tab.Id); }
     }
     private SitePreferences GetSite(string host)
     {

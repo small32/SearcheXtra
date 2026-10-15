@@ -10,6 +10,13 @@ namespace SearcheXtra.Windows;
 public sealed partial class MainWindow
 {
     private bool extensionBusy;
+    private string ExtensionInstallError(Exception error) => error switch
+    {
+        HttpRequestException or OperationCanceledException => T("Could not download the extension. Check your connection and try again.", "扩展下载失败，请检查网络连接后重试。"),
+        InvalidDataException or JsonException or System.Security.Cryptography.CryptographicException => T("The extension package is invalid or could not be verified. Choose a valid CRX or ZIP package.", "扩展包无效或无法通过校验，请选择有效的 CRX 或 ZIP 扩展包。"),
+        IOException or UnauthorizedAccessException => T("Could not read or save the extension files. Check the file location and access permissions.", "无法读取或保存扩展文件，请检查文件位置和访问权限。"),
+        _ => T("Could not install the extension. Check that it is compatible with this WebView2 Runtime and try again.", "扩展安装失败，请检查扩展与当前 WebView2 Runtime 的兼容性后重试。")
+    };
     private async Task<CoreWebView2Profile> CurrentProfileAsync()
     {
         if (active == null) throw new InvalidOperationException("No active tab.");
@@ -64,7 +71,7 @@ public sealed partial class MainWindow
             await InstallExtensionFolderAsync(folder, id);
             progress?.Invoke(T("Updated to version ", "已更新至版本 ") + Settings.Extensions.First(e => e.StoreId == id).Version);
         }
-        catch (Exception ex) { if (progress != null) progress(T("Could not check or install the update. Try again.", "检查或安装更新失败，请重试。")); else Status.Text = T("Extension installation failed: ", "扩展安装失败：") + ex.Message; }
+        catch (Exception ex) { if (progress != null) progress(T("Could not check or install the update. Try again.", "检查或安装更新失败，请重试。")); else Status.Text = ExtensionInstallError(ex); }
         finally { extensionBusy = false; }
     }
     private async Task InstallExtensionFolderAsync(string folder, string? storeId = null)
@@ -132,14 +139,14 @@ public sealed partial class MainWindow
         var picker = new FolderPicker(); picker.FileTypeFilter.Add("*"); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         var folder = await picker.PickSingleFolderAsync(); if (folder == null) return;
         try { await InstallExtensionFolderAsync(folder.Path); }
-        catch (Exception ex) { Status.Text = ex.Message; }
+        catch (Exception ex) { Status.Text = ExtensionInstallError(ex); }
     }
     private async Task ChooseExtensionPackageAsync()
     {
         var picker = new FileOpenPicker(); picker.FileTypeFilter.Add(".crx"); picker.FileTypeFilter.Add(".zip"); InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
         var file = await picker.PickSingleFileAsync(); if (file == null) return;
         try { var folder = await CrxInstaller.ImportAsync(file.Path, Path.Combine(DataStore.Root, "Extensions")); await InstallExtensionFolderAsync(folder); }
-        catch (Exception ex) { Status.Text = ex.Message; }
+        catch (Exception ex) { Status.Text = ExtensionInstallError(ex); }
     }
     private async Task OpenExtensionPopupAsync(InstalledExtension item)
     {

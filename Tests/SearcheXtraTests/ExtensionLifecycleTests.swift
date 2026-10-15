@@ -33,6 +33,23 @@ final class ExtensionLifecycleTests: XCTestCase {
         }
     }
 
+    func testRemovalWhileFolderInstallIsQueuedCannotReinstallIt() async throws {
+        let install = try XCTUnwrap(Extensions.shared.installFolder(at: folder, confirm: false))
+        // Removal wins even before copying starts, or while it is suspended.
+        Extensions.shared.remove(id)
+        await install.value
+        XCTAssertFalse(Extensions.shared.installed.contains { $0.id == id })
+        XCTAssertNil(Extensions.shared.contexts[id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: Extensions.folder(for: id).path))
+    }
+
+    func testOnlyOneFolderInstallForAnIDCanPrepareAtATime() async throws {
+        let install = try XCTUnwrap(Extensions.shared.installFolder(at: folder, confirm: false))
+        XCTAssertNil(Extensions.shared.installFolder(at: folder, confirm: false))
+        await install.value
+        XCTAssertEqual(Extensions.shared.installed.filter { $0.id == id }.count, 1)
+    }
+
     func testDisableDuringInitialLoadStaysDisabled() async throws {
         let install = try XCTUnwrap(Extensions.shared.installFolder(at: folder, confirm: false))
         await Task.yield()

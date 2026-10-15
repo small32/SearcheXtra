@@ -14,7 +14,10 @@ import SwiftUI
 extension Browser {
     /// Shift-click on a link, from a tab in the row.
     func peek(_ url: URL, from tab: Tab) {
-        let page = Tab(shy: tab.shy)
+        let page = Tab(shy: tab.shy, configuration: Web.configuration(
+            shy: tab.shy, space: spaceID, store: tab.shy ? tab.store : nil
+        ))
+        closePeek()
         prepare(page)
         page.go(to: url)
         withAnimation(Motion.settle) { peekTab = page }

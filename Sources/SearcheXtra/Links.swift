@@ -16,8 +16,7 @@ final class Links: NSObject, NSApplicationDelegate {
     @MainActor static var window: NSWindow? { Browsers.front?.window ?? Browsers.primary?.window }
     /// Whether the window has been asked for on a link's behalf (summon).
     private static var summoned = false
-    /// A first quit waits for an import worker to remove its temporary files.
-    /// AppKit calls us again when that cleanup has finished.
+    /// A quit waits briefly for import cleanup, then replies to AppKit once.
     private var terminationPending = false
 
     /// Quitting closes every window on the way out; that isn't a window
@@ -40,13 +39,12 @@ final class Links: NSObject, NSApplicationDelegate {
                 while Browser.hasActiveFileImports, Date() < until {
                     try? await Task.sleep(for: .milliseconds(50))
                 }
-                self.terminationPending = false
-                sender.terminate(nil)
+                sender.reply(toApplicationShouldTerminate: true)
             }
         }
-        // Returning from AppKit's first terminate call lets MainActor finish
-        // the worker continuation and remove it from Browser's registry.
-        return .terminateCancel
+        // AppKit resumes this termination after the reply, rather than
+        // starting another five-second wait through terminate(_:).
+        return .terminateLater
     }
 
     func applicationWillTerminate(_ notification: Notification) {

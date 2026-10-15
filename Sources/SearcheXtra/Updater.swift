@@ -67,6 +67,8 @@ final class Updater: ObservableObject {
     @Published private(set) var stage: Stage = .none
     /// True while the file is being fetched.
     @Published private(set) var checking = false
+    /// Failed requests are not evidence that this is the latest release.
+    @Published private(set) var checkFailed = false
     /// When the file was last read, for the line in Settings.
     @Published private(set) var lastChecked: Date?
 
@@ -87,7 +89,15 @@ final class Updater: ObservableObject {
     /// Where a line goes when there is one to say, handed over at launch.
     private var say: ((String) -> Void)?
 
-    private init() {
+    private let currentVersion: String
+    private let currentBuild: Int
+    private let fetchRelease: () async throws -> Release
+
+    init(version: String = Updater.version, build: Int = Updater.build,
+         fetchRelease: @escaping () async throws -> Release = Updater.fetch) {
+        currentVersion = version
+        currentBuild = build
+        self.fetchRelease = fetchRelease
         // The bundle a swap set aside goes once this process is done with
         // it — see Swap.sweep for why not sooner.
         NotificationCenter.default.addObserver(
@@ -137,24 +147,38 @@ final class Updater: ObservableObject {
         say?(L10n.text("Updater.1133"))
         check { [weak self] found in
             guard let self else { return }
-            if found == nil { self.say?(L10n.text("Updater.1134")); return }
+            if found == nil, !self.checkFailed { self.say?(L10n.text("Updater.1134")); return }
             // The waiting branch or `take` announces the next state afterward.
         }
     }
 
     /// Now, because somebody asked. `done` gets the newer build the feed
-    /// names, or nil when this is the latest; what becomes of it after that
-    /// is said through the line handed to `checkIfDue`.
+    /// names, or nil when current or the request failed (`checkFailed`).
+    /// What becomes of it is said through the line handed to `checkIfDue`.
     func check(then done: @escaping (Release?) -> Void) {
         guard !checking else { return }
         checking = true
+        checkFailed = false
+        let fetchRelease = self.fetchRelease
         Task { [weak self] in
-            let found = await Updater.fetch()
+            let found: Release
+            do { found = try await fetchRelease() }
+            catch {
+                guard let self else { return }
+                checking = false
+                checkFailed = true
+                // Keep both the last successful check and any release already
+                // offered. A failed request must not erase an available update.
+                say?(L10n.text("Updater.checkFailed"))
+                done(nil)
+                return
+            }
             guard let self else { return }
             checking = false
-            lastChecked = Date()
-            Store.settings.set(Date(), forKey: lastKey)
-            guard let found, (Updater.overridden ? found.build > Updater.build : (try? ExtensionVersion.isNewer(found.version, than: Updater.version)) == true), found.runsHere else {
+            let checked = Date()
+            lastChecked = checked
+            Store.settings.set(checked, forKey: lastKey)
+            guard (Updater.overridden ? found.build > currentBuild : (try? ExtensionVersion.isNewer(found.version, than: currentVersion)) == true), found.runsHere else {
                 // A build already swapped in stays ready whatever the feed
                 // says now.
                 if case .ready = stage {} else { stage = .none }
@@ -269,7 +293,7 @@ final class Updater: ObservableObject {
         return arguments + [Bundle.main.bundleURL.path]
     }
 
-    private static func fetch() async -> Release? {
+    static func fetch() async throws -> Release {
         if !overridden {
             guard let data = await get(feed, limit: 1 << 20),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -277,7 +301,7 @@ final class Updater: ObservableObject {
                   let tag = json["tag_name"] as? String,
                   let page = json["html_url"] as? String, let releaseURL = URL(string: page),
                   releaseURL.host == "github.com", releaseURL.path.hasPrefix("/small32/SearcheXtra/releases/"),
-                  let assets = json["assets"] as? [[String: Any]] else { return nil }
+                  let assets = json["assets"] as? [[String: Any]] else { throw URLError(.cannotParseResponse) }
             #if arch(x86_64)
             let suffix = "-x86_64.zip"
             #else
@@ -286,8 +310,10 @@ final class Updater: ObservableObject {
             guard let asset = assets.first(where: { ($0["name"] as? String)?.hasSuffix(suffix) == true }),
                   let text = asset["browser_download_url"] as? String, let archive = URL(string: text),
                   archive.scheme == "https", archive.host == "github.com",
-                  archive.path.hasPrefix("/small32/SearcheXtra/releases/download/") else { return nil }
-            return Release(version: tag.hasPrefix("v") ? String(tag.dropFirst()) : tag, build: 0,
+                  archive.path.hasPrefix("/small32/SearcheXtra/releases/download/") else { throw URLError(.cannotParseResponse) }
+            let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+            _ = try ExtensionVersion.isNewer(version, than: "0")
+            return Release(version: version, build: 0,
                            archive: archive, dmg: releaseURL, sha256: nil,
                            notes: json["body"] as? String, minimumSystemVersion: "14.0")
         }
@@ -302,7 +328,7 @@ final class Updater: ObservableObject {
               let build = (json["build"] as? Int) ?? Int(json["build"] as? String ?? ""),
               let archive = link(json["url"]),
               let dmg = link(json["dmg"])
-        else { return nil }
+        else { throw URLError(.cannotParseResponse) }
         let sha = (json["sha256"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let dmgSha = (json["dmgSha256"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let notes = (json["notes"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)

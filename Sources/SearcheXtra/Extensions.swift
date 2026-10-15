@@ -549,6 +549,29 @@ final class Extensions: NSObject, ObservableObject {
 
     // MARK: - installing
 
+    // Preparing a package suspends while its files are read off the main
+    // thread. Only one writer per id may commit, and removal invalidates it.
+    private var packageWork: [String: UUID] = [:]
+
+    private func beginPackageWork(_ id: String) -> UUID? {
+        guard packageWork[id] == nil else { return nil }
+        let token = UUID()
+        packageWork[id] = token
+        return token
+    }
+
+    private func finishPackageWork(_ id: String, token: UUID) {
+        guard packageWork[id] == token else { return }
+        packageWork[id] = nil
+        if busy == id { busy = nil }
+    }
+
+    // After an atomic replacement, the staged path contains the old package.
+    // Deleting it can be as expensive as preparing the new one.
+    nonisolated private static func discardPackage(_ staged: URL) {
+        Task.detached(priority: .utility) { try? FileManager.default.removeItem(at: staged) }
+    }
+
     /// A store link or an id, from the field in Settings or the bar that
     /// shows on a store page.
     /// `confirm: false` is for the bench in a test run only — there is no
@@ -562,7 +585,6 @@ final class Extensions: NSObject, ObservableObject {
             browser?.announce(L10n.text("Extensions.0401"))
             return
         }
-        busy = id
         Task { await install(id: id, confirm: confirm) }
     }
 
@@ -573,18 +595,22 @@ final class Extensions: NSObject, ObservableObject {
         // A store id, and nothing else, goes into the request and the folder
         // names below, whoever called.
         guard id.count == 32, id.allSatisfy({ ("a"..."p").contains($0) }) else { return }
-        guard !installed.contains(where: { $0.id == id }) else { return }
+        guard !installed.contains(where: { $0.id == id }), let token = beginPackageWork(id) else { return }
         busy = id
-        defer { busy = nil }
+        defer { finishPackageWork(id, token: token) }
         let staged = Extensions.stagingFolder(for: id)
-        defer { try? FileManager.default.removeItem(at: staged) }
+        defer { Extensions.discardPackage(staged) }
         do {
             let crx = try await Crx.fetch(id)
-            let zip = try Crx.verifiedZip(crx, id: id)
+            guard packageWork[id] == token else { return }
             let target = Extensions.folder(for: id)
-            try Crx.unpack(zip, into: staged)
-            try ExtensionShims.prepare(staged, fresh: true)
-            try await admit(staged, as: id, fromStore: true, finalFolder: target, confirm: confirm || !Store.testing)
+            try await Task.detached(priority: .userInitiated) {
+                let zip = try Crx.verifiedZip(crx, id: id)
+                try Crx.unpack(zip, into: staged)
+                try ExtensionShims.prepare(staged, fresh: true)
+            }.value
+            guard packageWork[id] == token else { return }
+            try await admit(staged, as: id, fromStore: true, finalFolder: target, confirm: confirm || !Store.testing, token: token)
         } catch {
             browser?.announce(error.localizedDescription)
         }
@@ -614,16 +640,22 @@ final class Extensions: NSObject, ObservableObject {
             browser?.announce(L10n.text("upstream.extension.alreadyLoaded"))
             return nil
         }
+        guard let token = beginPackageWork(id) else { return nil }
         let staged = Extensions.stagingFolder(for: id)
+        let parent = Extensions.folder
         return Task {
-            defer { try? FileManager.default.removeItem(at: staged) }
+            defer { finishPackageWork(id, token: token); Extensions.discardPackage(staged) }
+            guard packageWork[id] == token else { return }
             do {
-                try FileManager.default.createDirectory(at: Extensions.folder, withIntermediateDirectories: true)
-                // The folder itself, wherever a link to it leads.
-                try FileManager.default.copyItem(at: source.resolvingSymlinksInPath(), to: staged)
-                try Extensions.unlinkOutside(staged)
-                try ExtensionShims.prepare(staged, fresh: true)
-                try await admit(staged, as: id, fromStore: false, finalFolder: Extensions.folder(for: id), confirm: confirm || !Store.testing, source: source)
+                try await Task.detached(priority: .userInitiated) {
+                    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+                    // The folder itself, wherever a link to it leads.
+                    try FileManager.default.copyItem(at: source.resolvingSymlinksInPath(), to: staged)
+                    try Extensions.unlinkOutside(staged)
+                    try ExtensionShims.prepare(staged, fresh: true)
+                }.value
+                guard packageWork[id] == token else { return }
+                try await admit(staged, as: id, fromStore: false, finalFolder: Extensions.folder(for: id), confirm: confirm || !Store.testing, source: source, token: token)
             } catch {
                 browser?.announce(L10n.text("Extensions.0405", String(describing: error.localizedDescription)))
             }
@@ -634,16 +666,16 @@ final class Extensions: NSObject, ObservableObject {
     /// in developer mode. One loaded from a folder is copied in afresh from
     /// that folder first, so what its author just saved is what runs.
     func reload(_ id: String) {
-        guard let index = installed.firstIndex(where: { $0.id == id }), reloading.insert(id).inserted else { return }
+        guard let index = installed.firstIndex(where: { $0.id == id }), let token = beginPackageWork(id) else { return }
         let original = installed[index]
         let target = Extensions.folder(for: id)
         let staged = original.source.map { _ in Extensions.stagingFolder(for: id) }
         Task {
             defer {
-                if let staged { try? FileManager.default.removeItem(at: staged) }
-                reloading.remove(id)
+                if let staged { Extensions.discardPackage(staged) }
+                finishPackageWork(id, token: token)
             }
-            guard installed.contains(where: { $0.id == id }) else { return }
+            guard packageWork[id] == token, installed.contains(where: { $0.id == id }) else { return }
             if let path = original.source, let staged {
                 let source = URL(fileURLWithPath: path, isDirectory: true)
                 guard FileManager.default.fileExists(atPath: source.appendingPathComponent("manifest.json").path) else {
@@ -655,16 +687,20 @@ final class Extensions: NSObject, ObservableObject {
                     return
                 }
                 do {
-                    try FileManager.default.copyItem(at: source.resolvingSymlinksInPath(), to: staged)
-                    try Extensions.unlinkOutside(staged)
-                    try ExtensionShims.prepare(staged, fresh: true)
+                    try await Task.detached(priority: .userInitiated) {
+                        try FileManager.default.copyItem(at: source.resolvingSymlinksInPath(), to: staged)
+                        try Extensions.unlinkOutside(staged)
+                        try ExtensionShims.prepare(staged, fresh: true)
+                    }.value
                 } catch {
                     browser?.announce(L10n.text("Extensions.0407", String(describing: original.name), String(describing: error.localizedDescription)))
                     return
                 }
             }
+            guard packageWork[id] == token else { return }
             let resource = staged ?? target
             let found = try? await WKWebExtension(resourceBaseURL: resource)
+            guard packageWork[id] == token else { return }
             if found == nil, staged != nil {
                 browser?.announce(L10n.text("Extensions.0408", String(describing: original.name)))
                 return
@@ -683,7 +719,9 @@ final class Extensions: NSObject, ObservableObject {
             }
             // Loading and asking can both suspend. A removed extension must
             // not be put back by the work that was already in flight.
-            guard installed.contains(where: { $0.id == id }) else { return }
+            guard packageWork[id] == token,
+                  installed.contains(where: { $0.id == id && $0.version == original.version && $0.source == original.source && $0.permissions == original.permissions })
+            else { return }
             if let staged {
                 do {
                     try ExtensionFiles.replace(staged, at: target)
@@ -702,7 +740,7 @@ final class Extensions: NSObject, ObservableObject {
                 save()
             }
             guard let item = installed.first(where: { $0.id == id }), item.enabled else { return }
-            browser?.announce(await load(item) ? "\(item.name) reloaded" : L10n.text("Extensions.0411", String(describing: item.name)))
+            browser?.announce(await load(item) ? L10n.text("Extensions.reloaded", item.name) : L10n.text("Extensions.0411", String(describing: item.name)))
         }
     }
 
@@ -710,7 +748,6 @@ final class Extensions: NSObject, ObservableObject {
     /// as a relaunch would — at most once a minute, so one that can never
     /// start doesn't go round in circles.
     private var revived: [String: Date] = [:]
-    private var reloading: Set<String> = []
     /// Recent failed native messages, per extension and host.
     private var failures: [String: [Date]] = [:]
 
@@ -767,12 +804,13 @@ final class Extensions: NSObject, ObservableObject {
 
     /// Reads what was unpacked, asks, and — on yes — moves it into place and
     /// loads it. On no, nothing is left behind.
-    private func admit(_ staged: URL, as id: String, fromStore: Bool, finalFolder: URL, confirm: Bool = true, source: URL? = nil) async throws {
+    private func admit(_ staged: URL, as id: String, fromStore: Bool, finalFolder: URL, confirm: Bool = true, source: URL? = nil, token: UUID) async throws {
         let found = try await WKWebExtension(resourceBaseURL: staged)
+        guard packageWork[id] == token else { return }
         let name = found.displayName ?? id
         let wants = Extensions.describe(found, in: staged)
         let accepted = confirm ? await ask(install: name, wants: wants, icon: found.icon(for: CGSize(width: 64, height: 64))) : true
-        guard accepted, !installed.contains(where: { $0.id == id }) else { return }
+        guard accepted, packageWork[id] == token, !installed.contains(where: { $0.id == id }) else { return }
         let permissions = Extensions.grants(found, in: staged)
         try ExtensionFiles.replace(staged, at: finalFolder)
         unload(id)
@@ -796,6 +834,8 @@ final class Extensions: NSObject, ObservableObject {
     }
 
     func remove(_ id: String) {
+        packageWork[id] = nil
+        if busy == id { busy = nil }
         unload(id)
         ExtensionCapture.forget(id)
         errors[id] = nil
@@ -965,9 +1005,11 @@ final class Extensions: NSObject, ObservableObject {
 
     func update(_ item: Installed, manual: Bool = false, progress: ((String) -> Void)? = nil,
                 confirmPermissions: (([String]) async -> Bool)? = nil) async -> String? {
-        guard item.fromStore else { return nil }
-        if manual { guard busy == nil else { return nil }; busy = item.id }
-        defer { if manual { busy = nil } }
+        guard item.fromStore, installed.contains(where: { $0.id == item.id && $0.version == item.version }) else { return nil }
+        if manual, busy != nil { return nil }
+        guard let token = beginPackageWork(item.id) else { return nil }
+        if manual { busy = item.id }
+        defer { finishPackageWork(item.id, token: token) }
         progress?(L10n.text("extensions.checking"))
         do {
             var parts = URLComponents(string: "https://clients2.google.com/service/update2/crx")!
@@ -978,6 +1020,7 @@ final class Extensions: NSObject, ObservableObject {
                 URLQueryItem(name: "x", value: "id=\(item.id)&v=\(item.version)&uc"),
             ]
             let (data, response) = try await URLSession.shared.data(from: parts.url!)
+            guard packageWork[item.id] == token else { return nil }
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
                   let xml = String(data: data, encoding: .utf8),
                   // The answer is the <updatecheck> element alone: status="ok"
@@ -993,13 +1036,19 @@ final class Extensions: NSObject, ObservableObject {
                     .map({ String(check[$0].dropFirst(9).dropLast()) }) else { throw Crx.Refused.empty }
             guard try ExtensionVersion.isNewer(version, than: item.version) else { return manual ? L10n.text("extensions.latest") : nil }
             progress?(L10n.text("extensions.downloading"))
-            let zip = try Crx.verifiedZip(try await Crx.fetch(item.id), id: item.id)
+            let crx = try await Crx.fetch(item.id)
+            guard packageWork[item.id] == token else { return nil }
             let staged = Extensions.stagingFolder(for: item.id)
-            defer { try? FileManager.default.removeItem(at: staged) }
-            try Crx.unpack(zip, into: staged)
-            try ExtensionShims.prepare(staged, fresh: true)
+            defer { Extensions.discardPackage(staged) }
+            try await Task.detached(priority: .userInitiated) {
+                let zip = try Crx.verifiedZip(crx, id: item.id)
+                try Crx.unpack(zip, into: staged)
+                try ExtensionShims.prepare(staged, fresh: true)
+            }.value
+            guard packageWork[item.id] == token else { return nil }
             let found = try await WKWebExtension(resourceBaseURL: staged)
-            guard let current = installed.first(where: { $0.id == item.id }), current.fromStore,
+            guard packageWork[item.id] == token,
+                  let current = installed.first(where: { $0.id == item.id }), current.fromStore,
                   current.version == item.version else { return nil }
             guard let packageVersion = found.version else { throw Crx.Refused.empty }
             guard try ExtensionVersion.isNewer(packageVersion, than: current.version) else { return manual ? L10n.text("extensions.latest") : nil }
@@ -1012,11 +1061,12 @@ final class Extensions: NSObject, ObservableObject {
                     progress?(L10n.text("extensions.confirmUpdate"))
                     accepted = await confirmPermissions(Extensions.describe(found, in: staged))
                 } else {
-                    accepted = await ask(install: "An update to \(item.name)", wants: Extensions.describe(found, in: staged), icon: found.icon(for: CGSize(width: 64, height: 64)))
+                    accepted = await ask(install: L10n.text("Extensions.updateTo", item.name), wants: Extensions.describe(found, in: staged), icon: found.icon(for: CGSize(width: 64, height: 64)))
                 }
                 guard accepted else { return manual ? L10n.text("extensions.cancelled") : nil }
             }
-            guard let index = installed.firstIndex(where: { $0.id == item.id }), installed[index].fromStore,
+            guard packageWork[item.id] == token,
+                  let index = installed.firstIndex(where: { $0.id == item.id }), installed[index].fromStore,
                   installed[index].version == item.version,
                   installed[index].permissions == current.permissions else { return nil }
             let target = Extensions.folder(for: item.id)

@@ -111,6 +111,73 @@ final class VaultAndUpdaterTests: XCTestCase {
         XCTAssertTrue(release(minimum: "soon").runsHere)
     }
 
+    @MainActor
+    func testFailedCheckPreservesOfferedReleaseAndLastSuccessfulCheck() async throws {
+        guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
+        guard ProcessInfo.processInfo.environment["SEARCH_FEED"] == nil else {
+            throw XCTSkip("This test exercises the public release policy, not the signed test feed")
+        }
+        let storedCheck = Store.settings.object(forKey: "update.checked")
+        defer {
+            if let storedCheck { Store.settings.set(storedCheck, forKey: "update.checked") }
+            else { Store.settings.removeObject(forKey: "update.checked") }
+        }
+        let next = release(minimum: "14")
+        var requestFails = false
+        let updater = Updater(version: "1.0", build: 1) {
+            if requestFails { throw URLError(.notConnectedToInternet) }
+            return next
+        }
+        let offered: Updater.Release? = await withCheckedContinuation { continuation in
+            updater.check { continuation.resume(returning: $0) }
+        }
+        XCTAssertEqual(offered, next)
+        XCTAssertEqual(updater.stage, .offered(next))
+        XCTAssertFalse(updater.checkFailed)
+        let checked = try XCTUnwrap(updater.lastChecked)
+        XCTAssertEqual(Store.settings.object(forKey: "update.checked") as? Date, checked)
+
+        requestFails = true
+        let failed: Updater.Release? = await withCheckedContinuation { continuation in
+            updater.check { continuation.resume(returning: $0) }
+        }
+        XCTAssertNil(failed)
+        XCTAssertTrue(updater.checkFailed)
+        XCTAssertFalse(updater.checking)
+        XCTAssertEqual(updater.stage, .offered(next))
+        XCTAssertEqual(updater.lastChecked, checked)
+        XCTAssertEqual(Store.settings.object(forKey: "update.checked") as? Date, checked)
+
+        requestFails = false
+        let retried: Updater.Release? = await withCheckedContinuation { continuation in
+            updater.check { continuation.resume(returning: $0) }
+        }
+        XCTAssertEqual(retried, next)
+        XCTAssertFalse(updater.checkFailed)
+        XCTAssertEqual(updater.stage, .offered(next))
+    }
+
+    @MainActor
+    func testFailedFirstCheckDoesNotRecordASuccessfulTimestamp() async throws {
+        guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
+        let storedCheck = Store.settings.object(forKey: "update.checked")
+        let prior = Date(timeIntervalSince1970: 1234)
+        Store.settings.set(prior, forKey: "update.checked")
+        defer {
+            if let storedCheck { Store.settings.set(storedCheck, forKey: "update.checked") }
+            else { Store.settings.removeObject(forKey: "update.checked") }
+        }
+        let updater = Updater(version: "1.0", build: 1) { throw URLError(.badServerResponse) }
+        let found: Updater.Release? = await withCheckedContinuation { continuation in
+            updater.check { continuation.resume(returning: $0) }
+        }
+        XCTAssertNil(found)
+        XCTAssertTrue(updater.checkFailed)
+        XCTAssertNil(updater.lastChecked)
+        XCTAssertEqual(updater.stage, .none)
+        XCTAssertEqual(Store.settings.object(forKey: "update.checked") as? Date, prior)
+    }
+
     func testGarbageIsNotAFeed() {
         XCTAssertNil(Updater.opened(Data("not a zip".utf8)))
         XCTAssertNil(Updater.opened(Data()))

@@ -1,3 +1,5 @@
+SearcheXtra 2.1.1 修复了部分BUG。 SearcheXtra 2.1.1 fixes some bugs.
+
 SearcheXtra 2.1.0 重构超级拖拽，支持文字、链接和图片的方向规则与鼠标指针预览，并修复书签网页图标、右键操作和中键后台打开。 SearcheXtra 2.1.0 rebuilds super drag with direction rules and pointer previews for text, links, and images, and fixes bookmark icons, context actions, and middle-click background opening.
 
 SearcheXtra 2.0.5 为 Windows 和 macOS 新增超级拖拽，支持自定义规则、网站例外和配置导入导出，完善书签菜单切换，并修复书签图标显示与中键后台打开。 SearcheXtra 2.0.5 adds Super Drag on Windows and macOS with custom rules, website exclusions, and configuration import/export, improves bookmark menu switching, and fixes bookmark icons and middle-click background opening.

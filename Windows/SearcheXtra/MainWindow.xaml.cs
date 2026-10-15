@@ -114,7 +114,7 @@ public sealed partial class MainWindow : Window
         SpacesButton.Content = space == "Default" ? T("Default", "默认空间") : space;
         if (Settings.BookmarksBar) RefreshBookmarkBar();
         foreach (var tab in tabs) { tab.UseIcons = Settings.IconGlyphs; if (views.TryGetValue(tab.Id, out var page) && page.Control.CoreWebView2 is { } core) tab.Favicon = Settings.IconGlyphs ? core.FaviconUri : ""; if (!Settings.ShowsReading) tab.Reading = 0; }
-        foreach (var view in views.Values) { view.ApplySettings(); _ = view.UpdateDocumentScriptAsync(); }
+        foreach (var view in views.Values.Concat(previewViews.Values.Select(preview => preview.View))) { view.ApplySettings(); _ = view.UpdateDocumentScriptAsync(); }
         UpdateSidebarFold();
         RefreshPinnedExtensions();
         UpdateBench();
@@ -185,7 +185,7 @@ public sealed partial class MainWindow : Window
             view.NewWindowTarget += async _ => { var child = AddTab("", true, tab.IsPrivate); return (await GetViewAsync(child)).Control.CoreWebView2; };
             view.OpenLinkRequested += (url, foreground) => AddTab(url, foreground, tab.IsPrivate);
             view.HoveredLink += url => { if (active == tab) Status.Text = url; };
-            view.PreviewRequested += async url => await PreviewLinkAsync(url);
+            view.PreviewRequested += async url => await PreviewLinkAsync(url, tab);
             view.PermissionRequested += args => HandleSitePermissionAsync(tab, view, args);
             view.FlowDragRequested += request=>ExecuteFlowDragAsync(tab,view,request);
             view.WebsiteIconChanged += () => { _ = AdoptBookmarkIconAsync(view, tab); };
@@ -403,6 +403,8 @@ public sealed partial class MainWindow : Window
         benchCancellation?.Cancel(); benchCancellation?.Dispose(); benchCancellation = null;
         foreach (var view in views.Values) view.Dispose();
         views.Clear();
+        foreach (var preview in previewViews.Values) preview.View.Dispose();
+        previewViews.Clear();
     }
 
     private void Back_Click(object sender, RoutedEventArgs e) { if (ActiveView?.Control.CoreWebView2?.CanGoBack == true) ActiveView.Control.CoreWebView2.GoBack(); }

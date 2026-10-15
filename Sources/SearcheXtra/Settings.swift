@@ -754,6 +754,7 @@ struct SettingsPanel: View {
     }
 
     private var versionDetail: String {
+        if updater.checkFailed { return L10n.text("Updater.checkFailed") }
         switch updater.stage {
         case .none:
             return updater.lastChecked.map { L10n.text("Settings.0853", String(describing: $0.formatted(.relative(presentation: .named)))) }
@@ -775,7 +776,7 @@ struct SettingsPanel: View {
         case .none:
             Pill(updater.checking ? L10n.text("Settings.0859") : L10n.text("Settings.0860")) {
                 updater.check { found in
-                    if found == nil { browser.announce(L10n.text("Settings.0861")) }
+                    if found == nil, !updater.checkFailed { browser.announce(L10n.text("Settings.0861")) }
                 }
             }
             .disabled(updater.checking)

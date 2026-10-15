@@ -40,6 +40,11 @@ final class LittleWindow: NSObject, NSWindowDelegate {
     /// The small windows open now, newest last — for the bench.
     static var all: [LittleWindow] { open }
 
+    /// The pages this browser prepared, including ones outside its tab row.
+    static func tabs(for browser: Browser) -> [Tab] {
+        open.filter { $0.browser === browser }.map(\.tab)
+    }
+
     /// Closed as its button closes it — for the bench.
     func close() { window.performClose(nil) }
 

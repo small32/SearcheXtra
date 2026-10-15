@@ -90,7 +90,7 @@ enum FlowDrag {
 }
 @MainActor final class FlowDragSettings:ObservableObject {
     static let shared=FlowDragSettings()
-    @Published var config=FlowDragConfig() {didSet {if let data=try? JSONEncoder().encode(config){Store.settings.set(data,forKey:"flowDrag.config")};for browser in Browsers.all {for tab in browser.tabs + browser.parkedTabs + [browser.peekTab].compactMap({$0}) {tab.refreshFlowDrag()}}}}
+    @Published var config=FlowDragConfig() {didSet {if let data=try? JSONEncoder().encode(config){Store.settings.set(data,forKey:"flowDrag.config")};for browser in Browsers.all {for tab in browser.tabs + browser.parkedTabs + [browser.peekTab].compactMap({$0}) + LittleWindow.tabs(for: browser) {tab.refreshFlowDrag()}}}}
     init() {if let data=Store.settings.data(forKey:"flowDrag.config"),let value=try? JSONDecoder().decode(FlowDragConfig.self,from:data),(try? value.validate()) != nil {config=value}}
     static var source:String {L10n.resourceBundle.url(forResource:"FlowDrag",withExtension:"js").flatMap{try? String(contentsOf:$0,encoding:.utf8)} ?? ""}
     static var options:String {
@@ -139,7 +139,10 @@ final class FlowDragRelay:NSObject,WKScriptMessageHandler {
 }
 extension Browser {
     func performFlowDrag(_ source:Tab,_ p:FlowDragRequest) {
-        guard tabs.contains(where:{$0.id==source.id}),let r=FlowDrag.resolve(FlowDragSettings.shared.config,p),r.action != "none" else{return}
+        let inRow = tabs.contains { $0 === source }
+        let inPeek = peekTab === source
+        let inLittle = LittleWindow.tabs(for: self).contains { $0 === source }
+        guard inRow || inPeek || inLittle,let r=FlowDrag.resolve(FlowDragSettings.shared.config,p),r.action != "none" else{return}
         var target:URL?,copy:String?
         switch r.action {
         case "search":target=r.autoDetectUrl ? Address.url(from:p.text).flatMap{FlowDrag.web($0.absoluteString) ? $0:nil}:nil;if target==nil {target=Engine.url(for:p.text,template:FlowDrag.template(r.engine,current:prefs.engine.template(custom:prefs.customEngine),custom:r.url))}
@@ -159,20 +162,46 @@ extension Browser {
         if let copy {NSPasteboard.general.clearContents();NSPasteboard.general.setString(copy,forType:.string)}
         if let target,FlowDrag.web(target.absoluteString) {
             let privately=source.shy || r.incognito
-            if r.position=="current",privately==source.shy {select(source);source.go(to:target)}
+            if r.position=="current",privately==source.shy {
+                if inRow {select(source)}
+                source.go(to:target)
+            }
             else {
-                let opened:Tab
-                if r.incognito && !source.shy {newShyTab();guard let fresh=active else{return};opened=fresh;opened.go(to:target);if !r.active {select(source)}} else {opened=open(target,foreground:r.active,from:source,mayWait:false)}
-                if let index=tabs.firstIndex(where:{$0.id==source.id}) {
-                    let place=r.position=="first" ? 0:r.position=="last" ? tabs.count-1:r.position=="left" ? index:index+1
-                    move(opened,to:min(place,tabs.count-1))
+                let anchor = inRow ? source : active
+                // A fresh private context lets open keep a background action in
+                // the background, without selecting a tab outside the row.
+                let opener = r.incognito && !source.shy ? Tab(shy: true) : source
+                let opened = open(target,foreground:r.active,from:opener,mayWait:false)
+                placeFlowDragTab(opened, position: r.position, relativeTo: anchor)
+                if r.active {
+                    if inPeek {closePeek()}
+                    if inLittle, !Store.testing {window?.makeKeyAndOrderFront(nil)}
                 }
             }
         }
         announce(L10n.text("flowDrag.done"))
     }
+    /// Use displayed positions so a split stays together and ordinary tabs
+    /// never try to land among the pinned squares.
+    private func placeFlowDragTab(_ opened: Tab, position: String, relativeTo source: Tab?) {
+        let shown = displayedTabs
+        guard let from = shown.firstIndex(where: { $0 === opened }),
+              let first = shown.firstIndex(where: { $0.pin == nil }),
+              let last = shown.lastIndex(where: { $0.pin == nil }) else { return }
+        let destination: Int
+        if position == "first" { destination = first }
+        else if position == "last" { destination = last }
+        else if let source,
+                let anchor = shown.firstIndex(where: { $0.id == (split(for: source)?.left ?? source.id) }) {
+            destination = position == "left" ? anchor - (from < anchor ? 1 : 0) : anchor + (from > anchor ? 1 : 0)
+        } else { return }
+        moveDisplayedTab(opened, to: min(last, max(first, destination)))
+    }
     private func saveFlowDragImage(_ url:URL,source:Tab,subdir:String) {
         if subdir.isEmpty {if let web=source.built {downloadImage(at:url,from:web)};return}
+        // Capture the source window's folder before cookies or the network
+        // return: the user may switch spaces while this image downloads.
+        let directory = downloadsFolder.appendingPathComponent(subdir,isDirectory:true)
         source.store.httpCookieStore.getAllCookies { [weak self] cookies in
             Task { @MainActor in
                 guard let self else{return}
@@ -183,7 +212,7 @@ extension Browser {
                     let (data,response)=try await session.data(for:URLRequest(url:url))
                     guard let http=response as? HTTPURLResponse,(200..<300).contains(http.statusCode) else{throw FlowDrag.Invalid()}
                     var name=URL(fileURLWithPath:response.suggestedFilename ?? url.lastPathComponent).lastPathComponent;if name.isEmpty||name=="."||name==".." {name="image"}
-                    let directory=self.prefs.downloads.appendingPathComponent(subdir,isDirectory:true);try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
+                    try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
                     var destination=directory.appendingPathComponent(name);var i=1
                     while FileManager.default.fileExists(atPath:destination.path){destination=directory.appendingPathComponent((name as NSString).deletingPathExtension+" (\(i))"+((name as NSString).pathExtension.isEmpty ? "":"."+(name as NSString).pathExtension));i+=1}
                     try data.write(to:destination,options:.withoutOverwriting)

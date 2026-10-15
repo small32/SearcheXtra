@@ -5,6 +5,7 @@ on:
     branches: ['codex/**']
     paths:
       - 'Sources/SearcheXtra/**'
+      - 'Tests/SearcheXtraTests/**'
       - 'Tests/verify-macos-app-launch.sh'
       - 'Package.swift'
       - 'build.sh'
@@ -45,6 +46,9 @@ jobs:
         env:
           SEARCHEXTRA_LAUNCH_LOG_DIR: build/macos-launch-smoke/fixed
         run: bash Tests/verify-macos-app-launch.sh build/SearcheXtra.app "$(swift build -c release --arch arm64 -Xswiftc -Osize --show-bin-path)/SearcheXtra_SearcheXtra.bundle"
+
+      - name: Test macOS browser regressions
+        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter 'BookmarkBarTests|BookmarkIconTests|BookmarkManagerTests|MiddleClickTests|ExtensionVersionTests|ExtensionNativeTests|ExtensionLifecycleTests|FlowDragTests|FlowDragAuxiliaryTests|PrivacyAndWindowTests|VaultAndUpdaterTests'
 
       - name: Package verified app
         shell: bash

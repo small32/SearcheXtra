@@ -1,4 +1,13 @@
 {
+  "Updater.checkFailed": {"en":"Could not check for updates. Please try again later.","zh-Hans":"无法检查更新，请稍后重试。"},
+  "Extensions.reloaded": {"en":"{0} reloaded","zh-Hans":"已重新加载 {0}"},
+  "Extensions.updateTo": {"en":"An update to {0}","zh-Hans":"更新 {0}"},
+  "Crx.notAnID": {"en":"That isn't a Chrome Web Store link or extension id","zh-Hans":"请输入有效的 Chrome 应用商店链接或扩展 ID"},
+  "Crx.download": {"en":"The Chrome Web Store answered {0}","zh-Hans":"Chrome 应用商店请求失败（状态码：{0}）"},
+  "Crx.empty": {"en":"The Chrome Web Store has nothing for that id — it may have been taken down, or only exist for old versions of Chrome","zh-Hans":"Chrome 应用商店未提供此扩展，可能已下架或仅支持旧版 Chrome"},
+  "Crx.notCrx": {"en":"What came back isn't a Chrome extension","zh-Hans":"下载的文件不是有效的 Chrome 扩展"},
+  "Crx.unsignedOrWrong": {"en":"The extension's signature doesn't hold up","zh-Hans":"扩展签名验证失败"},
+  "Crx.unpack": {"en":"The extension couldn't be unpacked","zh-Hans":"无法解压扩展文件"},
   "bookmarks.context.open": {"en":"Open","zh-Hans":"打开"},
   "bookmarks.context.openTab": {"en":"Open in new tab","zh-Hans":"在新标签页中打开"},
   "bookmarks.context.openOneWindow": {"en":"Open in new window","zh-Hans":"在新窗口中打开"},

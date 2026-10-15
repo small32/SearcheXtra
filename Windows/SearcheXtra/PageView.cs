@@ -12,6 +12,7 @@ public sealed partial class PageView : IDisposable
     private readonly DataStore store;
     private readonly Action changed;
     private readonly Action<string> open;
+    private readonly bool recordVisits;
     private Task? initialization;
     private bool disposed;
     private readonly CancellationTokenSource lifetime = new();
@@ -36,8 +37,8 @@ public sealed partial class PageView : IDisposable
     public event Func<string, Task<CoreWebView2>>? NewWindowTarget;
     public event Action<string, bool>? OpenLinkRequested;
 
-    public PageView(BrowserTab tab, DataStore store, Action changed, Action<string> open)
-    { this.tab = tab; this.store = store; this.changed = changed; this.open = open; }
+    public PageView(BrowserTab tab, DataStore store, Action changed, Action<string> open, bool recordVisits = true)
+    { this.tab = tab; this.store = store; this.changed = changed; this.open = open; this.recordVisits = recordVisits; }
 
     private static Task<CoreWebView2Environment> EnvironmentAsync() => environment ??= CoreWebView2Environment.CreateWithOptionsAsync("", Path.Combine(DataStore.Root, "WebView2"), new CoreWebView2EnvironmentOptions { AreBrowserExtensionsEnabled = true, EnableTrackingPrevention = true }).AsTask();
     public Task InitializeAsync() => initialization ??= InitializeCoreAsync();
@@ -155,14 +156,14 @@ public sealed partial class PageView : IDisposable
     private async void NavigationCompleted(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
     {
         tab.Loading = false;
-        if (args.IsSuccess && !tab.IsPrivate && AddressParser.IsWeb(tab.Url))
+        if (args.IsSuccess && recordVisits && !tab.IsPrivate && AddressParser.IsWeb(tab.Url))
         {
             store.History.Insert(0, new(tab.Url, tab.Title, DateTimeOffset.Now));
             if (store.History.Count > 10000) store.History.RemoveRange(10000, store.History.Count - 10000);
         }
         if (!args.IsSuccess) tab.Title = $"{args.WebErrorStatus}";
         changed();
-        if (args.IsSuccess && !tab.IsPrivate && store.Settings.SearchesSites && Uri.TryCreate(tab.Url, UriKind.Absolute, out var page))
+        if (args.IsSuccess && recordVisits && !tab.IsPrivate && store.Settings.SearchesSites && Uri.TryCreate(tab.Url, UriKind.Absolute, out var page))
         { var description = JsonSerializer.Deserialize<string>(await sender.ExecuteScriptAsync("document.querySelector('link[rel~=search][type=\"application/opensearchdescription+xml\"]')?.href || ''")) ?? ""; await SiteSearch.LearnAsync(store.Settings, page, description); changed(); }
         ApplySettings();
         if (args.IsSuccess && !tab.IsPrivate && store.Settings.FillsPasswords && AddressParser.IsWeb(sender.Source))

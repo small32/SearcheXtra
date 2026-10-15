@@ -235,13 +235,14 @@ final class Favicons: ObservableObject {
         }
         guard !busy.contains(host), changed || !missing.contains(host) else { return }
         busy.insert(host)
-
-        tab.web.evaluateJavaScript(Favicons.probe) { [weak self, weak tab] answer, _ in
+        // The tab may close before the probe replies. Its privacy belongs to
+        // this request, even after the tab itself has been released.
+        let shy = tab.shy || !tab.store.isPersistent
+        tab.web.evaluateJavaScript(Favicons.probe) { [weak self] answer, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let declared = (answer as? [[String: String]]) ?? []
                 let candidates = Favicons.rank(declared, page: url, dark: dark)
-                let shy = tab?.shy ?? false
                 Task { await self.download(candidates, host: host, key: key, shy: shy) }
             }
         }

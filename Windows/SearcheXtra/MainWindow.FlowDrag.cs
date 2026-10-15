@@ -6,7 +6,8 @@ public sealed partial class MainWindow
     private async Task ExecuteFlowDragAsync(BrowserTab source,PageView view,FlowDragRequest request)
     {
         var rule=FlowDrag.Resolve(Settings.FlowDrag,request);
-        if(rule==null||rule.Action=="none"||view.IsDisposed||!tabs.Contains(source))return;
+        var isPreview=previewViews.TryGetValue(source.Id,out var preview)&&preview.View==view;
+        if(rule==null||rule.Action=="none"||view.IsDisposed||closing||!tabs.Contains(source)&&!isPreview)return;
         try {
             string? target=null,copy=null;
             switch(rule.Action) {
@@ -33,10 +34,13 @@ public sealed partial class MainWindow
             if(target!=null) {
                 if(!AddressParser.IsWeb(target))throw new InvalidOperationException();
                 var privately=source.IsPrivate||rule.Incognito;
-                if(rule.Position=="current"&&privately==source.IsPrivate){source.Url=target;await SelectAsync(source);view.Navigate(target);}
+                if(rule.Position=="current"&&privately==source.IsPrivate){source.Url=target;if(!isPreview)await SelectAsync(source);view.Navigate(target);}
                 else {
-                    var opened=AddTab(target,rule.Active,privately,loadBackground:false);
-                    var index=rule.Position switch {"first"=>0,"left"=>tabs.IndexOf(source),"right"=>tabs.IndexOf(source)+1,_=>tabs.Count-1};
+                    if(isPreview&&rule.Active)DismissOverlay();
+                    var opened=AddTab(target,rule.Active,privately,inSpace:source.Space,loadBackground:false);
+                    var anchor=isPreview?preview.Owner:source;
+                    var first=tabs.Select((tab,index)=>(tab,index)).FirstOrDefault(pair=>pair.tab.Space==source.Space&&!pair.tab.Pinned).index;
+                    var index=rule.Position switch {"first"=>first,"left"=>tabs.IndexOf(anchor),"right"=>tabs.IndexOf(anchor)+1,_=>tabs.Count-1};
                     tabs.Move(tabs.IndexOf(opened),Math.Clamp(index,0,tabs.Count-1));RefreshTabLists();
                     if(!rule.Active)await LoadBackgroundAsync(opened);
                 }
@@ -47,13 +51,14 @@ public sealed partial class MainWindow
     private async Task SaveFlowDragImageAsync(PageView view,string url,string subdir,bool privately)
     {
         if(!AddressParser.IsWeb(url))throw new InvalidOperationException();
+        var directory=Path.Combine(Settings.DownloadsFolder,subdir);
         var cookies=new System.Net.CookieContainer();
         foreach(var c in await view.Control.CoreWebView2.CookieManager.GetCookiesAsync(url)){try{cookies.Add(new System.Net.Cookie(c.Name,c.Value,c.Path,c.Domain){Secure=c.IsSecure,HttpOnly=c.IsHttpOnly});}catch(System.Net.CookieException){}}
         using var client=new HttpClient(new HttpClientHandler{CookieContainer=cookies}){Timeout=TimeSpan.FromMinutes(5)};
         using var response=await client.GetAsync(url,HttpCompletionOption.ResponseHeadersRead,view.Lifetime);response.EnsureSuccessStatusCode();
         var name=response.Content.Headers.ContentDisposition?.FileNameStar??response.Content.Headers.ContentDisposition?.FileName?.Trim('"')??Uri.UnescapeDataString(new Uri(url).AbsolutePath.Split('/').Last());
         name=string.Concat(name.Select(c=>Path.GetInvalidFileNameChars().Contains(c)?'_':c));if(string.IsNullOrWhiteSpace(name)||name is "." or "..")name="image";
-        var directory=Path.Combine(Settings.DownloadsFolder,subdir);Directory.CreateDirectory(directory);
+        Directory.CreateDirectory(directory);
         var path=Path.Combine(directory,name);for(var i=1;File.Exists(path);i++)path=Path.Combine(directory,$"{Path.GetFileNameWithoutExtension(name)} ({i}){Path.GetExtension(name)}");
         await using(var file=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.None)){try{await response.Content.CopyToAsync(file,view.Lifetime);}catch{file.Close();File.Delete(path);throw;}}
         try{await File.WriteAllTextAsync(path+":Zone.Identifier","[ZoneTransfer]\r\nZoneId=3\r\n");}catch(IOException){}
