@@ -92,7 +92,7 @@ enum FlowDrag {
     static let shared=FlowDragSettings()
     @Published var config=FlowDragConfig() {didSet {if let data=try? JSONEncoder().encode(config){Store.settings.set(data,forKey:"flowDrag.config")};for browser in Browsers.all {for tab in browser.tabs + browser.parkedTabs + [browser.peekTab].compactMap({$0}) {tab.refreshFlowDrag()}}}}
     init() {if let data=Store.settings.data(forKey:"flowDrag.config"),let value=try? JSONDecoder().decode(FlowDragConfig.self,from:data),(try? value.validate()) != nil {config=value}}
-    static var source:String {Bundle.module.url(forResource:"FlowDrag",withExtension:"js").flatMap{try? String(contentsOf:$0,encoding:.utf8)} ?? ""}
+    static var source:String {L10n.resourceBundle.url(forResource:"FlowDrag",withExtension:"js").flatMap{try? String(contentsOf:$0,encoding:.utf8)} ?? ""}
     static var options:String {
         let labels=Dictionary(uniqueKeysWithValues:FlowDrag.objects.flatMap(FlowDrag.actions).reduce(into:Set<String>()){$0.insert($1)}.map{($0,L10n.text("flowDrag.action."+$0))})
         guard let data=try? JSONSerialization.data(withJSONObject:["config":JSONSerialization.jsonObject(with:JSONEncoder().encode(shared.config)),"labels":labels,"pointerDrag":true]),let text=String(data:data,encoding:.utf8) else{return "{}"}
