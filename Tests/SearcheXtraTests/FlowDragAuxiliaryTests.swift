@@ -10,11 +10,14 @@ final class FlowDragAuxiliaryTests: XCTestCase {
     private var previousSpaces = false
     private var previousGroups = false
     private var previousSplit = false
+    private var previousPins: [UUID: [PinDef]] = [:]
 
     override func setUp() async throws {
         guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
+        Pins.load()
+        previousPins = Pins.bySpace
         previousConfig = FlowDragSettings.shared.config
         previousSpaces = Shared.prefs.usesSpaces
         previousGroups = Shared.prefs.usesTabGroups
@@ -22,22 +25,34 @@ final class FlowDragAuxiliaryTests: XCTestCase {
         Shared.prefs.usesSpaces = false
         Shared.prefs.usesTabGroups = false
         Shared.prefs.splitView = false
+        // WindowRecord starts with an empty row, but Browser reconciles the
+        // globally shared pins into it. Keep each fixture's row independent.
+        for space in Array(Pins.bySpace.keys) { Pins.forget(space) }
         browser = Browser(record: WindowRecord(), opensStartPage: false)
+        XCTAssertEqual(browser.tabs.count, 1)
+        XCTAssertNil(browser.active?.pin)
     }
 
     override func tearDown() async throws {
-        guard let browser else { return }
-        for little in LittleWindow.all where LittleWindow.tabs(for: browser).contains(where: { $0 === little.tab }) {
-            little.close()
+        guard browser != nil else { return }
+        autoreleasepool {
+            let fixture = browser!
+            for little in LittleWindow.all where LittleWindow.tabs(for: fixture).contains(where: { $0 === little.tab }) {
+                little.close()
+            }
+            fixture.closeAll()
+            fixture.dozing?.invalidate()
+            FlowDragSettings.shared.config = previousConfig
+            let spaces = Set(Pins.bySpace.keys).union(previousPins.keys)
+            for space in spaces { Pins.set(space, previousPins[space] ?? [], from: fixture) }
+            // rememberSession's delayed callback is weak. Release the owner
+            // before restoring preferences, which can otherwise write it again.
+            browser = nil
         }
-        browser.closePeek()
-        browser.tabs.forEach { $0.close() }
-        browser.parkedTabs.forEach { $0.close() }
-        browser.dozing?.invalidate()
-        FlowDragSettings.shared.config = previousConfig
         Shared.prefs.usesSpaces = previousSpaces
         Shared.prefs.usesTabGroups = previousGroups
         Shared.prefs.splitView = previousSplit
+        Disk.drain()
     }
 
     func testPrivatePeekAndItsBackgroundDragKeepSourceSignIns() throws {
@@ -114,7 +129,7 @@ final class FlowDragAuxiliaryTests: XCTestCase {
         let selected = browser.activeID
         configure(active: false)
         let other = Browser(record: WindowRecord(), opensStartPage: false)
-        defer { other.tabs.forEach { $0.close() }; other.dozing?.invalidate() }
+        defer { other.closeAll(); other.dozing?.invalidate() }
         let otherCount = other.tabs.count
         other.performFlowDrag(little.tab, request())
         XCTAssertEqual(other.tabs.count, otherCount)
@@ -145,6 +160,8 @@ final class FlowDragAuxiliaryTests: XCTestCase {
     func testRightPositionKeepsSourceSplitTogether() throws {
         Shared.prefs.splitView = true
         let left = try XCTUnwrap(browser.active)
+        XCTAssertEqual(browser.tabs.count, 1)
+        XCTAssertNil(left.pin)
         let right = browser.open(url("right"), foreground: true)
         browser.pair(right, with: left, onLeft: false)
         configure(position: "right", active: false)
