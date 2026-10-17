@@ -106,6 +106,15 @@ private struct ExtensionManagerCard: View {
                     get: { item.pinned == true }, set: { extensions.setPinned(item.id, $0) }
                 ))
                 .toggleStyle(.checkbox)
+                if extensions.supportsUserScripts(item.id) {
+                    Toggle(L10n.text("extensions.userScripts.label"), isOn: Binding(
+                        get: { Extensions.userScriptsAllowed(item.id) },
+                        set: { extensions.setUserScriptsAllowed(item.id, $0) }
+                    )).toggleStyle(.checkbox)
+                        .disabled(extensions.busy == item.id)
+                    Text(L10n.text("extensions.userScripts.detail"))
+                        .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                }
                 Pill(L10n.text("extensions.open")) { extensions.press(item.id) }
                     .disabled(!item.enabled)
                 if context?.optionsPageURL != nil {

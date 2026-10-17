@@ -5371,6 +5371,18 @@
     "en": "{0} wasn't reloaded — its folder now leads somewhere else",
     "zh-Hans": "未重新加载 {0}：扩展目录已指向其他位置。"
   },
+  "extensions.userScripts.label": {
+    "en": "Allow user scripts",
+    "zh-Hans": "允许用户脚本"
+  },
+  "extensions.userScripts.detail": {
+    "en": "Allow this extension to run user scripts on websites. Changing this setting reloads the extension. Refresh open webpages to apply it.",
+    "zh-Hans": "允许此扩展在网站上运行用户脚本。更改后会重新加载扩展，请刷新已打开的网页使其生效。"
+  },
+  "extensions.userScripts.disabled": {
+    "en": "User scripts are disabled. Enable Allow user scripts in this extension's details.",
+    "zh-Hans": "用户脚本已停用。请在此扩展的详情中开启“允许用户脚本”。"
+  },
   "updates.github.title": {
     "en": "Updates from GitHub",
     "zh-Hans": "从 GitHub 更新"

@@ -1,4 +1,5 @@
 import AppKit
+import WebKit
 import XCTest
 @testable import SearcheXtra
 
@@ -86,5 +87,82 @@ final class ExtensionLifecycleTests: XCTestCase {
         XCTAssertFalse(loaded)
         XCTAssertFalse(Extensions.shared.installed.contains { $0.id == id })
         XCTAssertNil(Extensions.shared.contexts[id])
+    }
+
+    func testUserScriptSwitchIsOptInReloadsAndPreservesSavedScripts() async throws {
+        let manifest: [String: Any] = ["manifest_version": 3, "name": "Userscript Fixture", "version": "1.0",
+                                       "permissions": ["userScripts", "scripting"], "host_permissions": ["<all_urls>"]]
+        try JSONSerialization.data(withJSONObject: manifest).write(to: folder.appendingPathComponent("manifest.json"))
+        let install = try XCTUnwrap(Extensions.shared.installFolder(at: folder, confirm: false))
+        await install.value
+        XCTAssertTrue(Extensions.shared.supportsUserScripts(id))
+        XCTAssertFalse(Extensions.userScriptsAllowed(id))
+        let first = try XCTUnwrap(Extensions.shared.contexts[id])
+        let denied = try await ExtensionShims.answer(["api": "userScripts.file", "args": [["id": "probe", "js": [["code": "void 0;"]]]]], from: first, owner: .shared) as? [String: Any]
+        XCTAssertEqual(denied?["error"] as? String, L10n.text("extensions.userScripts.disabled"))
+
+        let saved = Extensions.folder(for: id).appendingPathComponent("_search/userscripts.json")
+        try FileManager.default.createDirectory(at: saved.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let retained: [String: Any] = ["id": "retained", "matches": ["https://not-found.scriptcat.org/*"],
+                                       "js": [["code": "void 0;"]], "world": "USER_SCRIPT"]
+        let scripts = try JSONSerialization.data(withJSONObject: [retained])
+        try scripts.write(to: saved)
+        let enable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, true))
+        let enabled = await enable.value
+        XCTAssertTrue(enabled)
+        XCTAssertTrue(Extensions.userScriptsAllowed(id))
+        let second = try XCTUnwrap(Extensions.shared.contexts[id])
+        XCTAssertFalse(first === second)
+        let disable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, false))
+        let disabled = await disable.value
+        XCTAssertTrue(disabled)
+        XCTAssertFalse(Extensions.userScriptsAllowed(id))
+        XCTAssertEqual(try Data(contentsOf: saved), scripts)
+        let enabledAgain = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, true))
+        let restored = await enabledAgain.value
+        XCTAssertTrue(restored)
+        XCTAssertEqual(try Data(contentsOf: saved), scripts)
+        Extensions.shared.remove(id)
+        XCTAssertNil(Store.settings.object(forKey: "extensions.userscripts.\(id!)"))
+    }
+
+    func testUserScriptWorldAndRegistrationSurviveReloadWithoutLeakingRejectedChanges() async throws {
+        let manifest: [String: Any] = ["manifest_version": 3, "name": "User world fixture", "version": "1.0",
+                                       "permissions": ["userScripts"], "host_permissions": ["https://example.com/*"]]
+        try JSONSerialization.data(withJSONObject: manifest).write(to: folder.appendingPathComponent("manifest.json"))
+        let install = try XCTUnwrap(Extensions.shared.installFolder(at: folder, confirm: false))
+        await install.value
+        let enable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, true))
+        let enabled = await enable.value
+        XCTAssertTrue(enabled)
+        let context = try XCTUnwrap(Extensions.shared.contexts[id])
+        let world: [String: Any] = ["worldId": "scriptcat", "messaging": true, "csp": "script-src 'self' 'unsafe-inline' 'unsafe-eval' *"]
+        _ = try await ExtensionUserScripts.call("userScripts.world", args: [world], context: context)
+        let script: [String: Any] = ["id": "fixture", "matches": ["https://example.com/*"], "world": "USER_SCRIPT", "worldId": "scriptcat",
+                                    "runAt": "document_start", "allFrames": true, "js": [["code": "globalThis.fixture = new Function('return chrome.runtime.id')();"]]]
+        _ = try await ExtensionUserScripts.call("userScripts.register", args: [[script]], context: context)
+        do {
+            _ = try await ExtensionUserScripts.call("userScripts.register", args: [[script]], context: context)
+            XCTFail("Duplicate registration must fail")
+        } catch {}
+        do {
+            _ = try await ExtensionUserScripts.call("userScripts.world", args: [["worldId": "scriptcat", "csp": "script-src 'none'"]], context: context)
+            XCTFail("An unsupported policy must fail before changing saved settings")
+        } catch {}
+        let before = try await ExtensionUserScripts.call("userScripts.worlds", args: [], context: context) as? [[String: Any]]
+        XCTAssertEqual(before?.first?["csp"] as? String, world["csp"] as? String)
+        Extensions.shared.setEnabled(id, false)
+        let reload = try XCTUnwrap(Extensions.shared.setEnabled(id, true))
+        let loaded = await reload.value
+        XCTAssertTrue(loaded)
+        let restored = try XCTUnwrap(Extensions.shared.contexts[id])
+        let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: restored) as? [[String: Any]]
+        XCTAssertEqual(scripts?.count, 1)
+        XCTAssertEqual(scripts?.first?["worldId"] as? String, "scriptcat")
+        let worlds = try await ExtensionUserScripts.call("userScripts.worlds", args: [], context: restored) as? [[String: Any]]
+        XCTAssertEqual(worlds?.first?["messaging"] as? Bool, true)
+        _ = try await ExtensionUserScripts.call("userScripts.unregister", args: [["ids": ["fixture"]]], context: restored)
+        let remaining = try await ExtensionUserScripts.call("userScripts.list", args: [], context: restored) as? [[String: Any]]
+        XCTAssertEqual(remaining?.count, 0)
     }
 }

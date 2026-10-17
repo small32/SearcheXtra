@@ -494,6 +494,9 @@ final class Extensions: NSObject, ObservableObject {
             for permission in found.requestedPermissions {
                 context.setPermissionStatus(.grantedExplicitly, for: permission)
             }
+            if !Extensions.userScriptsAllowed(item.id) {
+                context.setPermissionStatus(.deniedExplicitly, for: WKWebExtension.Permission(rawValue: "userScripts"))
+            }
             context.setPermissionStatus(.grantedExplicitly, for: .nativeMessaging)
             // Never one for extension pages, another's or all of them (see
             // `fence`).
@@ -516,6 +519,7 @@ final class Extensions: NSObject, ObservableObject {
             if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
             loadsThisRun.insert(item.id)
             contexts[item.id] = context
+            ExtensionUserScripts.loaded(context)
             // Keys you gave its commands in Settings › Shortcuts (#189).
             ShortcutStore.shared.adopt(context, id: item.id)
             actionsChanged += 1
@@ -528,6 +532,7 @@ final class Extensions: NSObject, ObservableObject {
 
     private func unload(_ id: String) {
         loading[id] = nil
+        ExtensionUserScripts.unloaded(id)
         guard let context = contexts[id] else { return }
         Browsers.closePopups(of: id)
         try? controller.unload(context)
@@ -844,6 +849,7 @@ final class Extensions: NSObject, ObservableObject {
         loadsThisRun.remove(id)
         loadedBefore.remove(id)
         Store.settings.removeObject(forKey: "extensions.newtab.\(id)")
+        Store.settings.removeObject(forKey: "extensions.userscripts.\(id)")
         installed.removeAll { $0.id == id }
         save()
         try? FileManager.default.removeItem(at: Extensions.folder(for: id))
@@ -981,6 +987,37 @@ final class Extensions: NSObject, ObservableObject {
             ExtensionCapture.forget(id)
         }
         return nil
+    }
+
+    static func declaresUserScripts(_ manifest: [String: Any]) -> Bool {
+        let names = (manifest["permissions"] as? [String] ?? []) + (manifest["optional_permissions"] as? [String] ?? [])
+        return names.contains("userScripts")
+    }
+
+    func supportsUserScripts(_ id: String) -> Bool {
+        if let context = contexts[id] { return Extensions.declaresUserScripts(context.webExtension.manifest) }
+        let url = Extensions.folder(for: id).appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: url),
+              let manifest = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
+        return Extensions.declaresUserScripts(manifest)
+    }
+
+    static func userScriptsAllowed(_ id: String) -> Bool {
+        Store.settings.bool(forKey: "extensions.userscripts.\(id)")
+    }
+
+    /// Separate from the extension's manifest permission, as in Chrome.
+    /// Reloading drops injected registrations; the saved user-script list is
+    /// retained so enabling the switch can register the same scripts again.
+    @discardableResult
+    func setUserScriptsAllowed(_ id: String, _ on: Bool) -> Task<Bool, Never>? {
+        guard let item = installed.first(where: { $0.id == id }), supportsUserScripts(id),
+              Extensions.userScriptsAllowed(id) != on else { return nil }
+        Store.settings.set(on, forKey: "extensions.userscripts.\(id)")
+        objectWillChange.send()
+        unload(id)
+        guard item.enabled else { return nil }
+        return Task { await load(item) }
     }
 
     func openOptions(_ id: String) {

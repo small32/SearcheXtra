@@ -486,6 +486,7 @@ final class Tab: ObservableObject, Identifiable {
     private let images = ImageRelay()
     let flowDrag=FlowDragRelay()
     func refreshFlowDrag() {guard let web=built else{return};flowDrag.configure(web);arm(hiding:veils)}
+    func refreshUserScripts() { arm(hiding: veils) }
     var onFlowDrag:((Tab,FlowDragRequest)->Void)?
     private let shop = StoreRelay()
     private let iconChanges = IconRelay()
@@ -810,6 +811,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: PasskeyRelay.bridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
         )
+        if #available(macOS 15.4, *) { ExtensionUserScripts.arm(self, controller: controller) }
         guard !css.isEmpty else { return }
         controller.addUserScript(
             WKUserScript(source: Veiling.style(css), injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
@@ -1375,6 +1377,7 @@ final class Tab: ObservableObject, Identifiable {
         watch = []
         ears.stop()
         guard let web = built else { return }
+        if #available(macOS 15.4, *) { ExtensionUserScripts.discard(web) }
         built = nil
         Passkeys.shared.forget(web)
         let controller = web.configuration.userContentController
