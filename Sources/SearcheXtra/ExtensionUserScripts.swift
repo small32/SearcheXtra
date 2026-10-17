@@ -57,9 +57,9 @@ enum ExtensionUserScripts {
         registrations[id] = Registration(context: context, scripts: scripts, worlds: worlds.filter { !invalidWorlds.contains($0["worldId"] as? String ?? "") })
         if observers.isEmpty {
             for name in [WKWebExtensionContext.permissionMatchPatternsWereGrantedNotification,
-                         .permissionMatchPatternsWereDeniedNotification,
-                         .grantedPermissionMatchPatternsWereRemovedNotification,
-                         .deniedPermissionMatchPatternsWereRemovedNotification] {
+                         WKWebExtensionContext.permissionMatchPatternsWereDeniedNotification,
+                         WKWebExtensionContext.grantedPermissionMatchPatternsWereRemovedNotification,
+                         WKWebExtensionContext.deniedPermissionMatchPatternsWereRemovedNotification] {
                 observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
                     MainActor.assumeIsolated { refresh() }
                 })
