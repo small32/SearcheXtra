@@ -231,7 +231,7 @@ enum ExtensionUserScripts {
             let properties = registration.worlds.first { ($0["worldId"] as? String ?? "") == worldID } ?? [:]
             prefix = bootstrap(id: id, channel: channel, messaging: properties["messaging"] as? Bool == true)
         }
-        let host = try host(for: id)
+        let host = try ExtensionUserScripts.host(for: id)
         let targets = try await host.targets(target, tab: tab)
         defer { host.clearTargets(targets, in: view) }
         let source = try code(script, folder: Extensions.folder(for: id))
@@ -533,7 +533,7 @@ enum ExtensionUserScripts {
             Task { @MainActor in
                 do {
                     guard registrations[id]?.context === context else { throw invalid("Extension context was replaced") }
-                    let host = try host(for: id)
+                    let host = try ExtensionUserScripts.host(for: id)
                     let value = try await host.call(operation, body: body, source: source)
                     replyHandler(["value": value ?? NSNull()], nil)
                 } catch { replyHandler(["error": error.localizedDescription], nil) }
