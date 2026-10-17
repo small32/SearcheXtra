@@ -75,6 +75,17 @@ jobs:
           codesign --verify --deep --strict build/SearcheXtra.app
           ditto -c -k --keepParent build/SearcheXtra.app "build/SearcheXtra-$version-arm64-startup-fix.zip"
 
+      - name: Collect native test diagnostics
+        if: always()
+        shell: bash
+        run: |
+          destination=build/macos-launch-smoke/native-tests
+          mkdir -p "$destination"
+          for report in "$HOME/Library/Logs/DiagnosticReports/"*SearcheXtra*.ips "$HOME/Library/Logs/DiagnosticReports/"*SearcheXtra*.crash "$HOME/Library/Logs/DiagnosticReports/"*xctest*.ips; do
+            if [ -f "$report" ]; then cp "$report" "$destination/"; fi
+          done
+          log show --last 5m --style compact --predicate 'process CONTAINS "SearcheXtra" OR process CONTAINS "xctest"' > "$destination/system.log" 2>&1 || true
+
       - uses: actions/upload-artifact@v4
         with:
           name: SearcheXtra-macOS-startup-fix

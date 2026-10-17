@@ -15,8 +15,10 @@ final class ExtensionScriptCatTests: XCTestCase {
         guard let input = ProcessInfo.processInfo.environment["SEARCHEXTRA_TEST_MV3_FOLDER"], !input.isEmpty else {
             throw XCTSkip("Set SEARCHEXTRA_TEST_MV3_FOLDER to the original ScriptCat 1.4.0 Chrome ZIP or folder")
         }
+        trace("starting AppKit")
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
+        trace("preparing official package")
         let files = FileManager.default
         let scratch = files.temporaryDirectory.appendingPathComponent("scriptcat-native-\(UUID().uuidString)", isDirectory: true)
         let package = scratch.appendingPathComponent("scriptcat", isDirectory: true)
@@ -26,16 +28,20 @@ final class ExtensionScriptCatTests: XCTestCase {
         guard files.fileExists(atPath: input, isDirectory: &directory) else { throw FixtureFailure("ScriptCat fixture is missing") }
         if directory.boolValue { try files.copyItem(at: URL(fileURLWithPath: input), to: package) }
         else { try Crx.unpack(Data(contentsOf: URL(fileURLWithPath: input)), into: package) }
+        trace("official package unpacked")
         let manifest = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: package.appendingPathComponent("manifest.json"))) as? [String: Any])
         XCTAssertEqual(manifest["manifest_version"] as? Int, 3)
         XCTAssertEqual(manifest["version"] as? String, "1.4.0")
         let identifier = Crx.unpackedID(for: package)
+        trace("constructing browser")
         let browser = Browser(record: WindowRecord(), opensStartPage: false)
         let previousFront = Front.shared.browser
+        trace("constructing native window")
         let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 900, height: 700),
                               styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         browser.window = window
+        trace("registering native window")
         Browsers.register(browser)
         Front.shared.set(browser)
         var installed = [identifier]
@@ -56,12 +62,17 @@ final class ExtensionScriptCatTests: XCTestCase {
         let pageServer = try LocalDownloadServer(size: 1024)
         let xhrServer = try LocalDownloadServer(size: 1024)
         defer { pageServer.stop(); xhrServer.stop() }
+        trace("opening initial local website")
         let website = browser.open(pageServer.url("/page"), foreground: true)
+        trace("attaching initial WebView")
         show(website)
         try await until("initial local website") { !website.web.isLoading && website.web.url == pageServer.url("/page") }
+        trace("initial local website loaded")
         do {
+            trace("installing original ScriptCat")
             let install = try XCTUnwrap(Extensions.shared.installFolder(at: package, confirm: false))
             await install.value
+            trace("original ScriptCat installed")
             let first = try XCTUnwrap(Extensions.shared.contexts[identifier])
             XCTAssertFalse(Extensions.userScriptsAllowed(identifier))
             let firstOptions = browser.open(try XCTUnwrap(first.optionsPageURL), foreground: true)
@@ -71,6 +82,7 @@ final class ExtensionScriptCatTests: XCTestCase {
             }
             let denied = try await evaluate(firstOptions.web, "try { await chrome.userScripts.getScripts(); return false; } catch { return true; }")
             XCTAssertEqual(denied as? Bool, true)
+            trace("enabling user-script permission")
             let enable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, true))
             let enabled = await enable.value
             XCTAssertTrue(enabled)
@@ -82,6 +94,7 @@ final class ExtensionScriptCatTests: XCTestCase {
                 let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: context) as? [[String: Any]] ?? []
                 return scripts.contains { $0["id"] as? String == "scriptcat-content" }
             }
+            trace("ScriptCat native user world registered")
             let userCode = #"""
             // ==UserScript==
             // @name SearcheXtra native MV3 regression
@@ -115,6 +128,7 @@ final class ExtensionScriptCatTests: XCTestCase {
             return { uuid, result };
             """#, arguments: ["code": userCode]) as? [String: Any]
             let scriptID = try XCTUnwrap(response?["uuid"] as? String)
+            trace("real GM user script installed")
             try await until("real installed user-script registration") {
                 let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: context) as? [[String: Any]] ?? []
                 return scripts.contains { $0["id"] as? String == scriptID }
@@ -130,6 +144,7 @@ final class ExtensionScriptCatTests: XCTestCase {
                 return value["count"] as? String != nil && value["xhr"] as? String == "200:true"
             }
             let firstState = try await state()
+            trace("real GM storage and cross-origin XHR succeeded")
             let firstCount = Int(try XCTUnwrap(firstState["count"] as? String)) ?? 0
             XCTAssertGreaterThan(firstCount, 0)
             XCTAssertGreaterThan(xhrServer.count("/page"), 0)
@@ -138,10 +153,12 @@ final class ExtensionScriptCatTests: XCTestCase {
                 let current = try await state()
                 return (Int(current["count"] as? String ?? "0") ?? 0) > firstCount
             }
+            trace("GM storage survived reload")
             _ = try await evaluate(website.web, "const frame = document.createElement('iframe'); frame.id = 'scriptcat-native-child'; frame.src = location.href; document.body.appendChild(frame); return true;")
             try await until("real ScriptCat GM storage in a matching iframe") {
                 try await self.evaluate(website.web, "return Boolean(document.querySelector('#scriptcat-native-child')?.contentDocument?.documentElement?.getAttribute('data-sx-scriptcat-count'));") as? Bool == true
             }
+            trace("real GM script executed in matching iframe")
             let mv2 = scratch.appendingPathComponent("mv2", isDirectory: true)
             try files.createDirectory(at: mv2, withIntermediateDirectories: true)
             try #"{"manifest_version":2,"name":"SearcheXtra native MV2 fixture","version":"1.0","content_scripts":[{"matches":["http://127.0.0.1/*"],"js":["content.js"],"run_at":"document_end"}]}"#.write(to: mv2.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
@@ -154,6 +171,7 @@ final class ExtensionScriptCatTests: XCTestCase {
             try await until("MV2 and real ScriptCat MV3 run together") {
                 try await self.evaluate(website.web, "return document.documentElement.getAttribute('data-sx-mv2') === 'native' && document.documentElement.getAttribute('data-sx-scriptcat-started') === 'true';") as? Bool == true
             }
+            trace("native MV2 and ScriptCat MV3 coexist")
             let disable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, false))
             let disabled = await disable.value
             XCTAssertTrue(disabled)
@@ -165,6 +183,10 @@ final class ExtensionScriptCatTests: XCTestCase {
             print("ScriptCat native errors: \(Extensions.shared.errors[identifier] ?? [])")
             throw error
         }
+    }
+
+    private func trace(_ stage: String) {
+        FileHandle.standardError.write(Data(("ScriptCat native stage: " + stage + "\n").utf8))
     }
 
     private func until(_ label: String, _ predicate: () async throws -> Bool) async throws {
