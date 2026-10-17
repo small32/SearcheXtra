@@ -44,6 +44,7 @@ final class ExtensionScriptCatTests: XCTestCase {
         trace("registering native window")
         Browsers.register(browser)
         Front.shared.set(browser)
+        trace("native browser registered")
         var installed = [identifier]
         defer {
             for id in installed { Extensions.shared.remove(id) }
@@ -59,6 +60,7 @@ final class ExtensionScriptCatTests: XCTestCase {
             tab.web.frame = NSRect(x: 0, y: 0, width: 900, height: 650)
             window.contentView = tab.web
         }
+        trace("starting loopback servers")
         let pageServer = try LocalDownloadServer(size: 1024)
         let xhrServer = try LocalDownloadServer(size: 1024)
         defer { pageServer.stop(); xhrServer.stop() }
