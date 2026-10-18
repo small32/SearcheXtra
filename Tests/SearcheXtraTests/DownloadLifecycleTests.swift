@@ -205,8 +205,12 @@ final class DownloadLifecycleTests: XCTestCase {
 
     func testCancelRemovesEntryAndPartialFile() async throws {
         let tab = try await openFixturePage()
+        fixture.hold("/cancel.bin", afterBytes: 256 * 1024)
+        defer { fixture.release("/cancel.bin") }
         let entry = try await startDownload("/cancel.bin", in: tab)
         try await waitUntil { entry.completedBytes >= 64 * 1024 && entry.destination != nil }
+        XCTAssertEqual(entry.state, .downloading)
+        XCTAssertEqual(fixture.completed("/cancel.bin"), 0, "Cancellation must exercise an unfinished response")
         let destination = try XCTUnwrap(entry.destination)
         let id = entry.id
 
@@ -333,7 +337,10 @@ final class DownloadLifecycleTests: XCTestCase {
             if condition() { return }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
-        XCTFail("Timed out waiting for the download state", file: file, line: line)
+        let entries = browser.fetches.entries.map {
+            "\($0.state): \($0.completedBytes)/\($0.totalBytes) bytes, destination=\($0.destination?.lastPathComponent ?? "nil"), error=\($0.errorDescription ?? "nil")"
+        }
+        XCTFail("Timed out waiting for the download state; active=\(browser.downloading.count), entries=\(entries)", file: file, line: line)
         throw WaitError.timedOut
     }
 

@@ -4,6 +4,19 @@ import vm from 'node:vm';
 
 // Run the shipping macOS shim, including ScriptCat's real availability probe.
 const swift = fs.readFileSync(new URL('../Sources/SearcheXtra/ExtensionShims.swift', import.meta.url), 'utf8');
+// WebKit namespace getters can return a fresh wrapper before the shim pins
+// one. Runtime method overrides must be applied to that pinned object.
+const namespaceStart = swift.indexOf("      // WebKit's objects are kept");
+const runtimeCapture = swift.indexOf('      const runtime = chrome.runtime;');
+const namespaceEnd = swift.indexOf('      const withLastError =', namespaceStart);
+let wrapper = 0;
+const freshNamespaces = {};
+Object.defineProperty(freshNamespaces, 'runtime', { configurable: true, enumerable: true,
+  get: () => ({ id: 'fresh-wrapper', wrapper: ++wrapper }) });
+const namespaceFixture = { chrome: freshNamespaces, root: {} };
+vm.runInNewContext(swift.slice(Math.min(namespaceStart, runtimeCapture), namespaceEnd) +
+  '\nroot.runtime = runtime;', namespaceFixture);
+assert.equal(namespaceFixture.root.runtime, freshNamespaces.runtime, 'Runtime overrides must target the namespace extensions read');
 const start = swift.indexOf('      const scripting = chrome.scripting;');
 const end = swift.indexOf('      // WebKit says "install" again', start);
 assert(start >= 0 && end > start);

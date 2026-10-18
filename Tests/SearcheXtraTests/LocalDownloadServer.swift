@@ -13,6 +13,8 @@ final class LocalDownloadServer {
     private let socket: Int32
     private let source: DispatchSourceRead
     private let requestsLock = NSLock()
+    private let transferCondition = NSCondition()
+    private var heldTransfers: [String: Int] = [:]
     private var requests: [Request] = []
     private var completedPaths: [String] = []
     private var stopped = false
@@ -103,12 +105,31 @@ final class LocalDownloadServer {
 
     func expectedBytes() -> Data { payload }
 
+    /// Keep an in-flight response at a known byte boundary until the test
+    /// has acted. A fixed transfer duration can finish between UI samples.
+    func hold(_ path: String, afterBytes: Int) {
+        transferCondition.lock()
+        heldTransfers[path] = afterBytes
+        transferCondition.unlock()
+    }
+
+    func release(_ path: String) {
+        transferCondition.lock()
+        heldTransfers[path] = nil
+        transferCondition.broadcast()
+        transferCondition.unlock()
+    }
+
     func stop() {
         requestsLock.lock()
         let shouldStop = !stopped
         stopped = true
         requestsLock.unlock()
         guard shouldStop else { return }
+        transferCondition.lock()
+        heldTransfers.removeAll()
+        transferCondition.broadcast()
+        transferCondition.unlock()
         source.cancel()
         shutdown(socket, SHUT_RDWR)
         Darwin.close(socket)
@@ -181,6 +202,11 @@ final class LocalDownloadServer {
             let next = min(offset + chunkSize, end)
             guard sendAll(client, payload.subdata(in: offset..<next)) else { return }
             offset = next
+            transferCondition.lock()
+            while let boundary = heldTransfers[request.path], offset - lower >= boundary {
+                transferCondition.wait()
+            }
+            transferCondition.unlock()
             // Leave enough time for the test to pause after real bytes arrive.
             Thread.sleep(forTimeInterval: 0.008)
         }

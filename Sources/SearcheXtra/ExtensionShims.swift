@@ -340,8 +340,6 @@ enum ExtensionShims {
         try { const a = location.ancestorOrigins; if (a && a.length) return [...a].some((o) => o !== location.origin); } catch (e) {}
         try { return window.top.location.origin !== location.origin; } catch (e) { return true; }
       })();
-      const runtime = chrome.runtime;
-
       // WebKit's objects are kept — WebKit finds an extension's listeners
       // through them, and a replacement would hide them. Members are set on
       // them instead: a method lives on the prototype, so an own property of
@@ -378,6 +376,9 @@ enum ExtensionShims {
         }
         for (const sub of ["local", "sync", "session", "managed"]) { try { if (ns[sub] && typeof ns[sub] === "object") kept.add(ns[sub]); } catch (e) {} }
       }
+      // Capture the fixed namespace, not an earlier wrapper the loop may
+      // have replaced: methods set on that earlier object are never called.
+      const runtime = chrome.runtime;
       const withLastError = (error, callback) => {
         put(runtime, "lastError", { message: String(error && error.message || error) });
         try { callback(); } finally { try { delete runtime.lastError; } catch (e) {} }
