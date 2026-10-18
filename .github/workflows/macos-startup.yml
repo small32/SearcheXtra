@@ -85,6 +85,7 @@ jobs:
           sleep 10
 
       - name: Test macOS browser regressions
+        if: ${{ !cancelled() && (success() || steps.scriptcat.outcome == 'failure') }}
         run: bash Tests/run-macos-regressions.sh
 
       - name: Package verified app
