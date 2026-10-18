@@ -3551,8 +3551,14 @@ enum ExtensionShims {
                 browser.namedDownloads[url] = (name as NSString).lastPathComponent
             }
             ExtensionShims.askedDownloads[url] = id
-            let download = await web.startDownload(using: URLRequest(url: url))
-            browser.keep(download)
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                web.startDownload(using: URLRequest(url: url)) { download in
+                    // WebKit needs the delegate before this callback returns,
+                    // while the async overload resumes the actor afterwards.
+                    browser.keep(download, from: web)
+                    continuation.resume()
+                }
+            }
             return browser.loot.kept.count + 1
         case "downloads.search":
             return browser.loot.kept.enumerated().map { index, keep in

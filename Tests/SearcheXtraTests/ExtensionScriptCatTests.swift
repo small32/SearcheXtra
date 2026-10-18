@@ -81,6 +81,7 @@ final class ExtensionScriptCatTests: XCTestCase {
         show(website)
         try await until("initial local website") { !website.web.isLoading && website.web.url == pageServer.url("/page") }
         trace("initial local website loaded")
+        var restoredRuntime: [String: Any] = [:]
         do {
             trace("installing original ScriptCat")
             let install = try XCTUnwrap(Extensions.shared.installFolder(at: package, confirm: false))
@@ -266,6 +267,35 @@ final class ExtensionScriptCatTests: XCTestCase {
                 let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: restoredContext) as? [[String: Any]] ?? []
                 return scripts.contains { $0["id"] as? String == scriptID }
             }
+            // App registrations are restored synchronously, but WebKit loads
+            // persistent chrome.scripting registrations asynchronously. The
+            // real 1.4 worker sees scriptcat-inject and reuses that native
+            // registration instead of rebuilding it. Its scripting.js is
+            // the DOM-to-GM relay, so both halves must be ready before this
+            // fixture navigates the website into a new document.
+            let restoredOptions = browser.open(try XCTUnwrap(restoredContext.optionsPageURL), foreground: true)
+            show(restoredOptions)
+            try await until("native ScriptCat content registration after permission re-enable") {
+                restoredRuntime = try await self.evaluate(restoredOptions.web, #"""
+                return { scripts: (await chrome.scripting.getRegisteredContentScripts()).map(script => script.id),
+                  worlds: await chrome.userScripts.getWorldConfigurations() };
+                """#) as? [String: Any] ?? [:]
+                return (restoredRuntime["scripts"] as? [String])?.contains("scriptcat-scripting") == true
+            }
+            trace("permission re-enable native registrations: \(restoredRuntime)")
+            // This production service is behind ScriptCat's initReady
+            // middleware. A persisted script ID alone cannot prove that the
+            // replacement worker has finished initializing its GM services.
+            let restoredService = try await evaluate(restoredOptions.web, #"""
+            return await chrome.runtime.sendMessage({ action: 'serviceWorker/runtime/pageLoad', data: {} });
+            """#) as? [String: Any]
+            restoredRuntime["service"] = restoredService ?? [:]
+            guard restoredService?["code"] as? Int == 0,
+                  (restoredService?["data"] as? [String: Any])?["ok"] is Bool else {
+                throw FixtureFailure("The replacement ScriptCat worker did not initialize its runtime service: \(restoredService ?? [:])")
+            }
+            trace("permission re-enable runtime service initialized")
+            show(website)
             try await reload(website.web)
             try await until("GM storage and XHR recover after permission re-enable") {
                 let value = try await state()
@@ -274,6 +304,7 @@ final class ExtensionScriptCatTests: XCTestCase {
             trace("permission re-enable restored GM storage and XHR")
             print("PASS: original ScriptCat MV3 1.4.0: installation, opt-in, real GM storage, cross-origin XHR, reload, iframe, native execute targets, native runtime.reload, MV2 coexistence, revocation and re-enable")
         } catch {
+            if !restoredRuntime.isEmpty { print("ScriptCat permission restore runtime: \(restoredRuntime)") }
             print("ScriptCat native errors: \(Extensions.shared.errors[identifier] ?? [])")
             if let current = Extensions.shared.contexts[identifier] {
                 let scripts = try? await ExtensionUserScripts.call("userScripts.list", args: [], context: current) as? [[String: Any]]

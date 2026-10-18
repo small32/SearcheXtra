@@ -261,7 +261,7 @@ final class DownloadLifecycleTests: XCTestCase {
         try await waitUntil { fixture.completed("/page") == 1 }
 
         let download = try await requestDownload("/private.bin", from: tab.web)
-        browser.keep(download, from: tab.web)
+        XCTAssertTrue(download.delegate === browser)
         XCTAssertTrue(browser.fetches.entries.isEmpty)
 
         try await waitUntil {
@@ -285,14 +285,17 @@ final class DownloadLifecycleTests: XCTestCase {
 
     private func startDownload(_ path: String, in tab: BrowserTab) async throws -> FetchEntry {
         let download = try await requestDownload(path, from: tab.web)
-        browser.keep(download, from: tab.web)
         return try XCTUnwrap(browser.fetches.entry(for: download))
     }
 
     private func requestDownload(_ path: String, from webView: WKWebView) async throws -> WKDownload {
         let request = URLRequest(url: fixture.url(path))
+        let browser = try XCTUnwrap(browser)
         return await withCheckedContinuation { continuation in
             webView.startDownload(using: request) { download in
+                // Assign the delegate before returning to WebKit: resuming
+                // the actor first can lose the destination request to nil.
+                browser.keep(download, from: webView)
                 continuation.resume(returning: download)
             }
         }
