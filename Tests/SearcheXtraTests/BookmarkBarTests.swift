@@ -107,6 +107,13 @@ final class BookmarkBarTests: XCTestCase {
         let folder = browser.bookmarks.insert(.folder("Popup test", [.site("Bookmark", URL(string: "https://example.com")!)]), into: nil)
         defer { browser.bookmarks.remove(folder.id); BookmarkBarPanel.hide() }
         let window = NSWindow(contentRect: NSRect(x: 160, y: 200, width: 600, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer {
+            BookmarkBarPanel.hide()
+            window.orderOut(nil)
+            window.contentView = nil
+            window.close()
+        }
         let anchor = NSView(frame: NSRect(x: 20, y: 350, width: 100, height: 22))
         window.contentView?.addSubview(anchor)
         BookmarkBarPanel.show(folder, in: browser, from: anchor)

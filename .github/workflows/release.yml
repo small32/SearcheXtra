@@ -59,7 +59,7 @@ jobs:
           node Tests/FlowDragTests.mjs
 
       - name: Test macOS browser regressions
-        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --skip ExtensionScriptCatTests
+        run: bash Tests/run-macos-regressions.sh
 
       - name: Verify original ScriptCat MV3 package
         shell: bash

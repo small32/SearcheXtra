@@ -9,6 +9,7 @@ on:
       - 'Tests/ExtensionUserScriptsTests.mjs'
       - 'Tests/ExtensionUserWorldTests.mjs'
       - 'Tests/FlowDragTests.mjs'
+      - 'Tests/run-macos-regressions.sh'
       - 'Tests/verify-macos-app-launch.sh'
       - 'Package.swift'
       - 'build.sh'
@@ -84,7 +85,7 @@ jobs:
           sleep 10
 
       - name: Test macOS browser regressions
-        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --skip ExtensionScriptCatTests
+        run: bash Tests/run-macos-regressions.sh
 
       - name: Package verified app
         shell: bash
