@@ -29,7 +29,6 @@ enum ExtensionUserScripts {
         let discovery = "userScriptFrames_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
         var frames: [String: Frame] = [:]
         var mainDocument: String?
-        var discovering = false
         init(_ tab: Tab) { self.tab = tab }
     }
     private struct Frame {
@@ -117,25 +116,15 @@ enum ExtensionUserScripts {
     /// channel lends a website access to its extension's message transport.
     static func arm(_ tab: Tab, controller: WKUserContentController) {
         let key = ObjectIdentifier(controller)
-        let page = pages[key] ?? Page(tab)
+        let page: Page
+        if let found = pages[key] { page = found }
+        else {
+            page = Page(tab)
+            controller.addScriptMessageHandler(FrameDiscovery(page: page), contentWorld: Web.world, name: page.discovery)
+        }
         pages[key] = page
         let permitted = registrations.keys.sorted().filter { id in
             registrations[id].map { !tab.shy || $0.context.hasAccessToPrivateData } == true
-        }
-        guard !permitted.isEmpty else {
-            for (name, world) in page.handlers.values { controller.removeScriptMessageHandler(forName: name, contentWorld: world) }
-            page.handlers.removeAll()
-            if page.discovering {
-                controller.removeScriptMessageHandler(forName: page.discovery, contentWorld: Web.world)
-                page.discovering = false
-            }
-            page.frames.removeAll()
-            page.mainDocument = nil
-            return
-        }
-        if !page.discovering {
-            controller.addScriptMessageHandler(FrameDiscovery(page: page), contentWorld: Web.world, name: page.discovery)
-            page.discovering = true
         }
         var retained = Set<String>()
         controller.addUserScript(WKUserScript(source: discovery(channel: page.discovery), injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world))

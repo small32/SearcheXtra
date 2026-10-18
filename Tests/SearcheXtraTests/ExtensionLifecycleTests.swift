@@ -166,7 +166,7 @@ final class ExtensionLifecycleTests: XCTestCase {
         XCTAssertEqual(remaining?.count, 0)
     }
 
-    func testUserScriptFrameDiscoveryIsOnlyInstalledWhileAuthorized() async throws {
+    func testUserScriptPermissionRevokesScriptsAndRetainsFrameDiscovery() async throws {
         let manifest: [String: Any] = ["manifest_version": 3, "name": "Discovery fixture", "version": "1.0",
                                        "permissions": ["userScripts"], "host_permissions": ["https://example.com/*"]]
         try JSONSerialization.data(withJSONObject: manifest).write(to: folder.appendingPathComponent("manifest.json"))
@@ -176,15 +176,27 @@ final class ExtensionLifecycleTests: XCTestCase {
         defer { tab.close() }
         let controller = tab.web.configuration.userContentController
         func hasDiscovery() -> Bool { controller.userScripts.contains { $0.source.contains("__searchDiscoverFrame") } }
-        XCTAssertFalse(hasDiscovery(), "Ordinary pages need no user-script frame transport before opt-in")
+        func hasProbe() -> Bool { controller.userScripts.contains { $0.source.contains("nativePermissionLifecycleProbe") } }
+        XCTAssertTrue(hasDiscovery())
+        XCTAssertFalse(hasProbe())
         let enable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, true))
         let enabled = await enable.value
         XCTAssertTrue(enabled)
-        XCTAssertTrue(hasDiscovery(), "An existing tab must acquire discovery when its extension is authorized")
+        let context = try XCTUnwrap(Extensions.shared.contexts[id])
+        let script: [String: Any] = ["id": "permission-probe", "matches": ["https://example.com/*"],
+                                   "js": [["code": "globalThis.nativePermissionLifecycleProbe = true;"]]]
+        _ = try await ExtensionUserScripts.call("userScripts.register", args: [[script]], context: context)
+        XCTAssertTrue(hasProbe())
         let disable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, false))
         let disabled = await disable.value
         XCTAssertTrue(disabled)
-        XCTAssertFalse(hasDiscovery(), "Revoking the last user-script extension must release discovery")
+        XCTAssertFalse(hasProbe(), "Revocation must remove injected extension scripts")
+        XCTAssertTrue(hasDiscovery(), "Frame lifecycle delivery remains attached while permission is toggled")
+        let restore = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, true))
+        let restored = await restore.value
+        XCTAssertTrue(restored)
+        XCTAssertTrue(hasProbe(), "Reauthorization restores the saved script in the existing tab")
+        XCTAssertEqual(controller.userScripts.filter { $0.source.contains("__searchDiscoverFrame") }.count, 1)
     }
 
     func testRuntimeReloadClearsUserScriptsAndWorldsWithoutRecopyingTheSource() async throws {

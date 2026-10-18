@@ -295,6 +295,22 @@ final class ExtensionScriptCatTests: XCTestCase {
                 throw FixtureFailure("The replacement ScriptCat worker did not initialize its runtime service: \(restoredService ?? [:])")
             }
             trace("permission re-enable runtime service initialized")
+            website.web.configuration.userContentController.addUserScript(WKUserScript(source: #"""
+            (() => {
+              const events = [], dispatch = EventTarget.prototype.dispatchEvent;
+              Object.defineProperty(globalThis, '__sxScriptCatDOMTrace', { value: events });
+              EventTarget.prototype.dispatchEvent = function(event) {
+                if (event instanceof CustomEvent) {
+                  const detail = event.detail;
+                  events.push({ type: event.type, action: detail?.action, kind: detail?.type,
+                    api: detail?.data?.api || detail?.data?.data?.api,
+                    target: this === window ? 'window' : this === document ? 'document' : this.nodeName });
+                  if (events.length > 48) events.shift();
+                }
+                return dispatch.call(this, event);
+              };
+            })();
+            """#, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
             show(website)
             try await reload(website.web)
             try await until("GM storage and XHR recover after permission re-enable") {
@@ -312,6 +328,8 @@ final class ExtensionScriptCatTests: XCTestCase {
             } else { print("ScriptCat current context: unloaded") }
             let lastState = try? await evaluate(website.web, "return { started: document.documentElement.getAttribute('data-sx-scriptcat-started'), count: document.documentElement.getAttribute('data-sx-scriptcat-count'), xhr: document.documentElement.getAttribute('data-sx-scriptcat-xhr'), error: document.documentElement.getAttribute('data-sx-scriptcat-error') };")
             print("ScriptCat last website state: \(lastState ?? "unavailable")")
+            let relayTrace = try? await evaluate(website.web, "return globalThis.__sxScriptCatDOMTrace || [];")
+            print("ScriptCat last DOM relay trace: \(relayTrace ?? "unavailable")")
             throw error
         }
     }
