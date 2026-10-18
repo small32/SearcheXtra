@@ -165,4 +165,25 @@ final class ExtensionLifecycleTests: XCTestCase {
         let remaining = try await ExtensionUserScripts.call("userScripts.list", args: [], context: restored) as? [[String: Any]]
         XCTAssertEqual(remaining?.count, 0)
     }
+
+    func testUserScriptFrameDiscoveryIsOnlyInstalledWhileAuthorized() async throws {
+        let manifest: [String: Any] = ["manifest_version": 3, "name": "Discovery fixture", "version": "1.0",
+                                       "permissions": ["userScripts"], "host_permissions": ["https://example.com/*"]]
+        try JSONSerialization.data(withJSONObject: manifest).write(to: folder.appendingPathComponent("manifest.json"))
+        let install = try XCTUnwrap(Extensions.shared.installFolder(at: folder, confirm: false))
+        await install.value
+        let tab = Tab()
+        defer { tab.close() }
+        let controller = tab.web.configuration.userContentController
+        func hasDiscovery() -> Bool { controller.userScripts.contains { $0.source.contains("__searchDiscoverFrame") } }
+        XCTAssertFalse(hasDiscovery(), "Ordinary pages need no user-script frame transport before opt-in")
+        let enable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, true))
+        let enabled = await enable.value
+        XCTAssertTrue(enabled)
+        XCTAssertTrue(hasDiscovery(), "An existing tab must acquire discovery when its extension is authorized")
+        let disable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, false))
+        let disabled = await disable.value
+        XCTAssertTrue(disabled)
+        XCTAssertFalse(hasDiscovery(), "Revoking the last user-script extension must release discovery")
+    }
 }

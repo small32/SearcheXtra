@@ -532,6 +532,7 @@ final class Extensions: NSObject, ObservableObject {
 
     private func unload(_ id: String) {
         loading[id] = nil
+        if let observer = errorWatchers.removeValue(forKey: id) { NotificationCenter.default.removeObserver(observer) }
         ExtensionUserScripts.unloaded(id)
         guard let context = contexts[id] else { return }
         Browsers.closePopups(of: id)

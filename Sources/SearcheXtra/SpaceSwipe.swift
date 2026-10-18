@@ -180,6 +180,8 @@ final class SpaceSwipe {
     /// frame and without anything moving — it was already there. One past
     /// the last space is the card for a new one.
     func slide(_ browser: Browser, to target: Int, from here: Int) {
+        guard (0...browser.spaces.count).contains(target) else { return }
+        let destination = browser.spaces.indices.contains(target) ? browser.spaces[target].id : nil
         if browser.makingSpace, target != browser.spaces.count {
             browser.cancelSpaceCreation()
         }
@@ -194,11 +196,11 @@ final class SpaceSwipe {
             var still = Transaction()
             still.disablesAnimations = true
             withTransaction(still) {
-                if target == browser.spaces.count {
-                    browser.makingSpace = true
-                } else {
+                if let destination {
                     browser.makingSpace = false
-                    browser.switchSpace(to: browser.spaces[target].id)
+                    if browser.spaces.contains(where: { $0.id == destination }) { browser.switchSpace(to: destination) }
+                } else {
+                    browser.makingSpace = true
                 }
                 browser.spaceSwipe = 0
             }

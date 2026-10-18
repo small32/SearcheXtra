@@ -111,7 +111,7 @@ enum ExtensionNative {
                 // counts.
                 if beating == nil {
                     beating = Timer.scheduledTimer(withTimeInterval: 25, repeats: true) { timer in
-                        guard !port.isDisconnected else { timer.invalidate(); return }
+                        guard !port.isDisconnected else { timer.invalidate(); beating = nil; return }
                         port.sendMessage(["__searchNative": "alive"], completionHandler: nil)
                     }
                 }
@@ -119,7 +119,7 @@ enum ExtensionNative {
             }
             try? pipe.write(message)
         }
-        port.disconnectHandler = { _ in beating?.invalidate(); pipe.stop() }
+        port.disconnectHandler = { _ in beating?.invalidate(); beating = nil; pipe.stop() }
         Live.keep(pipe, for: port)
         try pipe.start()
     }
@@ -275,6 +275,12 @@ final class HostPipe: @unchecked Sendable {
         var messages: [Any] = []
         while buffer.count >= 4 {
             let length = Int(buffer.prefix(4).withUnsafeBytes { $0.loadUnaligned(as: UInt32.self).littleEndian })
+            guard length <= 1 << 20 else {
+                buffer.removeAll()
+                lock.unlock()
+                stop()
+                return
+            }
             guard buffer.count >= 4 + length else { break }
             let body = buffer.subdata(in: 4..<(4 + length))
             buffer.removeSubrange(0..<(4 + length))

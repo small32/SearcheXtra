@@ -97,6 +97,7 @@ enum SiteSearch {
 
     private static var file: URL { Store.file("search-sites.json") }
     private static var loaded: [SearchSite]?
+    private static var generation = 0
     /// Never more than this many: the oldest go first.
     static let most = 40
 
@@ -124,7 +125,7 @@ enum SiteSearch {
     /// at most, without the browser's cookies — and the site joins the list.
     /// Nothing is ever fetched for a site not visited, in the background or
     /// from a private tab (see Browser, where this is called).
-    static func learn(from page: URL, description: URL) {
+    static func learn(from page: URL, description: URL, session suppliedSession: URLSession? = nil) {
         guard page.scheme == "https", description.scheme == "https",
               let host = siteHost(page.absoluteString), sameSite(description.absoluteString, host),
               !builtIn.contains(where: { Vault.registrable(bare($0.host)) == Vault.registrable(host) }),
@@ -132,7 +133,8 @@ enum SiteSearch {
         var request = URLRequest(url: description, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 10)
         request.httpShouldHandleCookies = false
         // Redirected only within the site: nothing is read from one not visited.
-        let session = URLSession(configuration: .ephemeral, delegate: SameSiteRedirects(host: host), delegateQueue: .main)
+        let session = suppliedSession ?? URLSession(configuration: .ephemeral, delegate: SameSiteRedirects(host: host), delegateQueue: .main)
+        let turn = generation
         session.dataTask(with: request) { data, response, _ in
             defer { session.finishTasksAndInvalidate() }
             guard let data, data.count <= 64 * 1024, (response as? HTTPURLResponse)?.statusCode == 200,
@@ -140,6 +142,7 @@ enum SiteSearch {
             let template = found.template
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
+                    guard generation == turn else { return }
                     adopt(host: host, template: template)
                 }
             }
@@ -161,8 +164,9 @@ enum SiteSearch {
 
     /// Forgotten, all of them: with the history (Browser.clearHistory).
     static func forget() {
+        generation &+= 1
         loaded = []
-        try? FileManager.default.removeItem(at: file)
+        Disk.write(file, now: true) { try? JSONEncoder().encode([SearchSite]()) }
     }
 
     private static func bare(_ host: String) -> String {

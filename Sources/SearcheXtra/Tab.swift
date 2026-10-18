@@ -1,4 +1,5 @@
 import ImageIO
+import Combine
 import SwiftUI
 import WebKit
 
@@ -244,6 +245,8 @@ final class Tab: ObservableObject, Identifiable {
     /// the reason there is.
     private(set) var built: PageView?
     private var configuration: WKWebViewConfiguration
+    private var loadCheck = 0
+    var browserWatch: [AnyCancellable] = []
     let extensionReturn = ExtensionReturnNavigation()
 
     /// Whether its page was made with the extension controller in it — every
@@ -944,6 +947,7 @@ final class Tab: ObservableObject, Identifiable {
     }
 
     func go(to url: URL) {
+        loadCheck &+= 1
         // Judged by the page it shows, not by how it was made: a tab an
         // extension's page opened with window.open is built from that
         // extension's configuration too. A tab with no page yet was just
@@ -1180,7 +1184,10 @@ final class Tab: ObservableObject, Identifiable {
     /// take — no error, no navigation, just a view that goes on sitting on
     /// about:blank with nothing left to say so. Still there, or still
     /// answering for a process that's already gone, is asked once more.
-    private func loadAndVerify(_ url: URL, state: Any? = nil, tries: Int = 0) {
+    private func loadAndVerify(_ url: URL, state: Any? = nil, tries: Int = 0, check: Int? = nil) {
+        if check == nil { loadCheck &+= 1 }
+        let check = check ?? loadCheck
+        guard check == loadCheck, address == url, pending == nil else { return }
         // Wait for the stage to take the view back before loading into it. A
         // page loaded while its view is off any window boots as a hidden tab,
         // and a site that holds everything until it is shown — x.com does,
@@ -1194,7 +1201,7 @@ final class Tab: ObservableObject, Identifiable {
         let view = web
         if view.window == nil, tries < 50 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
-                self?.loadAndVerify(url, state: state, tries: tries + 1)
+                self?.loadAndVerify(url, state: state, tries: tries + 1, check: check)
             }
             return
         }
@@ -1207,19 +1214,22 @@ final class Tab: ObservableObject, Identifiable {
         } else {
             view.open(url)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            guard let self else { return }
-            guard built?.url?.absoluteString != "about:blank" else {
-                web.open(url)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak view] in
+            guard let self, let view, built === view, check == loadCheck,
+                  address == url, pending == nil else { return }
+            guard view.url?.absoluteString != "about:blank" else {
+                view.open(url)
                 return
             }
-            web.evaluateJavaScript("document.readyState") { [weak self] _, error in
+            view.evaluateJavaScript("document.readyState") { [weak self, weak view] _, error in
                 MainActor.assumeIsolated {
-                    guard let self, let error = error as NSError? else { return }
+                    guard let self, let view, self.built === view, check == self.loadCheck,
+                          self.address == url, self.pending == nil,
+                          let error = error as NSError? else { return }
                     guard error.domain == WKErrorDomain,
                           error.code == WKError.webContentProcessTerminated.rawValue
                     else { return }
-                    self.web.open(url)
+                    view.open(url)
                 }
             }
         }
@@ -1337,6 +1347,7 @@ final class Tab: ObservableObject, Identifiable {
     /// A view that has lost its document is given the address back instead:
     /// there is nothing else for it to reload.
     func reload(fromOrigin: Bool = false) {
+        loadCheck &+= 1
         // A pin put down with ⌘W has no view left to reload; waking it is
         // the reload.
         guard !wake() else { return }
@@ -1350,15 +1361,16 @@ final class Tab: ObservableObject, Identifiable {
             web.reload()
         }
     }
-    func stop() { web.stopLoading() }
+    func stop() { loadCheck &+= 1; built?.stopLoading() }
     /// Straight through, every time. A page that has to be fetched again is
     /// fetched again — nothing is kept behind to make that look otherwise.
-    func back() { web.goBack() }
-    func forward() { web.goForward() }
+    func back() { loadCheck &+= 1; built?.goBack() }
+    func forward() { loadCheck &+= 1; built?.goForward() }
 
     /// Called when the tab is thrown away. Without it the view keeps running
     /// whatever the page left behind — timers, video, sockets.
     func close() {
+        browserWatch = []
         onZoom = nil
         onLink = nil
         onPick = nil
@@ -1374,6 +1386,7 @@ final class Tab: ObservableObject, Identifiable {
     /// back-forward cache. The tab keeps its address; `web` builds again the
     /// next time anyone asks for it.
     private func discard() {
+        loadCheck &+= 1
         watch = []
         ears.stop()
         guard let web = built else { return }

@@ -8,6 +8,7 @@ on:
       - 'Tests/SearcheXtraTests/**'
       - 'Tests/ExtensionUserScriptsTests.mjs'
       - 'Tests/ExtensionUserWorldTests.mjs'
+      - 'Tests/FlowDragTests.mjs'
       - 'Tests/verify-macos-app-launch.sh'
       - 'Package.swift'
       - 'build.sh'
@@ -53,6 +54,7 @@ jobs:
         run: |
           node Tests/ExtensionUserScriptsTests.mjs
           node Tests/ExtensionUserWorldTests.mjs
+          node Tests/FlowDragTests.mjs
 
       - name: Verify original ScriptCat MV3 package
         shell: bash
@@ -82,7 +84,7 @@ jobs:
           sleep 10
 
       - name: Test macOS browser regressions
-        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter 'BookmarkBarTests|BookmarkIconTests|BookmarkManagerTests|MiddleClickTests|ExtensionVersionTests|ExtensionNativeTests|ExtensionLifecycleTests|ExtensionScriptingTests|FlowDragTests|FlowDragAuxiliaryTests|PrivacyAndWindowTests|VaultAndUpdaterTests'
+        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --skip ExtensionScriptCatTests
 
       - name: Package verified app
         shell: bash

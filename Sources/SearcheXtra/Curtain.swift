@@ -25,9 +25,13 @@ struct Veil: Codable, Identifiable, Equatable {
 @MainActor
 final class Curtain: ObservableObject {
     @Published private(set) var byHost: [String: [Veil]] = [:]
-    private var saving = false
+    private var saving: DispatchWorkItem?
+    private let file: URL
 
-    init() { load() }
+    init(file: URL = Store.file("hidden.json")) {
+        self.file = file
+        load()
+    }
 
     func host(of url: URL?) -> String? {
         guard let host = url?.host()?.lowercased() else { return nil }
@@ -82,31 +86,34 @@ final class Curtain: ObservableObject {
 
     // MARK: - the file
 
-    private static var file: URL { Store.file("hidden.json") }
-
     private func load() {
-        guard let data = try? Data(contentsOf: Curtain.file),
+        guard let data = try? Data(contentsOf: file),
               let stored = try? JSONDecoder().decode([String: [Veil]].self, from: data)
         else { return }
         byHost = stored
     }
 
     private func save() {
-        guard !saving else { return }
-        saving = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+        guard saving == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            saving = false
-            let snapshot = byHost
-            let file = Curtain.file
-            DispatchQueue.global(qos: .utility).async {
-                guard let data = try? JSONEncoder().encode(snapshot) else { return }
-                try? FileManager.default.createDirectory(
-                    at: file.deletingLastPathComponent(), withIntermediateDirectories: true
-                )
-                try? data.write(to: file, options: .atomic)
-            }
+            saving = nil
+            write()
         }
+        saving = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    func flush() {
+        guard let saving else { return }
+        saving.cancel()
+        self.saving = nil
+        write(now: true)
+    }
+
+    private func write(now: Bool = false) {
+        let snapshot = byHost
+        Disk.write(file, now: now) { try? JSONEncoder().encode(snapshot) }
     }
 }
 

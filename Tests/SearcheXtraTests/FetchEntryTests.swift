@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import WebKit
 import XCTest
@@ -69,5 +70,22 @@ final class FetchEntryTests: XCTestCase {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         return WKWebView(frame: .zero, configuration: configuration)
+    }
+
+    func testIdenticalProgressDoesNotRepublishTheDownloadRow() {
+        let entry = FetchEntry(name: "fixture", request: nil, webView: nil)
+        let progress = Progress(totalUnitCount: 100)
+        progress.completedUnitCount = 20
+        entry.record(progress, trackFile: false)
+        var changes = 0
+        let watch = entry.objectWillChange.sink { changes += 1 }
+        defer { watch.cancel() }
+        entry.record(progress, trackFile: false)
+        XCTAssertEqual(changes, 0)
+        progress.completedUnitCount = 30
+        entry.record(progress, trackFile: false)
+        XCTAssertEqual(entry.completedBytes, 30)
+        XCTAssertEqual(entry.fraction, 0.3)
+        XCTAssertGreaterThan(changes, 0)
     }
 }

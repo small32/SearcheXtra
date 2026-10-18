@@ -1,8 +1,31 @@
+import Combine
 import XCTest
 @testable import SearcheXtra
 
 @MainActor
 final class BookmarkManagerTests: XCTestCase {
+    func testBatchDeletionPublishesOneChangeAndKeepsUnselectedSiblings() throws {
+        guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
+        let bookmarks = Bookmarks()
+        let previous = bookmarks.roots
+        bookmarks.remove(Set(previous.map(\.id)))
+        defer {
+            bookmarks.remove(Set(bookmarks.roots.map(\.id)))
+            for node in previous { bookmarks.insert(node, into: nil) }
+        }
+        let children = (0..<100).map { Bookmark(title: "Page \($0)", url: "https://bookmark-\($0).example/") }
+        let folder = bookmarks.insert(.folder("Folder", children), into: nil)
+        let survivor = bookmarks.insert(.folder("Survivor", []), into: nil)
+        var changes = 0
+        let watch = bookmarks.objectWillChange.sink { changes += 1 }
+        bookmarks.remove(Set([folder.id] + children.prefix(50).map(\.id)))
+        watch.cancel()
+        XCTAssertEqual(changes, 1)
+        XCTAssertEqual(bookmarks.roots.map(\.id), [survivor.id])
+        Disk.drain()
+        XCTAssertEqual(Bookmarks().roots.map(\.id), [survivor.id])
+    }
+
     func testSortingFolderPreservesOtherFoldersAndPersists() throws {
         guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
         let bookmarks = Bookmarks()

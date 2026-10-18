@@ -27,6 +27,12 @@ final class UnpackedIDTests: XCTestCase {
     private let key = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4/QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1+f4CBgoOEhYaHiImKi4yNjo+QkZKTlJWWl5iZmpucnZ6foKGi" // gitleaks:allow (bytes 1, 2, 3… in base64, not a real key)
     private let keyID = "gmamnbkpnmopddmcggdjbipgakiejpfc"
 
+    func testStoreIDPastedAfterUnicodeTextKeepsItsCorrectRange() {
+        XCTAssertEqual(Crx.id(in: "İ: " + keyID.uppercased()), keyID)
+        XCTAssertEqual(Crx.id(in: "扩展 😀 " + keyID), keyID)
+        XCTAssertNil(Crx.id(in: "x" + keyID))
+    }
+
     func testTheIdComesFromThePath() {
         // StopTheMadness Pro's bundled folder, and the id its host lists for Chrome.
         let path = "/Applications/StopTheMadness Pro.app/Contents/MacOS/StopTheMadness Chrome.app/Contents/Resources/chromium"

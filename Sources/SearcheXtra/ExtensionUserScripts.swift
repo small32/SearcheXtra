@@ -15,6 +15,13 @@ enum ExtensionUserScripts {
         let generation = UUID().uuidString
         var contentWorlds: [String: WKContentWorld] = [:]
         var host: Host?
+        var compiled: [CompiledScript]?
+    }
+    private struct CompiledScript {
+        let source: String
+        let worldID: String?
+        let atStart: Bool
+        let mainFrameOnly: Bool
     }
     private final class Page {
         weak var tab: Tab?
@@ -22,6 +29,7 @@ enum ExtensionUserScripts {
         let discovery = "userScriptFrames_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
         var frames: [String: Frame] = [:]
         var mainDocument: String?
+        var discovering = false
         init(_ tab: Tab) { self.tab = tab }
     }
     private struct Frame {
@@ -60,8 +68,14 @@ enum ExtensionUserScripts {
                          WKWebExtensionContext.permissionMatchPatternsWereDeniedNotification,
                          WKWebExtensionContext.grantedPermissionMatchPatternsWereRemovedNotification,
                          WKWebExtensionContext.deniedPermissionMatchPatternsWereRemovedNotification] {
-                observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
-                    MainActor.assumeIsolated { refresh() }
+                observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { note in
+                    MainActor.assumeIsolated {
+                        guard let context = note.object as? WKWebExtensionContext,
+                              var registration = registrations[context.uniqueIdentifier], registration.context === context else { return }
+                        registration.compiled = nil
+                        registrations[context.uniqueIdentifier] = registration
+                        refresh()
+                    }
                 })
             }
         }
@@ -70,6 +84,10 @@ enum ExtensionUserScripts {
 
     static func unloaded(_ id: String) {
         registrations.removeValue(forKey: id)?.host?.close()
+        if registrations.isEmpty {
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers.removeAll()
+        }
         refresh()
     }
 
@@ -92,16 +110,29 @@ enum ExtensionUserScripts {
     /// channel lends a website access to its extension's message transport.
     static func arm(_ tab: Tab, controller: WKUserContentController) {
         let key = ObjectIdentifier(controller)
-        let page: Page
-        if let found = pages[key] { page = found }
-        else {
-            page = Page(tab)
+        let page = pages[key] ?? Page(tab)
+        pages[key] = page
+        let permitted = registrations.keys.sorted().filter { id in
+            registrations[id].map { !tab.shy || $0.context.hasAccessToPrivateData } == true
+        }
+        guard !permitted.isEmpty else {
+            for (name, world) in page.handlers.values { controller.removeScriptMessageHandler(forName: name, contentWorld: world) }
+            page.handlers.removeAll()
+            if page.discovering {
+                controller.removeScriptMessageHandler(forName: page.discovery, contentWorld: Web.world)
+                page.discovering = false
+            }
+            page.frames.removeAll()
+            page.mainDocument = nil
+            return
+        }
+        if !page.discovering {
             controller.addScriptMessageHandler(FrameDiscovery(page: page), contentWorld: Web.world, name: page.discovery)
+            page.discovering = true
         }
         var retained = Set<String>()
-        pages[key] = page
         controller.addUserScript(WKUserScript(source: discovery(channel: page.discovery), injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world))
-        for id in registrations.keys.sorted() {
+        for id in permitted {
             guard var registration = registrations[id], !tab.shy || registration.context.hasAccessToPrivateData else { continue }
             let scripts = registration.scripts
             let worldIDs = Set([""] + registration.worlds.map { $0["worldId"] as? String ?? "" } + scripts.filter { ($0["world"] as? String) != "MAIN" }.map { $0["worldId"] as? String ?? "" }).union(registration.contentWorlds.keys)
@@ -121,17 +152,22 @@ enum ExtensionUserScripts {
                                                            injectionTime: .atDocumentStart, forMainFrameOnly: false, in: world))
                 }
             }
+            if registration.compiled == nil {
+                let granted = registration.context.currentPermissionMatchPatterns.map(\.string)
+                let denied = Array(registration.context.deniedPermissionMatchPatterns.keys).map(\.string)
+                registration.compiled = scripts.compactMap { script in
+                    do {
+                        return CompiledScript(source: try compiled(script, folder: Extensions.folder(for: id), granted: granted, denied: denied),
+                                              worldID: (script["world"] as? String) == "MAIN" ? nil : script["worldId"] as? String ?? "",
+                                              atStart: (script["runAt"] as? String) == "document_start", mainFrameOnly: script["allFrames"] as? Bool != true)
+                    } catch { Extensions.shared.noteError(error.localizedDescription, for: id); return nil }
+                }
+            }
             registrations[id] = registration
-            let granted = registration.context.currentPermissionMatchPatterns.map(\.string)
-            let denied = Array(registration.context.deniedPermissionMatchPatterns.keys).map(\.string)
-            for script in scripts {
-                do {
-                    let world: WKContentWorld = (script["world"] as? String) == "MAIN" ? .page : registration.contentWorlds[script["worldId"] as? String ?? ""]!
-                    let source = try compiled(script, folder: Extensions.folder(for: id), granted: granted, denied: denied)
-                    let start = (script["runAt"] as? String) == "document_start"
-                    controller.addUserScript(WKUserScript(source: source, injectionTime: start ? .atDocumentStart : .atDocumentEnd,
-                                                           forMainFrameOnly: script["allFrames"] as? Bool != true, in: world))
-                } catch { Extensions.shared.noteError(error.localizedDescription, for: id) }
+            for script in registration.compiled ?? [] {
+                let world = script.worldID.flatMap { registration.contentWorlds[$0] } ?? .page
+                controller.addUserScript(WKUserScript(source: script.source, injectionTime: script.atStart ? .atDocumentStart : .atDocumentEnd,
+                                                       forMainFrameOnly: script.mainFrameOnly, in: world))
             }
         }
         for (key, (name, world)) in page.handlers where !retained.contains(key) {
@@ -196,6 +232,7 @@ enum ExtensionUserScripts {
             registration.worlds = worlds
         default: throw invalid("Unknown userScripts method")
         }
+        registration.compiled = nil
         registrations[id] = registration
         refresh()
         return nil

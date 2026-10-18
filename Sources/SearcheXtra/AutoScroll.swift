@@ -12,7 +12,7 @@ enum AutoScroll {
     @MainActor static var on = false
 
     /// For a page already up when it is turned off.
-    static let off = "window.__searchAutoScrollOff = true;"
+    static let off = "window.__searchAutoScrollOff = true; window.__searchAutoScrollStop?.();"
 
     static let script = #"""
     (() => {
@@ -71,6 +71,7 @@ enum AutoScroll {
         removeEventListener('mousemove', move, true);
         active = null;
       };
+      window.__searchAutoScrollStop = stop;
 
       addEventListener('mousedown', (e) => {
         swallow = -1;

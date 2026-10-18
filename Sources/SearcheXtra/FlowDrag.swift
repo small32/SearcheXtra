@@ -90,13 +90,13 @@ enum FlowDrag {
 }
 @MainActor final class FlowDragSettings:ObservableObject {
     static let shared=FlowDragSettings()
-    @Published var config:FlowDragConfig {didSet {if let data=try? JSONEncoder().encode(config){Store.settings.set(data,forKey:"flowDrag.config")};for browser in Browsers.all {for tab in browser.tabs + browser.parkedTabs + [browser.peekTab].compactMap({$0}) + LittleWindow.tabs(for: browser) {tab.refreshFlowDrag()}}}}
+    @Published var config:FlowDragConfig {didSet {guard config != oldValue else{return};if let data=try? JSONEncoder().encode(config){Store.settings.set(data,forKey:"flowDrag.config")};for browser in Browsers.all {for tab in browser.tabs + browser.parkedTabs + [browser.peekTab].compactMap({$0}) + LittleWindow.tabs(for: browser) {tab.refreshFlowDrag()}}}}
     init() {
         let saved=Store.settings.data(forKey:"flowDrag.config").flatMap{try? JSONDecoder().decode(FlowDragConfig.self,from:$0)}
         // Do not broadcast to existing tabs while the shared instance is still initializing.
         _config=Published(initialValue:saved.flatMap{(try? $0.validate()) != nil ? $0:nil} ?? FlowDragConfig())
     }
-    static var source:String {L10n.resourceBundle.url(forResource:"FlowDrag",withExtension:"js").flatMap{try? String(contentsOf:$0,encoding:.utf8)} ?? ""}
+    static let source:String = L10n.resourceBundle.url(forResource:"FlowDrag",withExtension:"js").flatMap{try? String(contentsOf:$0,encoding:.utf8)} ?? ""
     static var options:String {
         let labels=Dictionary(uniqueKeysWithValues:FlowDrag.objects.flatMap(FlowDrag.actions).reduce(into:Set<String>()){$0.insert($1)}.map{($0,L10n.text("flowDrag.action."+$0))})
         guard let data=try? JSONSerialization.data(withJSONObject:["config":JSONSerialization.jsonObject(with:JSONEncoder().encode(shared.config)),"labels":labels,"pointerDrag":true]),let text=String(data:data,encoding:.utf8) else{return "{}"}
@@ -109,15 +109,20 @@ final class FlowDragRelay:NSObject,WKScriptMessageHandler {
     weak var tab:Tab?
     private var pending:FlowDragRequest?
     private var started=Date()
-    private var frames:[WKFrameInfo]=[]
+    private var frames:[String:WKFrameInfo]=[:]
     func userContentController(_ controller:WKUserContentController,didReceive message:WKScriptMessage) {
         MainActor.assumeIsolated {
             guard let tab,let body=message.body as? [String:Any],let data=try? JSONSerialization.data(withJSONObject:body),let p=try? JSONDecoder().decode(FlowDragRequest.self,from:data) else{return}
             if p.phase=="cancel" {if pending?.id==p.id {pending=nil};return}
             guard let page=URL(string:p.pageUrl),let origin=page.host,origin==message.frameInfo.securityOrigin.host else{return}
+            if p.phase=="gone" {
+                frames[p.id]=nil
+                return
+            }
             if p.phase=="ready" {
-                if message.frameInfo.isMainFrame {frames.removeAll()}
-                frames.append(message.frameInfo)
+                // A restored child's pageshow can arrive before its parent's.
+                if message.frameInfo.isMainFrame {frames=frames.filter{!$0.value.isMainFrame || $0.key==p.id}}
+                frames[p.id]=message.frameInfo
                 // Settings may have changed while this document was loading.
                 // Its document-start script is a snapshot; refresh each frame
                 // after the installed bridge announces that it is ready.
@@ -134,7 +139,7 @@ final class FlowDragRelay:NSObject,WKScriptMessageHandler {
     }
     @MainActor func configure(_ web:WKWebView) {
         configure(web,in:nil)
-        for frame in frames where !frame.isMainFrame {configure(web,in:frame)}
+        for frame in frames.values where !frame.isMainFrame {configure(web,in:frame)}
     }
     @MainActor private func configure(_ web:WKWebView,in frame:WKFrameInfo?) {
         let script="window.__sxFlowDrag?.configure("+FlowDragSettings.options+")"
@@ -213,13 +218,14 @@ extension Browser {
                     let configuration=URLSessionConfiguration.ephemeral
                     cookies.forEach{configuration.httpCookieStorage?.setCookie($0)}
                     let session=URLSession(configuration:configuration);defer{session.finishTasksAndInvalidate()}
-                    let (data,response)=try await session.data(for:URLRequest(url:url))
+                    let (download,response)=try await session.download(for:URLRequest(url:url))
+                    defer{try? FileManager.default.removeItem(at:download)}
                     guard let http=response as? HTTPURLResponse,(200..<300).contains(http.statusCode) else{throw FlowDrag.Invalid()}
                     var name=URL(fileURLWithPath:response.suggestedFilename ?? url.lastPathComponent).lastPathComponent;if name.isEmpty||name=="."||name==".." {name="image"}
                     try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true)
                     var destination=directory.appendingPathComponent(name);var i=1
                     while FileManager.default.fileExists(atPath:destination.path){destination=directory.appendingPathComponent((name as NSString).deletingPathExtension+" (\(i))"+((name as NSString).pathExtension.isEmpty ? "":"."+(name as NSString).pathExtension));i+=1}
-                    try data.write(to:destination,options:.withoutOverwriting)
+                    try FileManager.default.moveItem(at:download,to:destination)
                     self.announce(L10n.text("flowDrag.done"))
                 } catch {self.announce(L10n.text("flowDrag.failed"))}
             }

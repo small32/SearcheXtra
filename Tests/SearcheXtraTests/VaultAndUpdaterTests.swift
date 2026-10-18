@@ -1,3 +1,4 @@
+import LocalAuthentication
 import XCTest
 @testable import SearcheXtra
 
@@ -6,6 +7,18 @@ import XCTest
 /// Nothing here touches the keychain: every CSV row below is one that is
 /// skipped, so nothing is ever saved.
 final class VaultAndUpdaterTests: XCTestCase {
+    func testUnavailableAuthenticationDoesNotRevealPasswords() {
+        for code in [LAError.notInteractive, .biometryNotAvailable, .systemCancel, .invalidContext] {
+            let context = UnavailableAuthentication(code: code)
+            var allowed: Bool?
+            Vault.prove("Fixture", context: context) { allowed = $0 }
+            XCTAssertEqual(allowed, false)
+        }
+        var allowed: Bool?
+        Vault.prove("Fixture", context: UnavailableAuthentication(code: .passcodeNotSet)) { allowed = $0 }
+        XCTAssertEqual(allowed, true)
+    }
+
     func testHostIsTheSiteWithoutWWW() {
         XCTAssertEqual(Vault.host(of: "https://www.example.com/login?next=/"), "example.com")
         XCTAssertEqual(Vault.host(of: "  Example.COM  "), "example.com")
@@ -202,5 +215,14 @@ final class VaultAndUpdaterTests: XCTestCase {
         XCTAssertEqual(ditto.terminationStatus, 0)
 
         XCTAssertNil(Updater.opened(try Data(contentsOf: zip)))
+    }
+}
+
+private final class UnavailableAuthentication: LAContext {
+    let code: LAError.Code
+    init(code: LAError.Code) { self.code = code; super.init() }
+    override func canEvaluatePolicy(_ policy: LAPolicy, error: NSErrorPointer) -> Bool {
+        error?.pointee = NSError(domain: LAErrorDomain, code: code.rawValue)
+        return false
     }
 }

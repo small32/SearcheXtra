@@ -52,8 +52,25 @@ jobs:
       - name: Launch packaged app without build resources
         run: bash Tests/verify-macos-app-launch.sh build/SearcheXtra.app "$(swift build -c release --arch arm64 -Xswiftc -Osize --show-bin-path)/SearcheXtra_SearcheXtra.bundle"
 
+      - name: Test user-script permission bridge
+        run: |
+          node Tests/ExtensionUserScriptsTests.mjs
+          node Tests/ExtensionUserWorldTests.mjs
+          node Tests/FlowDragTests.mjs
+
       - name: Test macOS browser regressions
-        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter 'BookmarkBarTests|BookmarkIconTests|BookmarkManagerTests|MiddleClickTests|ExtensionVersionTests|ExtensionNativeTests|ExtensionLifecycleTests|FlowDragTests|FlowDragAuxiliaryTests|PrivacyAndWindowTests|VaultAndUpdaterTests'
+        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --skip ExtensionScriptCatTests
+
+      - name: Verify original ScriptCat MV3 package
+        shell: bash
+        run: |
+          package="$RUNNER_TEMP/scriptcat-v1.4.0-chrome.zip"
+          curl --fail --location --retry 3 'https://github.com/scriptscat/scriptcat/releases/download/v1.4.0/scriptcat-v1.4.0-chrome.zip' --output "$package"
+          printf '92be0136bef5b18863965f1ec9a5c780549e0269f0c61391689eb51152792e43  %s\n' "$package" | shasum -a 256 --check
+          echo "SEARCHEXTRA_TEST_MV3_FOLDER=$package" >> "$GITHUB_ENV"
+
+      - name: Test original ScriptCat with MV2 coexistence
+        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter ExtensionScriptCatTests
 
       - name: Verify and package application
         shell: bash

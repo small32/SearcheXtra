@@ -211,15 +211,20 @@ final class Bookmarks: ObservableObject {
     }
 
     func remove(_ id: Bookmark.ID) {
-        roots = Bookmarks.prune(id, from: roots)
+        remove(Set([id]))
+    }
+
+    func remove(_ ids: Set<Bookmark.ID>) {
+        guard !ids.isEmpty else { return }
+        roots = Bookmarks.prune(ids, from: roots)
         save()
     }
 
-    private static func prune(_ id: Bookmark.ID, from nodes: [Bookmark]) -> [Bookmark] {
+    private static func prune(_ ids: Set<Bookmark.ID>, from nodes: [Bookmark]) -> [Bookmark] {
         nodes.compactMap { node in
-            if node.id == id { return nil }
+            if ids.contains(node.id) { return nil }
             var copy = node
-            if let kids = node.children { copy.children = prune(id, from: kids) }
+            if let kids = node.children { copy.children = prune(ids, from: kids) }
             return copy
         }
     }
@@ -1360,7 +1365,7 @@ struct BookmarksPanel: View {
                     Button(L10n.text("bookmarks.manager.deleteSelected")) {
                         let ids = selection
                         Ask.sure(L10n.text("bookmarks.manager.deleteSelected"), detail: L10n.text("bookmarks.manager.deleteDetail"), confirm: L10n.text("Bookmarks.0220")) {
-                            for id in ids { bookmarks.remove(id) }
+                            bookmarks.remove(ids)
                             selection.removeAll()
                         }
                     }
