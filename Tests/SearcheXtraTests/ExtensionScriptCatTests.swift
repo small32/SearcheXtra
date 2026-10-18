@@ -204,6 +204,17 @@ final class ExtensionScriptCatTests: XCTestCase {
             let mainExecuted = try await evaluate(website.web, "return document.documentElement.getAttribute('data-sx-execute-main') === 'true';")
             XCTAssertEqual(mainExecuted as? Bool, true)
             trace("native allFrames, frameId, documentId and MAIN execution succeeded")
+            let countBeforeExtensionReload = Int((try await state())["count"] as? String ?? "0") ?? 0
+            _ = try await evaluate(options.web, "setTimeout(() => chrome.runtime.reload(), 50); return true;")
+            // Let the real extension IPC unload/reload complete before a new
+            // website document uses the worker and its native ports again.
+            try await Task.sleep(for: .milliseconds(500))
+            try await reload(website.web)
+            try await until("GM storage and XHR after native chrome.runtime.reload") {
+                let value = try await state()
+                return (Int(value["count"] as? String ?? "0") ?? 0) > countBeforeExtensionReload && value["xhr"] as? String == "200:true"
+            }
+            trace("GM storage and native transport survived chrome.runtime.reload")
             let mv2 = scratch.appendingPathComponent("mv2", isDirectory: true)
             try files.createDirectory(at: mv2, withIntermediateDirectories: true)
             try #"{"manifest_version":2,"name":"SearcheXtra native MV2 fixture","version":"1.0","content_scripts":[{"matches":["http://127.0.0.1/*"],"js":["content.js"],"run_at":"document_end"}]}"#.write(to: mv2.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
@@ -223,7 +234,21 @@ final class ExtensionScriptCatTests: XCTestCase {
             try await reload(website.web)
             let revoked = try await evaluate(website.web, "return document.documentElement.getAttribute('data-sx-scriptcat-started') === null && document.documentElement.getAttribute('data-sx-mv2') === 'native';")
             XCTAssertEqual(revoked as? Bool, true)
-            print("PASS: original ScriptCat MV3 1.4.0: installation, opt-in, real GM storage, cross-origin XHR, reload, iframe, native execute targets, MV2 coexistence and revocation")
+            let reenable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, true))
+            let reenabled = await reenable.value
+            XCTAssertTrue(reenabled)
+            let restoredContext = try XCTUnwrap(Extensions.shared.contexts[identifier])
+            try await until("real user-script registrations after permission re-enable") {
+                let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: restoredContext) as? [[String: Any]] ?? []
+                return scripts.contains { $0["id"] as? String == scriptID }
+            }
+            try await reload(website.web)
+            try await until("GM storage and XHR recover after permission re-enable") {
+                let value = try await state()
+                return (Int(value["count"] as? String ?? "0") ?? 0) > countBeforeExtensionReload && value["xhr"] as? String == "200:true"
+            }
+            trace("permission re-enable restored GM storage and XHR")
+            print("PASS: original ScriptCat MV3 1.4.0: installation, opt-in, real GM storage, cross-origin XHR, reload, iframe, native execute targets, native runtime.reload, MV2 coexistence, revocation and re-enable")
         } catch {
             print("ScriptCat native errors: \(Extensions.shared.errors[identifier] ?? [])")
             throw error
