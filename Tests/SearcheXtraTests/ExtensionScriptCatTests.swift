@@ -206,9 +206,11 @@ final class ExtensionScriptCatTests: XCTestCase {
             trace("native allFrames, frameId, documentId and MAIN execution succeeded")
             let countBeforeExtensionReload = Int((try await state())["count"] as? String ?? "0") ?? 0
             _ = try await evaluate(options.web, "setTimeout(() => chrome.runtime.reload(), 50); return true;")
-            // Let the real extension IPC unload/reload complete before a new
-            // website document uses the worker and its native ports again.
-            try await Task.sleep(for: .milliseconds(500))
+            try await until("a fresh runtime and original ScriptCat registration after chrome.runtime.reload") {
+                guard let current = Extensions.shared.contexts[identifier], current !== context else { return false }
+                let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: current) as? [[String: Any]] ?? []
+                return scripts.contains { $0["id"] as? String == "scriptcat-content" } && scripts.contains { $0["id"] as? String == scriptID }
+            }
             try await reload(website.web)
             try await until("GM storage and XHR after native chrome.runtime.reload") {
                 let value = try await state()
@@ -251,6 +253,8 @@ final class ExtensionScriptCatTests: XCTestCase {
             print("PASS: original ScriptCat MV3 1.4.0: installation, opt-in, real GM storage, cross-origin XHR, reload, iframe, native execute targets, native runtime.reload, MV2 coexistence, revocation and re-enable")
         } catch {
             print("ScriptCat native errors: \(Extensions.shared.errors[identifier] ?? [])")
+            let lastState = try? await evaluate(website.web, "return { started: document.documentElement.getAttribute('data-sx-scriptcat-started'), count: document.documentElement.getAttribute('data-sx-scriptcat-count'), xhr: document.documentElement.getAttribute('data-sx-scriptcat-xhr'), error: document.documentElement.getAttribute('data-sx-scriptcat-error') };")
+            print("ScriptCat last website state: \(lastState ?? "unavailable")")
             throw error
         }
     }

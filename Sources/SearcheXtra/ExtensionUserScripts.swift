@@ -91,6 +91,13 @@ enum ExtensionUserScripts {
         refresh()
     }
 
+    /// Native resource-folder reloads start a new installation of user
+    /// scripts and worlds. Extension storage, including GM values, is kept.
+    static func reset(_ id: String) throws {
+        try persist([], name: "userscripts.json", id: id)
+        try persist([], name: "worlds.json", id: id)
+    }
+
     static func discard(_ web: WKWebView) {
         let controller = web.configuration.userContentController
         if let page = pages.removeValue(forKey: ObjectIdentifier(controller)) {

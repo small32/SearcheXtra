@@ -2498,6 +2498,7 @@ enum ExtensionShims {
       }
       const wantsUserScripts = (() => { try { const m = runtime.getManifest(); return [...(m.permissions || []), ...(m.optional_permissions || [])].includes("userScripts"); } catch (e) { return false; } })();
       if (!chrome.userScripts && wantsUserScripts) {
+        put(runtime, "reload", () => { void native("runtime.reload", []).catch(error => console.error(error)); });
         const api = {
           register: (scripts) => native("userScripts.register", [scripts]),
           update: (scripts) => native("userScripts.update", [scripts]),
@@ -3367,6 +3368,7 @@ enum ExtensionShims {
     private static func run(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
         let id = context.uniqueIdentifier
         if api == "permissions.userScriptsAllowed" { return Extensions.userScriptsAllowed(id) }
+        if api == "runtime.reload" { owner.reloadRuntime(context); return nil }
         // Enforced at the native boundary as well as during registration:
         // extension code can call the bridge without going through our shim.
         if api.hasPrefix("userScripts."), !Extensions.userScriptsAllowed(id) {

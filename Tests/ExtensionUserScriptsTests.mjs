@@ -27,6 +27,7 @@ function fixture({ allowed = false, optional = false, background = false, saved 
     if (api === 'permissions.userScriptsAllowed') return state.allowed;
     if (api.startsWith('userScripts.') && !state.allowed) throw Error('User scripts are disabled');
     switch (api) {
+      case 'runtime.reload': return;
       case 'userScripts.list': return structuredClone(state.saved);
       case 'userScripts.register': state.saved.push(...structuredClone(args[0])); return;
       case 'userScripts.update': state.saved = state.saved.map(s => ({ ...s, ...structuredClone(args[0].find(update => update.id === s.id)) })); return;
@@ -76,6 +77,9 @@ for (const optional of [false, true]) {
 
 const saved = [{ id: 'scriptcat-content', js: [{ code: 'void 0;' }], matches: ['<all_urls>'], world: 'USER_SCRIPT' }];
 const disabled = fixture({ background: true, saved });
+disabled.chrome.runtime.reload();
+await Promise.resolve();
+assert(disabled.state.calls.includes('runtime.reload'), 'Extension self-reload must replace browser-owned user-script worlds and transport');
 await assert.rejects(disabled.chrome.userScripts.getScripts(), /disabled/);
 assert.deepEqual(disabled.state.saved, saved);
 disabled.state.allowed = true;

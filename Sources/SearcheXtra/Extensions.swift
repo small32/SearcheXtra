@@ -1028,6 +1028,25 @@ final class Extensions: NSObject, ObservableObject {
 
     // MARK: - updates
 
+    /// The native runtime.reload must pass through the same lifecycle as
+    /// browser reloads so hidden user-script pages and worlds cannot retain
+    /// the old worker. Reload the installed copy, without copying its source.
+    @discardableResult
+    func reloadRuntime(_ context: WKWebExtensionContext) -> Task<Bool, Never>? {
+        let id = context.uniqueIdentifier
+        guard contexts[id] === context, let item = installed.first(where: { $0.id == id && $0.enabled }) else { return nil }
+        return Task {
+            // Return the native API reply before unloading its caller.
+            await Task.yield()
+            guard contexts[id] === context else { return false }
+            unload(id)
+            do { try ExtensionUserScripts.reset(id) }
+            catch { noteError(error.localizedDescription, for: id); return false }
+            workersChanged()
+            return await load(item)
+        }
+    }
+
     /// Once a day, the store is asked whether anything installed from it has
     /// a newer version; if so it is fetched, checked and swapped in. One that
     /// asks for more than it was installed with is asked about first.

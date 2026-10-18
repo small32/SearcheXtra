@@ -186,4 +186,33 @@ final class ExtensionLifecycleTests: XCTestCase {
         XCTAssertTrue(disabled)
         XCTAssertFalse(hasDiscovery(), "Revoking the last user-script extension must release discovery")
     }
+
+    func testRuntimeReloadClearsUserScriptsAndWorldsWithoutRecopyingTheSource() async throws {
+        let manifest: [String: Any] = ["manifest_version": 3, "name": "Runtime reload fixture", "version": "1.0",
+                                       "permissions": ["userScripts"], "host_permissions": ["https://example.com/*"]]
+        try JSONSerialization.data(withJSONObject: manifest).write(to: folder.appendingPathComponent("manifest.json"))
+        let install = try XCTUnwrap(Extensions.shared.installFolder(at: folder, confirm: false))
+        await install.value
+        let enable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, true))
+        let enabled = await enable.value
+        XCTAssertTrue(enabled)
+        let previous = try XCTUnwrap(Extensions.shared.contexts[id])
+        let script: [String: Any] = ["id": "registered", "matches": ["https://example.com/*"], "js": [["code": "void 0;"]]]
+        _ = try await ExtensionUserScripts.call("userScripts.register", args: [[script]], context: previous)
+        _ = try await ExtensionUserScripts.call("userScripts.world", args: [["worldId": "registered-world", "messaging": true]], context: previous)
+        let kept = Extensions.folder(for: id).appendingPathComponent("_search/retained.txt")
+        try "installed-copy".write(to: kept, atomically: true, encoding: .utf8)
+        let reload = try XCTUnwrap(Extensions.shared.reloadRuntime(previous))
+        let reloaded = await reload.value
+        XCTAssertTrue(reloaded)
+        let current = try XCTUnwrap(Extensions.shared.contexts[id])
+        XCTAssertFalse(current === previous)
+        XCTAssertNil(Extensions.shared.reloadRuntime(previous), "A retired extension context cannot reload its replacement")
+        let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: current) as? [[String: Any]]
+        let worlds = try await ExtensionUserScripts.call("userScripts.worlds", args: [], context: current) as? [[String: Any]]
+        XCTAssertEqual(scripts?.count, 0)
+        XCTAssertEqual(worlds?.count, 0)
+        XCTAssertEqual(try String(contentsOf: kept, encoding: .utf8), "installed-copy")
+        XCTAssertTrue(Extensions.userScriptsAllowed(id))
+    }
 }
