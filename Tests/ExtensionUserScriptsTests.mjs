@@ -89,4 +89,29 @@ assert.equal((await disabled.chrome.userScripts.getWorldConfigurations()).length
 assert.equal(disabled.state.registered.size, 0, 'User scripts are not exposed as privileged native extension content scripts');
 assert(disabled.state.calls.includes('userScripts.register') === false);
 assert(disabled.state.calls.includes('userScripts.update'));
-console.log('PASS: macOS user-script opt-in, ScriptCat probe, optional permission, callback errors and native-world API forwarding');
+
+// macOS 15 WebKit's alarm binding does not accept the Chrome callback overload
+// used during ScriptCat startup. The real scheduler must receive only its args.
+const alarmStart = swift.indexOf('      if (chrome.alarms && typeof chrome.alarms.create === "function") {');
+const alarmEnd = swift.indexOf('      // The popup Search shows', alarmStart);
+assert(alarmStart >= 0 && alarmEnd > alarmStart);
+const alarmCalls = [];
+const alarmRuntime = {};
+const alarms = { create(...args) {
+  assert.equal(this, alarms);
+  assert(args.every(value => typeof value !== 'function'));
+  alarmCalls.push(args);
+  if (args[0] === 'bad') throw new Error('Invalid alarm');
+  return Promise.resolve();
+} };
+vm.runInNewContext(swift.slice(alarmStart, alarmEnd), {
+  chrome: { alarms }, put: (target, key, value) => { target[key] = value; },
+  withLastError(error, callback) { alarmRuntime.lastError = error; try { callback(); } finally { delete alarmRuntime.lastError; } },
+});
+await new Promise(resolve => alarms.create('cloudSync', { periodInMinutes: 60 }, resolve));
+await alarms.create('cleanup', { delayInMinutes: 1 });
+await new Promise(resolve => alarms.create('bad', {}, () => { assert.match(alarmRuntime.lastError.message, /Invalid alarm/); resolve(); }));
+await assert.rejects(alarms.create('bad', {}), /Invalid alarm/);
+assert.deepEqual(alarmCalls[0], ['cloudSync', { periodInMinutes: 60 }]);
+assert.equal(alarmRuntime.lastError, undefined);
+console.log('PASS: macOS user-script opt-in, ScriptCat probe, optional permission, callback errors, native-world forwarding and alarm callback compatibility');

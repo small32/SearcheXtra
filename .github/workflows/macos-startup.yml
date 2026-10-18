@@ -54,9 +54,6 @@ jobs:
           node Tests/ExtensionUserScriptsTests.mjs
           node Tests/ExtensionUserWorldTests.mjs
 
-      - name: Test macOS browser regressions
-        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter 'BookmarkBarTests|BookmarkIconTests|BookmarkManagerTests|MiddleClickTests|ExtensionVersionTests|ExtensionNativeTests|ExtensionLifecycleTests|ExtensionScriptingTests|FlowDragTests|FlowDragAuxiliaryTests|PrivacyAndWindowTests|VaultAndUpdaterTests'
-
       - name: Verify original ScriptCat MV3 package
         shell: bash
         run: |
@@ -67,17 +64,25 @@ jobs:
 
       - name: Test original ScriptCat with MV2 coexistence
         id: scriptcat
-        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter ExtensionScriptCatTests
+        shell: bash
+        run: |
+          mkdir -p build/macos-launch-smoke/native-tests
+          SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter ExtensionScriptCatTests 2>&1 | tee build/macos-launch-smoke/native-tests/scriptcat.log
 
       - name: Diagnose failed native ScriptCat test
         if: ${{ failure() && steps.scriptcat.outcome == 'failure' }}
+        timeout-minutes: 2
         shell: bash
         run: |
           destination=build/macos-launch-smoke/native-tests
           mkdir -p "$destination"
+          if ! grep -Eiq 'unexpected signal|signal code|signal 5|signal 6' "$destination/scriptcat.log"; then exit 0; fi
           bundle="$(swift build -c release --arch arm64 -Xswiftc -Osize --show-bin-path)/SearcheXtraPackageTests.xctest"
-          SEARCH_PROBE=interface-tests xcrun lldb --batch -o 'run' -o 'thread backtrace all' -- "$(xcrun -f xctest)" -XCTest SearcheXtraTests.ExtensionScriptCatTests/testOriginalMV3RunsGMStorageXHRFramesAlongsideMV2 "$bundle" > "$destination/backtrace.log" 2>&1 || true
+          SEARCH_PROBE=interface-tests xcrun lldb --batch -o 'run' -k 'thread backtrace all' -- "$(xcrun -f xctest)" -XCTest SearcheXtraTests.ExtensionScriptCatTests/testOriginalMV3RunsGMStorageXHRFramesAlongsideMV2 "$bundle" > "$destination/backtrace.log" 2>&1 || true
           sleep 10
+
+      - name: Test macOS browser regressions
+        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter 'BookmarkBarTests|BookmarkIconTests|BookmarkManagerTests|MiddleClickTests|ExtensionVersionTests|ExtensionNativeTests|ExtensionLifecycleTests|ExtensionScriptingTests|FlowDragTests|FlowDragAuxiliaryTests|PrivacyAndWindowTests|VaultAndUpdaterTests'
 
       - name: Package verified app
         shell: bash

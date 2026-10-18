@@ -1727,6 +1727,18 @@ enum ExtensionShims {
         ContextType: { TAB: "TAB", POPUP: "POPUP", BACKGROUND: "BACKGROUND", OFFSCREEN_DOCUMENT: "OFFSCREEN_DOCUMENT",
           SIDE_PANEL: "SIDE_PANEL", DEVELOPER_TOOLS: "DEVELOPER_TOOLS" },
       });
+      // Older WebKit bindings mistake Chrome's optional third callback for
+      // the alarm info dictionary. Keep the native scheduler, and settle the
+      // Chrome callback from its promise instead.
+      if (chrome.alarms && typeof chrome.alarms.create === "function") {
+        const alarms = chrome.alarms, create = alarms.create.bind(alarms);
+        put(alarms, "create", (...args) => {
+          const callback = typeof args[args.length - 1] === "function" ? args.pop() : null;
+          const promise = Promise.resolve().then(() => create(...args));
+          if (!callback) return promise;
+          promise.then(() => callback(), error => withLastError(error, callback));
+        });
+      }
       // The popup Search shows is a page of its own, known to WebKit as a
       // tab with no place in the row (no index). Chrome has no current
       // tab in a popup, and lists it among the popup views; extensions lay
