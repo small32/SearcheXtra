@@ -82,6 +82,20 @@ final class ExtensionScriptCatTests: XCTestCase {
         try await until("initial local website") { !website.web.isLoading && website.web.url == pageServer.url("/page") }
         trace("initial local website loaded")
         var restoredRuntime: [String: Any] = [:]
+        var diagnosticOptions: Tab?
+        var permissionPhase = "not started"
+        func nativeRelayState(_ options: Tab) async throws -> Any? {
+            try await evaluate(options.web, #"""
+            const scripts = await chrome.scripting.getRegisteredContentScripts();
+            const tab = (await chrome.tabs.query({})).find(tab => tab.url === website);
+            if (!tab) return { scripts, tab: 'unavailable' };
+            const isolated = await chrome.scripting.executeScript({ target: { tabId: tab.id },
+              func: () => ({ url: location.href, id: globalThis.chrome?.runtime?.id || null,
+                shim: globalThis.__searchShim === true, sendMessage: typeof globalThis.chrome?.runtime?.sendMessage,
+                connect: typeof globalThis.chrome?.runtime?.connect }) });
+            return { scripts, isolated };
+            """#, arguments: ["website": pageServer.url("/page").absoluteString])
+        }
         do {
             trace("installing original ScriptCat")
             let install = try XCTUnwrap(Extensions.shared.installFolder(at: package, confirm: false))
@@ -124,7 +138,10 @@ final class ExtensionScriptCatTests: XCTestCase {
             (async () => {
               document.documentElement.setAttribute('data-sx-scriptcat-started', 'true');
               const count = Number(await GM.getValue('searchextra-native-test-count', 0)) + 1;
+              document.documentElement.setAttribute('data-sx-scriptcat-read', String(count - 1));
+              document.documentElement.setAttribute('data-sx-scriptcat-writing', String(count));
               await GM.setValue('searchextra-native-test-count', count);
+              document.documentElement.setAttribute('data-sx-scriptcat-wrote', 'true');
               document.documentElement.setAttribute('data-sx-scriptcat-count', String(count));
               GM_xmlhttpRequest({ method: 'GET', url: XHR_URL,
                 onload: response => document.documentElement.setAttribute('data-sx-scriptcat-xhr', response.status + ':' + response.responseText.includes('Local test page')),
@@ -150,7 +167,54 @@ final class ExtensionScriptCatTests: XCTestCase {
             show(website)
             try await reload(website.web)
             func state() async throws -> [String: Any] {
-                try await self.evaluate(website.web, "return { started: document.documentElement.getAttribute('data-sx-scriptcat-started'), count: document.documentElement.getAttribute('data-sx-scriptcat-count'), xhr: document.documentElement.getAttribute('data-sx-scriptcat-xhr'), error: document.documentElement.getAttribute('data-sx-scriptcat-error') };") as? [String: Any] ?? [:]
+                try await self.evaluate(website.web, "return { started: document.documentElement.getAttribute('data-sx-scriptcat-started'), read: document.documentElement.getAttribute('data-sx-scriptcat-read'), writing: document.documentElement.getAttribute('data-sx-scriptcat-writing'), wrote: document.documentElement.getAttribute('data-sx-scriptcat-wrote'), count: document.documentElement.getAttribute('data-sx-scriptcat-count'), xhr: document.documentElement.getAttribute('data-sx-scriptcat-xhr'), error: document.documentElement.getAttribute('data-sx-scriptcat-error') };") as? [String: Any] ?? [:]
+            }
+            func permissionCycle(_ label: String, mv2: Bool) async throws {
+                permissionPhase = label
+                let previousCount = Int((try await state())["count"] as? String ?? "0") ?? 0
+                trace("permission cycle starting: \(label), previous count \(previousCount)")
+                let disable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, false))
+                let disabled = await disable.value
+                XCTAssertTrue(disabled)
+                try await reload(website.web)
+                let revoked = try await evaluate(website.web, "return document.documentElement.getAttribute('data-sx-scriptcat-started') === null && (!mv2 || document.documentElement.getAttribute('data-sx-mv2') === 'native');", arguments: ["mv2": mv2])
+                XCTAssertEqual(revoked as? Bool, true)
+                let reenable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, true))
+                let reenabled = await reenable.value
+                XCTAssertTrue(reenabled)
+                let restoredContext = try XCTUnwrap(Extensions.shared.contexts[identifier])
+                try await until("real user-script registrations: \(label)") {
+                    let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: restoredContext) as? [[String: Any]] ?? []
+                    return scripts.contains { $0["id"] as? String == scriptID }
+                }
+                let restoredOptions = browser.open(try XCTUnwrap(restoredContext.optionsPageURL), foreground: true)
+                diagnosticOptions = restoredOptions
+                show(restoredOptions)
+                try await until("native ScriptCat content registration: \(label)") {
+                    restoredRuntime = try await self.evaluate(restoredOptions.web, #"""
+                    return { scripts: await chrome.scripting.getRegisteredContentScripts(),
+                      worlds: await chrome.userScripts.getWorldConfigurations() };
+                    """#) as? [String: Any] ?? [:]
+                    return (restoredRuntime["scripts"] as? [[String: Any]])?.contains { $0["id"] as? String == "scriptcat-scripting" } == true
+                }
+                trace("permission cycle native registrations: \(label) \(restoredRuntime)")
+                // A persisted ID does not establish worker readiness. This
+                // real service waits for ScriptCat's initReady middleware.
+                let service = try await evaluate(restoredOptions.web, #"""
+                return await chrome.runtime.sendMessage({ action: 'serviceWorker/runtime/pageLoad', data: {} });
+                """#) as? [String: Any]
+                restoredRuntime["service"] = service ?? [:]
+                guard service?["code"] as? Int == 0, (service?["data"] as? [String: Any])?["ok"] is Bool else {
+                    throw FixtureFailure("ScriptCat runtime was not initialized: \(label) \(service ?? [:])")
+                }
+                show(website)
+                try await reload(website.web)
+                trace("permission cycle actual native page relay: \(label) \(try await nativeRelayState(restoredOptions) ?? "unavailable")")
+                try await until("GM storage and XHR recover: \(label)") {
+                    let value = try await state()
+                    return (Int(value["count"] as? String ?? "0") ?? 0) > previousCount && value["xhr"] as? String == "200:true"
+                }
+                trace("permission cycle GM storage and XHR succeeded: \(label)")
             }
             try await until("real GM storage and cross-origin GM_xmlhttpRequest") {
                 let value = try await state()
@@ -205,10 +269,14 @@ final class ExtensionScriptCatTests: XCTestCase {
             let mainExecuted = try await evaluate(website.web, "return document.documentElement.getAttribute('data-sx-execute-main') === 'true';")
             XCTAssertEqual(mainExecuted as? Bool, true)
             trace("native allFrames, frameId, documentId and MAIN execution succeeded")
+            try await permissionCycle("before runtime.reload", mv2: false)
             let countBeforeExtensionReload = Int((try await state())["count"] as? String ?? "0") ?? 0
-            trace("runtime.reload requested from context \(ObjectIdentifier(context))")
-            show(options)
-            let runtimeAssembly = try await evaluate(options.web, #"""
+            let runtimeContext = try XCTUnwrap(Extensions.shared.contexts[identifier])
+            let runtimeOptions = browser.open(try XCTUnwrap(runtimeContext.optionsPageURL), foreground: true)
+            diagnosticOptions = runtimeOptions
+            trace("runtime.reload requested from context \(ObjectIdentifier(runtimeContext))")
+            show(runtimeOptions)
+            let runtimeAssembly = try await evaluate(runtimeOptions.web, #"""
             const descriptor = (object, key) => {
               const d = Object.getOwnPropertyDescriptor(object, key);
               return d && { configurable: d.configurable, enumerable: d.enumerable, writable: d.writable,
@@ -226,10 +294,10 @@ final class ExtensionScriptCatTests: XCTestCase {
                   (runtimeAssembly?["reload"] as? String)?.contains("native(\"runtime.reload\"") == true else {
                 throw FixtureFailure("The app runtime.reload method was not installed in the real extension page")
             }
-            let reloadSource = try await evaluate(options.web, "const source = Function.prototype.toString.call(chrome.runtime.reload); chrome.runtime.reload(); return source;")
+            let reloadSource = try await evaluate(runtimeOptions.web, "const source = Function.prototype.toString.call(chrome.runtime.reload); chrome.runtime.reload(); return source;")
             trace("runtime.reload dispatched: \(reloadSource ?? "unavailable")")
             try await until("a fresh runtime and original ScriptCat registration after chrome.runtime.reload") {
-                guard let current = Extensions.shared.contexts[identifier], current !== context else { return false }
+                guard let current = Extensions.shared.contexts[identifier], current !== runtimeContext else { return false }
                 let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: current) as? [[String: Any]] ?? []
                 return scripts.contains { $0["id"] as? String == "scriptcat-content" } && scripts.contains { $0["id"] as? String == scriptID }
             }
@@ -253,83 +321,40 @@ final class ExtensionScriptCatTests: XCTestCase {
                 try await self.evaluate(website.web, "return document.documentElement.getAttribute('data-sx-mv2') === 'native' && document.documentElement.getAttribute('data-sx-scriptcat-started') === 'true';") as? Bool == true
             }
             trace("native MV2 and ScriptCat MV3 coexist")
-            let disable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, false))
-            let disabled = await disable.value
-            XCTAssertTrue(disabled)
-            try await reload(website.web)
-            let revoked = try await evaluate(website.web, "return document.documentElement.getAttribute('data-sx-scriptcat-started') === null && document.documentElement.getAttribute('data-sx-mv2') === 'native';")
-            XCTAssertEqual(revoked as? Bool, true)
-            let reenable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, true))
-            let reenabled = await reenable.value
-            XCTAssertTrue(reenabled)
-            let restoredContext = try XCTUnwrap(Extensions.shared.contexts[identifier])
-            try await until("real user-script registrations after permission re-enable") {
-                let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: restoredContext) as? [[String: Any]] ?? []
-                return scripts.contains { $0["id"] as? String == scriptID }
-            }
-            // App registrations are restored synchronously, but WebKit loads
-            // persistent chrome.scripting registrations asynchronously. The
-            // real 1.4 worker sees scriptcat-inject and reuses that native
-            // registration instead of rebuilding it. Its scripting.js is
-            // the DOM-to-GM relay, so both halves must be ready before this
-            // fixture navigates the website into a new document.
-            let restoredOptions = browser.open(try XCTUnwrap(restoredContext.optionsPageURL), foreground: true)
-            show(restoredOptions)
-            try await until("native ScriptCat content registration after permission re-enable") {
-                restoredRuntime = try await self.evaluate(restoredOptions.web, #"""
-                return { scripts: (await chrome.scripting.getRegisteredContentScripts()).map(script => script.id),
-                  worlds: await chrome.userScripts.getWorldConfigurations() };
-                """#) as? [String: Any] ?? [:]
-                return (restoredRuntime["scripts"] as? [String])?.contains("scriptcat-scripting") == true
-            }
-            trace("permission re-enable native registrations: \(restoredRuntime)")
-            // This production service is behind ScriptCat's initReady
-            // middleware. A persisted script ID alone cannot prove that the
-            // replacement worker has finished initializing its GM services.
-            let restoredService = try await evaluate(restoredOptions.web, #"""
-            return await chrome.runtime.sendMessage({ action: 'serviceWorker/runtime/pageLoad', data: {} });
-            """#) as? [String: Any]
-            restoredRuntime["service"] = restoredService ?? [:]
-            guard restoredService?["code"] as? Int == 0,
-                  (restoredService?["data"] as? [String: Any])?["ok"] is Bool else {
-                throw FixtureFailure("The replacement ScriptCat worker did not initialize its runtime service: \(restoredService ?? [:])")
-            }
-            trace("permission re-enable runtime service initialized")
-            website.web.configuration.userContentController.addUserScript(WKUserScript(source: #"""
-            (() => {
-              const events = [], dispatch = EventTarget.prototype.dispatchEvent;
-              Object.defineProperty(globalThis, '__sxScriptCatDOMTrace', { value: events });
-              EventTarget.prototype.dispatchEvent = function(event) {
-                if (event instanceof CustomEvent) {
-                  const detail = event.detail;
-                  events.push({ type: event.type, action: detail?.action, kind: detail?.type,
-                    api: detail?.data?.api || detail?.data?.data?.api,
-                    target: this === window ? 'window' : this === document ? 'document' : this.nodeName });
-                  if (events.length > 48) events.shift();
-                }
-                return dispatch.call(this, event);
-              };
-            })();
-            """#, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
-            show(website)
-            try await reload(website.web)
-            try await until("GM storage and XHR recover after permission re-enable") {
-                let value = try await state()
-                return (Int(value["count"] as? String ?? "0") ?? 0) > countBeforeExtensionReload && value["xhr"] as? String == "200:true"
-            }
-            trace("permission re-enable restored GM storage and XHR")
+            try await permissionCycle("after runtime.reload", mv2: true)
             print("PASS: original ScriptCat MV3 1.4.0: installation, opt-in, real GM storage, cross-origin XHR, reload, iframe, native execute targets, native runtime.reload, MV2 coexistence, revocation and re-enable")
         } catch {
+            print("ScriptCat permission phase: \(permissionPhase)")
             if !restoredRuntime.isEmpty { print("ScriptCat permission restore runtime: \(restoredRuntime)") }
             print("ScriptCat native errors: \(Extensions.shared.errors[identifier] ?? [])")
             if let current = Extensions.shared.contexts[identifier] {
                 let scripts = try? await ExtensionUserScripts.call("userScripts.list", args: [], context: current) as? [[String: Any]]
                 print("ScriptCat current context: \(ObjectIdentifier(current)); registrations: \(scripts?.compactMap { $0["id"] as? String } ?? [])")
             } else { print("ScriptCat current context: unloaded") }
-            let lastState = try? await evaluate(website.web, "return { started: document.documentElement.getAttribute('data-sx-scriptcat-started'), count: document.documentElement.getAttribute('data-sx-scriptcat-count'), xhr: document.documentElement.getAttribute('data-sx-scriptcat-xhr'), error: document.documentElement.getAttribute('data-sx-scriptcat-error') };")
+            let stateBody = "return Object.fromEntries(['started', 'read', 'writing', 'wrote', 'count', 'xhr', 'error'].map(key => [key, document.documentElement.getAttribute('data-sx-scriptcat-' + key)]));"
+            let lastState = try? await evaluate(website.web, stateBody)
             print("ScriptCat last website state: \(lastState ?? "unavailable")")
-            let relayTrace = try? await evaluate(website.web, "return globalThis.__sxScriptCatDOMTrace || [];")
-            print("ScriptCat last DOM relay trace: \(relayTrace ?? "unavailable")")
+            if let diagnosticOptions {
+                let nativeState = try? await nativeRelayState(diagnosticOptions)
+                print("ScriptCat last native scripting state: \(nativeState ?? "unavailable")")
+            }
+            if permissionPhase != "not started" {
+                // Keep the failing document for diagnosis, and check a new
+                // native WebView under the same extension context. This
+                // distinguishes a reused page/world from a worker-wide issue.
+                let fresh = browser.open(pageServer.url("/page"), foreground: true)
+                show(fresh)
+                let deadline = Date().addingTimeInterval(15)
+                var freshState: [String: Any] = [:]
+                repeat {
+                    if !fresh.web.isLoading {
+                        freshState = (try? await evaluate(fresh.web, stateBody)) as? [String: Any] ?? [:]
+                        if freshState["xhr"] as? String == "200:true" { break }
+                    }
+                    try? await Task.sleep(for: .milliseconds(100))
+                } while Date() < deadline
+                print("ScriptCat fresh WebView comparison: \(freshState)")
+            }
             throw error
         }
     }
