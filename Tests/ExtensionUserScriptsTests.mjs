@@ -17,24 +17,39 @@ const namespaceFixture = { chrome: freshNamespaces, root: {} };
 vm.runInNewContext(swift.slice(Math.min(namespaceStart, runtimeCapture), namespaceEnd) +
   '\nroot.runtime = runtime;', namespaceFixture);
 assert.equal(namespaceFixture.root.runtime, freshNamespaces.runtime, 'Runtime overrides must target the namespace extensions read');
+const globalsStart = swift.indexOf('      for (const key of ["browser", "chrome"])');
+const globalsEnd = swift.indexOf("      // On a web page this is a content script:", globalsStart);
+const nativeNamespace = { runtime: { id: 'user-script-globals' } };
+const globalsRoot = { chrome: nativeNamespace, browser: nativeNamespace };
+vm.runInNewContext(swift.slice(globalsStart, globalsEnd), { root: globalsRoot, needsUserScriptRuntime: true });
+globalsRoot.browser = { runtime: { id: nativeNamespace.runtime.id } };
+assert.equal(globalsRoot.browser, nativeNamespace, 'Library assignments must not hide WebKit native event lookup');
+const chromeView = new Proxy(nativeNamespace, {});
+globalsRoot.chrome = chromeView;
+assert.equal(globalsRoot.chrome, chromeView, 'Chrome code can use the app runtime view');
 const start = swift.indexOf('      const scripting = chrome.scripting;');
 const end = swift.indexOf('      // WebKit says "install" again', start);
 assert(start >= 0 && end > start);
 const shim = swift.slice(start, end);
 const event = () => ({ listeners: new Set(), addListener(f) { this.listeners.add(f); }, removeListener(f) { this.listeners.delete(f); } });
 
-function fixture({ allowed = false, optional = false, background = false, saved = [] } = {}) {
+function fixture({ allowed = false, optional = false, background = false, saved = [], dynamicRuntime = false } = {}) {
   const state = { allowed, saved: structuredClone(saved), calls: [], worlds: [], registered: new Map() };
-  const runtime = {
+  const nativeRuntime = {
     id: 'userscript-fixture', getManifest: () => optional ? { optional_permissions: ['userScripts'] } : { permissions: ['userScripts'] },
     onUserScriptMessage: event(), onUserScriptConnect: event(), onConnect: event(), onMessage: event(),
   };
+  const nativeReload = () => { throw new Error('Native runtime.reload bypassed the app lifecycle'); };
+  const runtime = dynamicRuntime ? new Proxy(nativeRuntime, { get(target, key) {
+    return key === 'reload' ? nativeReload : Reflect.get(target, key, target);
+  } }) : nativeRuntime;
+  nativeRuntime.receiver = function () { assert.equal(this, runtime); return true; };
   const chrome = { runtime, scripting: {
     async registerContentScripts(scripts) { for (const s of scripts) { if (state.registered.has(s.id)) throw Error('Duplicate script id'); state.registered.set(s.id, s); } },
     async unregisterContentScripts({ ids } = {}) { if (!ids) state.registered.clear(); else ids.forEach(id => state.registered.delete(id)); },
     async getRegisteredContentScripts() { return [...state.registered.values()]; },
   } };
-  const root = { chrome };
+  const root = { chrome, browser: chrome };
   const native = async (api, args) => {
     state.calls.push(api);
     if (api === 'permissions.userScriptsAllowed') return state.allowed;
@@ -54,12 +69,12 @@ function fixture({ allowed = false, optional = false, background = false, saved 
     }
   };
   vm.runInNewContext(`(() => {${shim}\n})()`, {
-    chrome, runtime, root, background, native,
+    chrome, runtime, root, background, native, __SEARCH_VERBOSE__: false,
     put: (o, k, v) => { o[k] = v; },
     put2: (k, v) => { chrome[k] = v; },
     withLastError: (e, callback) => { runtime.lastError = { message: e.message }; try { callback(); } finally { delete runtime.lastError; } },
   });
-  return { state, chrome };
+  return { state, chrome: root.chrome, root };
 }
 
 async function scriptCatProbe(chrome) {
@@ -93,6 +108,13 @@ const disabled = fixture({ background: true, saved });
 disabled.chrome.runtime.reload();
 await Promise.resolve();
 assert(disabled.state.calls.includes('runtime.reload'), 'Extension self-reload must replace browser-owned user-script worlds and transport');
+const dynamic = fixture({ dynamicRuntime: true });
+dynamic.chrome.runtime.reload();
+await Promise.resolve();
+assert(dynamic.state.calls.includes('runtime.reload'), 'A native dynamic property cannot hide the app reload method');
+assert.equal(dynamic.chrome.runtime.receiver(), true, 'Native runtime methods keep their original receiver');
+assert.equal(dynamic.chrome.runtime.onMessage, dynamic.root.browser.runtime.onMessage, 'Native event objects are retained');
+assert.notEqual(dynamic.chrome, dynamic.root.browser, 'WebKit keeps its real browser namespace for native event dispatch');
 await assert.rejects(disabled.chrome.userScripts.getScripts(), /disabled/);
 assert.deepEqual(disabled.state.saved, saved);
 disabled.state.allowed = true;

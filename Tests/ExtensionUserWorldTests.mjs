@@ -206,7 +206,7 @@ function extensionFixture(background) {
     },
   };
   const chrome = { runtime };
-  const context = vm.createContext({ chrome, runtime, root: {}, background, inContent: false, console, setTimeout,
+  const context = vm.createContext({ chrome, runtime, root: {}, background, inContent: false, console, setTimeout, __SEARCH_VERBOSE__: false,
     untabbed: sender => sender, put: (target, key, value) => { target[key] = value; }, put2: (key, value) => { chrome[key] = value; },
     native: async () => undefined, withLastError: () => {} });
   vm.runInContext(shims.slice(userStart, userEnd) + shims.slice(portStart, portEnd), context);

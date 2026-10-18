@@ -194,7 +194,7 @@ final class LocalDownloadServer {
             + "Connection: close\r\n\r\n"
         guard sendAll(client, Data(headers.utf8)) else { return }
 
-        let length = shouldTruncate ? min(128 * 1024, remaining) : remaining
+        let length = shouldTruncate ? min(512 * 1024, remaining) : remaining
         let chunkSize = 16 * 1024
         var offset = lower
         let end = lower + length

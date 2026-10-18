@@ -251,6 +251,10 @@ enum ExtensionShims {
       // (There, Search's passkey patch holds navigator.credentials.)
       const ours = (() => { try { return !!(chrome && chrome.runtime && chrome.runtime.id); } catch (e) { return false; } })();
       if (!ours || root.__searchShim) return;
+      const needsUserScriptRuntime = (() => {
+        try { const m = chrome.runtime.getManifest(); return !chrome.userScripts && [...(m.permissions || []), ...(m.optional_permissions || [])].includes("userScripts"); }
+        catch (e) { return false; }
+      })();
       // Bitwarden's bundled TypeScript uses these as computed class keys
       // before it registers disposable resources. Define them before any
       // extension code runs; Symbol.for keeps the key shared by its frames.
@@ -323,7 +327,7 @@ enum ExtensionShims {
         // from WebKit too, and nothing would reach the extension again. A
         // replacement that still carries them is taken.
         const carries = (v) => { try { return !!(v && v.runtime && v.runtime.id); } catch (e) { return false; } };
-        try { Object.defineProperty(root, key, { configurable: false, enumerable: d.enumerable, get: () => value, set: (v) => { if (carries(v)) value = v; } }); } catch (e) {}
+        try { Object.defineProperty(root, key, { configurable: false, enumerable: d.enumerable, get: () => value, set: (v) => { if (carries(v) && !(needsUserScriptRuntime && key === "browser")) value = v; } }); } catch (e) {}
       }
       // On a web page this is a content script: only Chrome's behaviour is
       // mended there, no API that Chrome doesn't give content scripts either.
@@ -2499,7 +2503,27 @@ enum ExtensionShims {
       }
       const wantsUserScripts = (() => { try { const m = runtime.getManifest(); return [...(m.permissions || []), ...(m.optional_permissions || [])].includes("userScripts"); } catch (e) { return false; } })();
       if (!chrome.userScripts && wantsUserScripts) {
-        put(runtime, "reload", () => { void native("runtime.reload", []).catch(error => console.error(error)); });
+        // MainWorldOnly native methods are JSClass dynamic properties:
+        // WebKit reads them before ordinary own properties, so an override
+        // written with defineProperty is ignored. Keep the real `browser`
+        // namespace for WebKit's native event lookup and give Chrome code
+        // a runtime view whose other methods/events still use native objects.
+        const reload = () => { void native("runtime.reload", []).catch(error => console.error(error)); };
+        const functions = new WeakMap();
+        const runtimeView = new Proxy(runtime, { get(target, key) {
+          if (key === "reload") return reload;
+          const value = Reflect.get(target, key, target);
+          if (typeof value !== "function") return value;
+          if (!functions.has(value)) functions.set(value, value.bind(target));
+          return functions.get(value);
+        } });
+        root.chrome = new Proxy(chrome, { get(target, key) { return key === "runtime" ? runtimeView : Reflect.get(target, key, target); } });
+        if (__SEARCH_VERBOSE__) root.__searchUserScriptRuntimeInstall = {
+          installed: root.chrome.runtime.reload === reload,
+          reload: String(root.chrome.runtime.reload),
+          browserReload: String(root.browser?.runtime?.reload),
+          nativeEvents: root.chrome.runtime.onMessage === runtime.onMessage,
+        };
         const api = {
           register: (scripts) => native("userScripts.register", [scripts]),
           update: (scripts) => native("userScripts.update", [scripts]),

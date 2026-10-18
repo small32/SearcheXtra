@@ -207,6 +207,24 @@ final class ExtensionScriptCatTests: XCTestCase {
             let countBeforeExtensionReload = Int((try await state())["count"] as? String ?? "0") ?? 0
             trace("runtime.reload requested from context \(ObjectIdentifier(context))")
             show(options)
+            let runtimeAssembly = try await evaluate(options.web, #"""
+            const descriptor = (object, key) => {
+              const d = Object.getOwnPropertyDescriptor(object, key);
+              return d && { configurable: d.configurable, enumerable: d.enumerable, writable: d.writable,
+                getter: typeof d.get === 'function', value: typeof d.value === 'function' ? String(d.value) : typeof d.value };
+            };
+            return { installed: globalThis.__searchUserScriptRuntimeInstall,
+              reload: String(chrome.runtime.reload), browserReload: String(browser.runtime.reload),
+              nativeEvents: chrome.runtime.onMessage === browser.runtime.onMessage,
+              chrome: descriptor(globalThis, 'chrome'), browser: descriptor(globalThis, 'browser'),
+              runtime: descriptor(chrome, 'runtime'), method: descriptor(chrome.runtime, 'reload') };
+            """#) as? [String: Any]
+            print("ScriptCat native runtime assembly: \(runtimeAssembly ?? [:])")
+            XCTAssertEqual(runtimeAssembly?["nativeEvents"] as? Bool, true)
+            guard (runtimeAssembly?["installed"] as? [String: Any])?["installed"] as? Bool == true,
+                  (runtimeAssembly?["reload"] as? String)?.contains("native(\"runtime.reload\"") == true else {
+                throw FixtureFailure("The app runtime.reload method was not installed in the real extension page")
+            }
             let reloadSource = try await evaluate(options.web, "const source = Function.prototype.toString.call(chrome.runtime.reload); chrome.runtime.reload(); return source;")
             trace("runtime.reload dispatched: \(reloadSource ?? "unavailable")")
             try await until("a fresh runtime and original ScriptCat registration after chrome.runtime.reload") {

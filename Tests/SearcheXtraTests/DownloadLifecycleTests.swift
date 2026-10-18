@@ -80,12 +80,17 @@ final class DownloadLifecycleTests: XCTestCase {
 
     func testWebKitFailureWithResumeDataResumesSameEntryAndDestination() async throws {
         let tab = try await openFixturePage()
+        fixture.hold("/failure.bin", afterBytes: 256 * 1024)
+        defer { fixture.release("/failure.bin") }
         let entry = try await startDownload("/failure.bin", in: tab)
+        try await waitUntil { entry.completedBytes >= 64 * 1024 && entry.destination != nil }
+        let destination = try XCTUnwrap(entry.destination)
+        fixture.release("/failure.bin")
         try await waitUntil { entry.state == .failed }
 
         let originalID = entry.id
         let reason = try XCTUnwrap(entry.errorDescription)
-        let destination = try XCTUnwrap(entry.destination)
+        XCTAssertEqual(entry.destination, destination, "A failed partial transfer must retain its target")
         XCTAssertFalse(reason.isEmpty)
         XCTAssertTrue(entry.canResume, "WebKit should return resume data for the ranged fixture")
         XCTAssertTrue(entry.canRetry)
@@ -164,7 +169,11 @@ final class DownloadLifecycleTests: XCTestCase {
 
     func testFailureWithoutResumeDataKeepsReasonAndCanRetryFromStart() async throws {
         let tab = try await openFixturePage()
+        fixture.hold("/retry.bin", afterBytes: 256 * 1024)
+        defer { fixture.release("/retry.bin") }
         let entry = try await startDownload("/retry.bin", in: tab)
+        try await waitUntil { entry.completedBytes >= 64 * 1024 && entry.destination != nil }
+        fixture.release("/retry.bin")
         try await waitUntil { entry.state == .failed }
 
         let originalID = entry.id
