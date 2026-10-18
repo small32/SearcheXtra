@@ -18,6 +18,16 @@ final class ExtensionScriptCatTests: XCTestCase {
         trace("starting AppKit")
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
+        // The first real tab must load saved drag settings without recursively
+        // refreshing itself during FlowDragSettings.shared initialization.
+        let previousDragSettings = Store.settings.data(forKey: "flowDrag.config")
+        var savedDragSettings = FlowDragConfig()
+        savedDragSettings.distanceThreshold = 47
+        Store.settings.set(try JSONEncoder().encode(savedDragSettings), forKey: "flowDrag.config")
+        defer {
+            if let previousDragSettings { Store.settings.set(previousDragSettings, forKey: "flowDrag.config") }
+            else { Store.settings.removeObject(forKey: "flowDrag.config") }
+        }
         trace("preparing official package")
         let files = FileManager.default
         let scratch = files.temporaryDirectory.appendingPathComponent("scriptcat-native-\(UUID().uuidString)", isDirectory: true)
@@ -66,6 +76,7 @@ final class ExtensionScriptCatTests: XCTestCase {
         defer { pageServer.stop(); xhrServer.stop() }
         trace("opening initial local website")
         let website = browser.open(pageServer.url("/page"), foreground: true)
+        XCTAssertEqual(FlowDragSettings.shared.config, savedDragSettings)
         trace("attaching initial WebView")
         show(website)
         try await until("initial local website") { !website.web.isLoading && website.web.url == pageServer.url("/page") }
@@ -161,6 +172,38 @@ final class ExtensionScriptCatTests: XCTestCase {
                 try await self.evaluate(website.web, "return Boolean(document.querySelector('#scriptcat-native-child')?.contentDocument?.documentElement?.getAttribute('data-sx-scriptcat-count'));") as? Bool == true
             }
             trace("real GM script executed in matching iframe")
+            let execution = try await evaluate(options.web, #"""
+            const tabs = await chrome.tabs.query({});
+            const tab = tabs.find(tab => tab.url === website);
+            if (!tab) throw new Error('Native website tab is unavailable');
+            const all = await chrome.userScripts.execute({ target: { tabId: tab.id, allFrames: true },
+              js: [{ code: "({ url: location.href, id: chrome.runtime.id, pageBridge: typeof globalThis.webkit?.messageHandlers?.officeFlowDrag })" }] });
+            if (all.some(frame => frame.error)) throw new Error(JSON.stringify(all));
+            const child = all.find(frame => frame.frameId !== 0);
+            if (!child) throw new Error('Native iframe result is missing: ' + JSON.stringify(all));
+            const byFrame = await chrome.userScripts.execute({ target: { tabId: tab.id, frameIds: [child.frameId] }, js: [{ code: "'frame-result'" }] });
+            const byDocument = await chrome.userScripts.execute({ target: { tabId: tab.id, documentIds: [child.documentId] }, js: [{ code: "'document-result'" }] });
+            const main = await chrome.userScripts.execute({ target: { tabId: tab.id }, world: 'MAIN',
+              js: [{ code: "document.documentElement.setAttribute('data-sx-execute-main', 'true'); 'main-result'" }] });
+            return { all, byFrame, byDocument, main };
+            """#, arguments: ["website": pageServer.url("/page").absoluteString]) as? [String: Any]
+            let allExecutions = try XCTUnwrap(execution?["all"] as? [[String: Any]])
+            XCTAssertEqual(allExecutions.count, 2)
+            XCTAssertEqual(Set(allExecutions.compactMap { $0["frameId"] as? Int }).count, 2)
+            XCTAssertEqual(Set(allExecutions.compactMap { $0["documentId"] as? String }).count, 2)
+            for result in allExecutions {
+                let value = try XCTUnwrap(result["result"] as? [String: Any])
+                XCTAssertEqual(value["id"] as? String, identifier)
+                XCTAssertEqual(value["pageBridge"] as? String, "undefined")
+            }
+            for (key, value) in [("byFrame", "frame-result"), ("byDocument", "document-result"), ("main", "main-result")] {
+                let results = try XCTUnwrap(execution?[key] as? [[String: Any]])
+                XCTAssertEqual(results.count, 1)
+                XCTAssertEqual(results.first?["result"] as? String, value)
+            }
+            let mainExecuted = try await evaluate(website.web, "return document.documentElement.getAttribute('data-sx-execute-main') === 'true';")
+            XCTAssertEqual(mainExecuted as? Bool, true)
+            trace("native allFrames, frameId, documentId and MAIN execution succeeded")
             let mv2 = scratch.appendingPathComponent("mv2", isDirectory: true)
             try files.createDirectory(at: mv2, withIntermediateDirectories: true)
             try #"{"manifest_version":2,"name":"SearcheXtra native MV2 fixture","version":"1.0","content_scripts":[{"matches":["http://127.0.0.1/*"],"js":["content.js"],"run_at":"document_end"}]}"#.write(to: mv2.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)
@@ -180,7 +223,7 @@ final class ExtensionScriptCatTests: XCTestCase {
             try await reload(website.web)
             let revoked = try await evaluate(website.web, "return document.documentElement.getAttribute('data-sx-scriptcat-started') === null && document.documentElement.getAttribute('data-sx-mv2') === 'native';")
             XCTAssertEqual(revoked as? Bool, true)
-            print("PASS: original ScriptCat MV3 1.4.0: installation, opt-in, real GM storage, cross-origin XHR, reload, iframe, MV2 coexistence and revocation")
+            print("PASS: original ScriptCat MV3 1.4.0: installation, opt-in, real GM storage, cross-origin XHR, reload, iframe, native execute targets, MV2 coexistence and revocation")
         } catch {
             print("ScriptCat native errors: \(Extensions.shared.errors[identifier] ?? [])")
             throw error

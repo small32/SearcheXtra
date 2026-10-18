@@ -3655,6 +3655,12 @@ enum ExtensionShims {
             let named = first as? String
             let options = (named == nil ? first : (args.count > 1 ? args[1] : nil)) as? [String: Any] ?? [:]
             let key = named ?? UUID().uuidString
+            // Command-line XCTest has no application bundle for macOS's
+            // notification center. Match the website notification test policy.
+            if Store.testing {
+                NSLog("Extensions test notification %@: %@ — %@", id, options["title"] as? String ?? "", options["message"] as? String ?? "")
+                return key
+            }
             let center = UNUserNotificationCenter.current()
             _ = try? await center.requestAuthorization(options: [.alert, .sound])
             let content = UNMutableNotificationContent()
@@ -3664,7 +3670,7 @@ enum ExtensionShims {
             try? await center.add(UNNotificationRequest(identifier: "\(id).\(key)", content: content, trigger: nil))
             return key
         case "notifications.clear":
-            if let key = first as? String {
+            if !Store.testing, let key = first as? String {
                 UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["\(id).\(key)"])
             }
             return true
