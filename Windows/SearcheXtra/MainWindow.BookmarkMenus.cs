@@ -11,6 +11,18 @@ public sealed partial class MainWindow
     private const string BookmarkClipboardFormat = "SearcheXtra.Bookmarks";
     private static (Guid Id, string Json)? cutBookmark;
 
+    private MenuFlyout DeferredBookmarkContextMenu(Bookmark? node, Action? changed = null, Func<Func<Task>, Task>? dialog = null)
+    {
+        var menu = new MenuFlyout();
+        menu.Opening += (_, _) =>
+        {
+            menu.Items.Clear();
+            // Build actions against the current tree only when the menu is used.
+            BookmarkBarContextMenu(node, changed, dialog, menu);
+        };
+        return menu;
+    }
+
     private void OpenBookmarkInBackground(Bookmark node)
     {
         if (node.Url is { } url && AddressParser.IsWeb(url)) AddTab(url, false, active?.IsPrivate == true);
@@ -19,7 +31,7 @@ public sealed partial class MainWindow
     private void BindBookmarkInteractions(FrameworkElement target, Bookmark node, Action? changed = null, Func<Func<Task>, Task>? dialog = null)
     {
         target.Tag = node;
-        target.ContextFlyout = BookmarkBarContextMenu(node, changed, dialog);
+        target.ContextFlyout = DeferredBookmarkContextMenu(node, changed, dialog);
         target.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, args) => {
             if (args.GetCurrentPoint(target).Properties.PointerUpdateKind != Microsoft.UI.Input.PointerUpdateKind.MiddleButtonPressed || node.Url == null) return;
             OpenBookmarkInBackground(node);
@@ -37,9 +49,9 @@ public sealed partial class MainWindow
         return Find(store.Bookmarks) ?? store.Bookmarks;
     }
 
-    private MenuFlyout BookmarkBarContextMenu(Bookmark? node, Action? changed = null, Func<Func<Task>, Task>? dialog = null)
+    private MenuFlyout BookmarkBarContextMenu(Bookmark? node, Action? changed = null, Func<Func<Task>, Task>? dialog = null, MenuFlyout? destination = null)
     {
-        var menu = new MenuFlyout();
+        var menu = destination ?? new MenuFlyout();
         var parent = node?.Children ?? (node == null ? store.Bookmarks : BookmarkParent(node));
         var parentId = node?.Children != null ? node.Id : BookmarkImport.Flatten(store.Bookmarks).FirstOrDefault(folder => folder.Children == parent)?.Id;
         MenuFlyoutItem Action(string en, string zh, Action action, bool enabled = true) {
@@ -113,7 +125,7 @@ public sealed partial class MainWindow
                 Renew(copied); parent.Add(copied); Changed();
             }
         }, Clipboard.GetContent().Contains(BookmarkClipboardFormat));
-        menu.Opening += (_, _) => paste.IsEnabled = Clipboard.GetContent().Contains(BookmarkClipboardFormat);
+        if (destination == null) menu.Opening += (_, _) => paste.IsEnabled = Clipboard.GetContent().Contains(BookmarkClipboardFormat);
         if (node != null) {
             menu.Items.Add(new MenuFlyoutSeparator());
             Action("Delete", "删除", () => {

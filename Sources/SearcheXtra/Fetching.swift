@@ -86,11 +86,14 @@ final class FetchEntry: ObservableObject, Identifiable {
     }
 
     func record(_ progress: Progress, trackFile: Bool = true) {
-        completedBytes = max(0, progress.completedUnitCount)
-        totalBytes = max(0, progress.totalUnitCount)
-        fraction = totalBytes > 0
-            ? min(1, max(0, Double(completedBytes) / Double(totalBytes)))
+        let completed = max(0, progress.completedUnitCount)
+        let total = max(0, progress.totalUnitCount)
+        let fraction = total > 0
+            ? min(1, max(0, Double(completed) / Double(total)))
             : nil
+        if completedBytes != completed { completedBytes = completed }
+        if totalBytes != total { totalBytes = total }
+        if self.fraction != fraction { self.fraction = fraction }
         if trackFile { trackPartialFile() }
     }
 
@@ -306,6 +309,7 @@ final class Fetches: ObservableObject {
 
     private var running: [ObjectIdentifier: Running] = [:]
     private var leaving: DispatchWorkItem?
+    private var measurement: DispatchWorkItem?
 
     /// A download has begun. Private downloads are tracked for cleanup and
     /// aggregate progress, but never become entries in the shared panel.
@@ -343,7 +347,7 @@ final class Fetches: ObservableObject {
         done = false
         showing = true
         item.watch = download.progress.observe(\.fractionCompleted) { [weak self] _, _ in
-            DispatchQueue.main.async { self?.measure() }
+            DispatchQueue.main.async { self?.measureSoon() }
         }
         measure()
         return true
@@ -550,6 +554,10 @@ final class Fetches: ObservableObject {
         item.watch?.invalidate()
         item.shown?.unpublish()
         item.entry?.download = nil
+        if running.isEmpty {
+            measurement?.cancel()
+            measurement = nil
+        }
         return item
     }
 
@@ -578,6 +586,17 @@ final class Fetches: ObservableObject {
 
     /// The running downloads, together, in whole percents; each file's own
     /// progress and row are brought up to date on the way.
+    private func measureSoon() {
+        guard !running.isEmpty, measurement == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            measurement = nil
+            measure()
+        }
+        measurement = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
+    }
+
     private func measure() {
         var total: Int64 = 0
         var completed: Int64 = 0

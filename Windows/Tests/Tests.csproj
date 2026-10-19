@@ -8,6 +8,9 @@
   <Compile Include="../SearcheXtra/BookmarkImport.cs" Link="BookmarkImport.cs"/>
   <Compile Include="../SearcheXtra/CrxInstaller.cs" Link="CrxInstaller.cs"/>
   <Compile Include="../SearcheXtra/ExtensionPermissions.cs" Link="ExtensionPermissions.cs"/>
+  <Compile Include="../SearcheXtra/ExtensionUserScriptsPackage.cs" Link="ExtensionUserScriptsPackage.cs"/>
+  <Compile Include="../SearcheXtra/UserScriptStore.cs" Link="UserScriptStore.cs"/>
+  <Content Include="../SearcheXtra/Assets/extension-user-scripts.js" Link="Assets/extension-user-scripts.js" CopyToOutputDirectory="PreserveNewest"/>
   <Compile Include="../SearcheXtra/CsvPasswords.cs" Link="CsvPasswords.cs"/>
   <Compile Include="../SearcheXtra/BrowserImport.cs" Link="BrowserImport.cs"/>
   <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.31"/>

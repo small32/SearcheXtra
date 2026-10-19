@@ -4,6 +4,7 @@ namespace SearcheXtra.Windows;
 public sealed record SearchSite(string Name, string Host, string Template, string[] Aliases);
 public static class SiteSearch
 {
+    private static readonly HttpClient Client = new(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromSeconds(10) };
     public static readonly SearchSite[] BuiltIn = [
         new("Reddit", "reddit.com", "https://www.reddit.com/search/?q=%s", []),
         new("YouTube", "youtube.com", "https://www.youtube.com/results?search_query=%s", ["yt"]),
@@ -32,8 +33,7 @@ public static class SiteSearch
         if (page.Scheme != "https" || page.AbsolutePath != "/" || !Uri.TryCreate(description, UriKind.Absolute, out var address) || address.Scheme != "https" || address.Host != page.Host || settings.LearnedSearchSites.Any(s => s.Host == page.Host)) return;
         try
         {
-            using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }) { Timeout = TimeSpan.FromSeconds(10) };
-            using var response = await client.GetAsync(address, HttpCompletionOption.ResponseHeadersRead); if (!response.IsSuccessStatusCode) return;
+            using var response = await Client.GetAsync(address, HttpCompletionOption.ResponseHeadersRead); if (!response.IsSuccessStatusCode) return;
             await using var stream = await response.Content.ReadAsStreamAsync(); var bytes = new byte[65537]; var count = 0; int n;
             while (count < bytes.Length && (n = await stream.ReadAsync(bytes.AsMemory(count))) > 0) count += n;
             if (count == bytes.Length) return;

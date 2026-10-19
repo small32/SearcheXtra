@@ -43,6 +43,7 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 - **书签、历史记录与下载。** 各自提供独立面板，支持搜索和快捷键打开。
 - **书签管理器。** 两端设置提供独立入口，支持搜索、导入 HTML、编辑、删除和文件夹管理，并可按名称排序。两端均支持全选、批量删除、拖动调整顺序及拖入文件夹；多选拖动保留原有顺序。
 - **Chrome 扩展。** 在“设置 → 扩展”中粘贴 Chrome 网上应用店链接，或打开扩展页面后点击添加。扩展运行在 WebKit 的扩展引擎上，浏览器补充部分 Chrome API。常用扩展可以固定，也可以加载本地未打包扩展，修改后点击重新载入。此功能需要 macOS 15.4 或更新版本，兼容情况取决于扩展使用的 API。
+- **MV3 用户脚本。** 声明用户脚本权限的扩展，在“扩展管理 → 详情”中提供默认关闭的“允许用户脚本”开关。Windows 保留 WebView2，macOS 保留 WebKit，两端均提供脚本注册、独立执行环境和消息通信；授权后请刷新网页。MV2 继续使用原有扩展加载方式。支持范围见[用户脚本说明](Windows/README.md#用户脚本--user-scripts)。
 - **多窗口与空间。** 可以创建多个窗口，并使用空间管理不同的标签页集合。
 - **版本更新。** 本分支的安装包从 [GitHub Releases](https://github.com/small32/SearcheXtra/releases) 下载更新。macOS 更新检查已使用本仓库的 GitHub Release，并按版本号比较；临时签名构建通过发布页下载后替换应用。
 
@@ -185,6 +186,8 @@ SEARCH_ARCH=arm64 ./build.sh release
 
 完成 `./build.sh` 后，可以运行 `python3 Tests/split_view.py`。它在隐藏的独立测试会话中检查分屏模型，使用单独的设置和文件，并在结束后清理。拖动到页面边缘、分隔线反馈及动画等视觉交互需要手动检查。
 
+macOS 原生回归使用 `bash Tests/run-macos-regressions.sh`，各测试类在独立进程中运行，避免测试会话和清理操作相互干扰。需要提供原版扩展包的 ScriptCat 集成测试单独运行，CI 会同时检查两者。
+
 ### 参与维护
 
 问题反馈和修改建议请提交至 [本仓库 Issues](https://github.com/small32/SearcheXtra/issues) 或 Pull Request。修改应尽量保持范围明确，减少新增依赖，延续本地存储和保护隐私的设计。
@@ -235,6 +238,7 @@ Set **Settings → General → Start page** to choose the page for new windows. 
 - **Super drag:** Configure text, link and image drags in Settings → Tabs → Super drag. FlowMouse-style direction sequences and fallback rules support background search, tab positions, clipboard actions, bookmarks, image saving and reverse image search. FlowMouse drag rules can be imported. See the [bilingual guide](docs/FLOW_DRAG.md).
 - **Bookmark manager:** Available from Settings on both platforms, with search, HTML import, editing, deletion, folder management, and sorting by name. Both platforms support select all, bulk deletion, drag reordering, and dropping items into folders. Multi-item dragging preserves the original order.
 - **Chrome extensions:** Install from a Chrome Web Store URL or its listing, pin frequently used extensions, or load an unpacked local extension and reload it after editing. On macOS, extensions use WebKit's extension engine with additional Chrome API compatibility. Support depends on the APIs an extension uses.
+- **MV3 user scripts:** Extensions declaring user-script permissions have an “Allow user scripts” switch under Manage extensions → Details, off by default. Windows retains WebView2 and macOS retains WebKit; both provide script registration, separate execution worlds, and messaging. Refresh webpages after granting access. MV2 retains its existing loading path. See the [user-script support details](Windows/README.md#用户脚本--user-scripts).
 - **Windows and spaces:** Open multiple windows and organize sets of tabs into spaces.
 - **Updates:** Download this fork's packages from [GitHub Releases](https://github.com/small32/SearcheXtra/releases). The macOS updater checks this repository’s GitHub releases and compares version numbers. Ad-hoc-signed builds download the update from the release page for manual application replacement.
 
@@ -340,6 +344,8 @@ Enable **Settings → General → Let a script drive SearcheXtra** to expose a U
 ```
 
 Test tabs do not automatically become active or write session/history data; scripts close them. `./bench ext-*` provides extension tests. After building, run `python3 Tests/split_view.py` to check the split model in a hidden, isolated session with separate settings and files, cleaned up afterward. Dragging, divider feedback, and animations still require visual checks.
+
+Run native macOS regressions with `bash Tests/run-macos-regressions.sh`. Each test class runs in a separate process so its test session and cleanup cannot affect other classes. The ScriptCat integration test requires an original extension package and runs separately; CI checks both.
 
 #### Contributing and license
 

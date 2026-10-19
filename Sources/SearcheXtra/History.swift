@@ -72,7 +72,9 @@ final class History: ObservableObject {
     /// into the address field included — and sorting the whole history for
     /// it each time cost more than everything else a key press does.
     private var recentCache: [Trace]?
-    private var saving = false
+    private var saving: DispatchWorkItem?
+    private let file: URL
+    private static let capacity = 2_000
     /// Visits counted at most: far more than anyone makes, and room to add.
     static let mostVisits = 1_000_000_000
     /// These are derived once when a visit enters memory. Suggestions run on
@@ -81,7 +83,10 @@ final class History: ObservableObject {
     private var pageText: [String: PageText] = [:]
     private var visitedHosts: Set<String> = []
 
-    init() { load() }
+    init(file: URL = Store.file("history.json")) {
+        self.file = file
+        load()
+    }
 
     /// URL identity ignores fragments, normalizes only the scheme and host,
     /// and keeps the spelling and encoding of the path and query intact.
@@ -456,13 +461,10 @@ final class History: ObservableObject {
 
     // MARK: - the file
 
-    private static var folder: URL { Store.folder }
-    private static var file: URL { Store.file("history.json") }
-
     private func load() {
-        guard let data = try? Data(contentsOf: History.file) else { return }
+        guard let data = try? Data(contentsOf: file) else { return }
         guard let list = try? JSONDecoder().decode([Visit].self, from: data) else {
-            Store.quarantine(History.file)
+            Store.quarantine(file)
             return
         }
         // Keys written by an older Search can meet under the new rule:
@@ -488,7 +490,7 @@ final class History: ObservableObject {
         visits = loaded
         for visit in visits.values { remember(visit) }
         // And written without them now, not at the next visit (Security).
-        if cleaned { save() }
+        if cleaned || visits.count > Self.capacity { save() }
     }
 
     /// The same page twice: its visits added up, the latest date, and a
@@ -535,21 +537,36 @@ final class History: ObservableObject {
     /// Coalesced: a busy minute of browsing writes the file once, not thirty
     /// times, and never on the main thread.
     private func save() {
-        guard !saving else { return }
-        saving = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+        guard saving == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            saving = false
-            let now = Date()
-            // A cap, so the file can't grow without end. What goes is what has
-            // been visited least and longest ago.
-            let snapshot = self.visits
-            let file = History.file
-            Disk.write(file) {
-                let list = Array(snapshot.values.sorted { History.score($0, now: now) > History.score($1, now: now) }.prefix(2_000))
-                return try? JSONEncoder().encode(list)
-            }
+            saving = nil
+            write()
         }
+        saving = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+    }
+
+    /// A pending visit or Clear History must reach disk before the app quits.
+    func flush() {
+        guard let saving else { return }
+        saving.cancel()
+        self.saving = nil
+        write(now: true)
+    }
+
+    private func write(now: Bool = false) {
+        // The file's existing limit also bounds the live history and the
+        // address matcher. Sort only when pruning, rather than on every save.
+        if visits.count > Self.capacity {
+            let now = Date()
+            let kept = visits.values.sorted { Self.score($0, now: now) > Self.score($1, now: now) }.prefix(Self.capacity)
+            visits = Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0) })
+            pageText = pageText.filter { visits[$0.key] != nil }
+            visitedHosts = Set(pageText.values.map(\.host).filter { !$0.isEmpty })
+        }
+        let snapshot = Array(visits.values)
+        Disk.write(file, now: now) { try? JSONEncoder().encode(snapshot) }
     }
 
     /// Somewhere to start on the first day, before there is any history to go

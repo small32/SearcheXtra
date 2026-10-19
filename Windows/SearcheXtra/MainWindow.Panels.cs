@@ -18,11 +18,12 @@ public sealed partial class MainWindow
 
     private void RefreshBookmarkBar()
     {
+        bookmarkIconOrigins = null;
         BookmarkRow.Children.Clear();
         BookmarkRow.Spacing = Settings.CompactBookmarksBar ? 0 : 2;
         BookmarkRow.Padding = new(Settings.CompactBookmarksBar ? 6 : 10, 2, Settings.CompactBookmarksBar ? 6 : 10, 2);
-        BookmarkRow.ContextFlyout = BookmarkBarContextMenu(null);
-        BookmarkScroller.ContextFlyout = BookmarkBarContextMenu(null);
+        BookmarkRow.ContextFlyout = DeferredBookmarkContextMenu(null);
+        BookmarkScroller.ContextFlyout = DeferredBookmarkContextMenu(null);
         foreach (var node in store.Bookmarks)
         {
             var button = new Button { Padding = new(Settings.CompactBookmarksBar ? 4 : 8, 3, Settings.CompactBookmarksBar ? 4 : 8, 3), MaxWidth = 190, Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent), BorderThickness = new(0) };
@@ -39,8 +40,9 @@ public sealed partial class MainWindow
             if (node.Children != null)
             {
                 var menu = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft };
-                foreach (var item in BookmarkMenuItems(node.Children)) menu.Items.Add(item);
                 menu.Opening += (_, _) => {
+                    menu.Items.Clear();
+                    foreach (var item in BookmarkMenuItems(node.Children)) menu.Items.Add(item);
                     var bottom = button.TransformToVisual(Root).TransformPoint(new(0, button.ActualHeight)).Y;
                     var style = new Style(typeof(MenuFlyoutPresenter));
                     style.Setters.Add(new Setter(FrameworkElement.MaxHeightProperty, Math.Max(1, Root.ActualHeight - bottom - 16)));
@@ -105,10 +107,14 @@ public sealed partial class MainWindow
     private async Task AddBookmarkAsync()
     {
         if (active == null || !AddressParser.IsWeb(active.Url)) return;
-        var title = await PromptAsync(T("Add bookmark", "添加书签"), T("Name", "名称"), active.Title.Length > 0 ? active.Title : active.Url);
+        var tab = active;
+        var address = tab.Url;
+        var title = await PromptAsync(T("Add bookmark", "添加书签"), T("Name", "名称"), tab.Title.Length > 0 ? tab.Title : address);
         if (string.IsNullOrWhiteSpace(title)) return;
-        store.Bookmarks.Add(new() { Title = title, Url = active.Url });
+        store.Bookmarks.Add(new() { Title = title, Url = address });
         store.Notify(); ScheduleSave();
+        if (views.TryGetValue(tab.Id, out var view) && !view.IsDisposed && view.Control.CoreWebView2.Source == address)
+            await AdoptBookmarkIconAsync(view, tab);
     }
 
     private async Task ShowBookmarksAsync(Guid? folderId = null)
@@ -180,7 +186,7 @@ public sealed partial class MainWindow
             }
             void Folders(IEnumerable<Bookmark> nodes, int depth) { foreach (var folder in nodes.Where(b => b.Children != null)) { FolderButton(folder, depth); Folders(folder.Children!, depth + 1); } }
             FolderButton(null, 0); Folders(store.Bookmarks, 1);
-            list.ContextFlyout = BookmarkBarContextMenu(currentFolder, Refresh, ManagerDialog);
+            list.ContextFlyout = DeferredBookmarkContextMenu(currentFolder, Refresh, ManagerDialog);
             filtered = (search.Text.Trim().Length == 0 ? Current() : BookmarkImport.Flatten(store.Bookmarks).Where(b => b.Title.Contains(search.Text.Trim(), StringComparison.OrdinalIgnoreCase) || (b.Url?.Contains(search.Text.Trim(), StringComparison.OrdinalIgnoreCase) ?? false))).ToList();
             list.ItemsSource = filtered.Select(node => {
                 var row = new Grid();
@@ -333,10 +339,11 @@ public sealed partial class MainWindow
         Button(T("Cancel", "取消"), d => { if (d.Operation.State != Microsoft.Web.WebView2.Core.CoreWebView2DownloadState.Completed) d.Operation.Cancel(); });
         Button(T("Show file", "显示文件"), d => Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + d.Path + "\"") { UseShellExecute = true }));
         panel.Children.Add(list); panel.Children.Add(controls);
-        var kept = new ListView { Height = 160, ItemsSource = store.Downloads.Select(d => Path.GetFileName(d.Path) + " · " + d.Date.ToLocalTime().ToString("g")).ToList() };
+        var keptRecords = store.Downloads.ToList();
+        var kept = new ListView { Name = "DownloadHistoryList", Height = 160, ItemsSource = keptRecords.Select(d => Path.GetFileName(d.Path) + " · " + d.Date.ToLocalTime().ToString("g")).ToList() };
         panel.Children.Add(kept); var keptControls = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var openFile = QuietButton(T("Open saved file", "打开已保存文件")); openFile.Click += (_, _) => { if (kept.SelectedIndex >= 0 && File.Exists(store.Downloads[kept.SelectedIndex].Path)) Process.Start(new ProcessStartInfo(store.Downloads[kept.SelectedIndex].Path) { UseShellExecute = true }); };
-        var forget = QuietButton(T("Forget record", "删除记录")); forget.Click += (_, _) => { if (kept.SelectedIndex >= 0) { store.Downloads.RemoveAt(kept.SelectedIndex); kept.ItemsSource = store.Downloads.Select(d => Path.GetFileName(d.Path) + " · " + d.Date.ToLocalTime().ToString("g")).ToList(); ScheduleSave(); } };
+        var openFile = QuietButton(T("Open saved file", "打开已保存文件")); openFile.Click += (_, _) => { if (kept.SelectedIndex >= 0 && File.Exists(keptRecords[kept.SelectedIndex].Path)) Process.Start(new ProcessStartInfo(keptRecords[kept.SelectedIndex].Path) { UseShellExecute = true }); };
+        var forget = QuietButton(T("Forget record", "删除记录")); forget.Click += (_, _) => { if (kept.SelectedIndex >= 0) { store.Downloads.Remove(keptRecords[kept.SelectedIndex]); keptRecords = store.Downloads.ToList(); kept.ItemsSource = keptRecords.Select(d => Path.GetFileName(d.Path) + " · " + d.Date.ToLocalTime().ToString("g")).ToList(); ScheduleSave(); } };
         keptControls.Children.Add(openFile); keptControls.Children.Add(forget); panel.Children.Add(keptControls);
         try { await ShowCardAsync(T("Downloads", "下载"), panel); } finally { timer.Stop(); }
     }

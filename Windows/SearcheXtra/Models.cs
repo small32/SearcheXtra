@@ -86,6 +86,7 @@ public sealed class InstalledExtension
     public string? StoreId { get; set; }
     public bool Enabled { get; set; } = true;
     public bool Pinned { get; set; }
+    public bool AllowUserScripts { get; set; }
     public string Popup { get; set; } = "";
     public string Options { get; set; } = "";
     public string NewTab { get; set; } = "";

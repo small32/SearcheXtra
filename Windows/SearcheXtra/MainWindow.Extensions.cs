@@ -85,7 +85,7 @@ public sealed partial class MainWindow
         var regular = active?.IsPrivate == true ? tabs.FirstOrDefault(tab => !tab.IsPrivate && tab.Space == space) ?? AddTab("", false) : active;
         if (regular == null) return;
         var profile = (await GetViewAsync(regular)).Control.CoreWebView2.Profile;
-        if (storeId != null && Settings.Extensions.FirstOrDefault(e => e.StoreId == storeId) is { } previous) { var installed = (await profile.GetBrowserExtensionsAsync()).FirstOrDefault(e => e.Id == previous.Id); if (installed != null) await installed.RemoveAsync(); }
+        var userScriptPackage = await ExtensionUserScripts.PrepareAsync(folder, reload: true);
         CoreWebView2BrowserExtension native;
         try { native = await profile.AddBrowserExtensionAsync(folder); }
         catch (Exception ex)
@@ -109,8 +109,13 @@ public sealed partial class MainWindow
         if (manifest.TryGetProperty("chrome_url_overrides", out var overrides) && overrides.TryGetProperty("newtab", out var newtab)) item.NewTab = newtab.GetString() ?? "";
         if (!Settings.Extensions.Contains(item)) Settings.Extensions.Add(item);
         if (!Settings.ExtensionFolders.Contains(item.Folder)) Settings.ExtensionFolders.Add(item.Folder);
+        var profileKey = profile.ProfileName + ":regular";
+        if (!Settings.ProfileExtensionFolders.TryGetValue(profileKey, out var recorded)) Settings.ProfileExtensionFolders[profileKey] = recorded = [];
+        recorded[item.Id] = item.Folder + (userScriptPackage ? "|userScripts:" + ExtensionUserScriptsPackage.Version : "");
         foreach (var loadedProfile in App.Windows.SelectMany(window => window.views.Values).Where(view => view.Control.CoreWebView2 != null).Select(view => view.Control.CoreWebView2.Profile).DistinctBy(p => (p.ProfileName, p.IsInPrivateModeEnabled)))
             if (!loadedProfile.IsInPrivateModeEnabled || PageView.SupportsPrivateExtensions && Settings.ExtensionsInPrivate) await PageView.SynchronizeExtensionsAsync(loadedProfile, Settings);
+        foreach (var loadedView in App.Windows.SelectMany(window => window.views.Values).Where(view => view.Control.CoreWebView2 != null && !view.Control.CoreWebView2.Profile.IsInPrivateModeEnabled).DistinctBy(view => view.Control.CoreWebView2.Profile.ProfileName))
+            await ExtensionUserScripts.EnsureAsync(loadedView.Control.CoreWebView2, Settings);
         Status.Text = T("Installed: ", "已安装：") + item.Name; store.Notify(); ScheduleSave();
     }
     private async Task SetExtensionEnabledAsync(InstalledExtension item, bool enabled)
@@ -122,15 +127,45 @@ public sealed partial class MainWindow
             if (native != null) await native.EnableAsync(enabled);
         }
         item.Enabled = enabled; RefreshPinnedExtensions(); ScheduleSave();
+        await ExtensionUserScripts.SynchronizeAsync();
+    }
+    private async Task SetUserScriptsAllowedAsync(InstalledExtension item, bool allowed)
+    {
+        var prefix = $"chrome-extension://{item.Id}/";
+        var openPages = App.Windows.SelectMany(window => window.views.Values).Where(view => !view.IsDisposed && view.Control.CoreWebView2?.Source.StartsWith(prefix, StringComparison.Ordinal) == true)
+            .Select(view => (View: view, Address: view.Control.CoreWebView2.Source)).ToArray();
+        item.AllowUserScripts = allowed; ScheduleSave();
+        await ExtensionUserScripts.RestartAsync(item.Id, Settings);
+        if (allowed && ExtensionUserScripts.Failed(item.Id)) throw new InvalidOperationException("The extension's user-script configuration could not be loaded.");
+        foreach (var (view, address) in openPages)
+        {
+            if (view.IsDisposed) continue;
+            var core = view.Control.CoreWebView2;
+            var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            void Loaded(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args) { if (args.IsSuccess) ready.TrySetResult(); }
+            core.NavigationCompleted += Loaded;
+            try { core.Navigate(address); await ready.Task.WaitAsync(TimeSpan.FromSeconds(20)); }
+            catch (Exception error) when (error is TimeoutException or System.Runtime.InteropServices.COMException) { System.Diagnostics.Debug.WriteLine(error.Message); }
+            finally { core.NavigationCompleted -= Loaded; }
+        }
     }
     private async Task RemoveExtensionAsync(InstalledExtension item)
     {
-        // Extensions are per WebView2 profile, including every space currently open.
-        foreach (var profile in App.Windows.SelectMany(window => window.views.Values).Where(v => v.Control.CoreWebView2 != null).Select(v => v.Control.CoreWebView2.Profile).DistinctBy(p => (p.ProfileName, p.IsInPrivateModeEnabled)))
+        var wasEnabled = item.Enabled;
+        item.Enabled = false;
+        try
         {
-            var native = (await profile.GetBrowserExtensionsAsync()).FirstOrDefault(e => e.Id == item.Id);
-            if (native != null) await native.RemoveAsync();
+            await ExtensionUserScripts.RemovedAsync(item.Id, Settings, async () =>
+            {
+                // Extensions are per WebView2 profile, including every space currently open.
+                foreach (var profile in App.Windows.SelectMany(window => window.views.Values).Where(v => v.Control.CoreWebView2 != null).Select(v => v.Control.CoreWebView2.Profile).DistinctBy(p => (p.ProfileName, p.IsInPrivateModeEnabled)).ToArray())
+                {
+                    var native = (await profile.GetBrowserExtensionsAsync()).FirstOrDefault(e => e.Id == item.Id);
+                    if (native != null) await native.RemoveAsync();
+                }
+            });
         }
+        catch { item.Enabled = wasEnabled; await ExtensionUserScripts.SynchronizeAsync(); throw; }
         if (!Settings.RemovedExtensionIds.Contains(item.Id)) Settings.RemovedExtensionIds.Add(item.Id);
         Settings.Extensions.Remove(item); Settings.ExtensionFolders.Remove(item.Folder); ScheduleSave(); store.Notify();
     }

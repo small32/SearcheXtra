@@ -19,7 +19,12 @@ public sealed partial class MainWindow
     {
         sideSizer = new() { Width = 7, Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Stretch };
         Grid.SetRowSpan(sideSizer, 4); Sidebar.Children.Add(sideSizer);
-        sideSizer.DragDelta += (_, e) => { Settings.SidebarWidth = Math.Clamp(Settings.SidebarWidth + (Settings.SidebarRight ? -e.HorizontalChange : e.HorizontalChange), 176, 440); ApplySettings(); };
+        sideSizer.DragDelta += (_, e) =>
+        {
+            Settings.SidebarWidth = Math.Clamp(Settings.SidebarWidth + (Settings.SidebarRight ? -e.HorizontalChange : e.HorizontalChange), 176, 440);
+            UpdateSidebarFold();
+            RefreshPins(tabs.Where(tab => tab.Space == space).OrderByDescending(tab => tab.Pinned).ThenBy(tab => tab.Group));
+        };
         sideSizer.DragCompleted += (_, _) => ScheduleSave();
         edgeReveal = new() { Width = 6, Fill = new SolidColorBrush(Microsoft.UI.Colors.Transparent), HorizontalAlignment = HorizontalAlignment.Left, Visibility = Visibility.Collapsed };
         Grid.SetColumnSpan(edgeReveal, 3); Canvas.SetZIndex(edgeReveal, 20); Body.Children.Add(edgeReveal);
@@ -125,7 +130,7 @@ public sealed partial class MainWindow
     }
     private async Task<ContentDialogResult> ShowCardAsync(string title, UIElement content, string? primary = null, bool fitWindow = false, string? secondary = null)
     {
-        if (OverlayLayer.Visibility == Visibility.Visible) return ContentDialogResult.None;
+        if (closing || OverlayLayer.Visibility == Visibility.Visible) return ContentDialogResult.None;
         var done = new TaskCompletionSource<ContentDialogResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         var panel = new Grid { Width = content is FrameworkElement { Width: > 560 } sized ? sized.Width + 44 : 560, MaxHeight = 650, Padding = new(22), RowSpacing = 16 };
         if (fitWindow && content is FrameworkElement popup) { panel.Width = popup.Width + 44; panel.MaxHeight = Math.Max(120, Root.ActualHeight - 32); }

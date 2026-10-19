@@ -27,6 +27,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// last focused one.
     private var page: PopupPage?
     private var measuring: Timer?
+    private weak var measuringWeb: WKWebView?
     private(set) var extensionID: String?
     /// The extension's own button, when the popup hangs from it.
     private weak var button: NSView?
@@ -175,6 +176,10 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// Tells WebKit the popup's window and tab are gone.
     private func forget() {
         if let page { Extensions.shared.controller.didCloseTab(page, windowIsClosing: false) }
+        web?.navigationDelegate = nil
+        web?.uiDelegate = nil
+        web?.stopLoading()
+        measuringWeb = nil
         page = nil
         popover = nil
         web = nil
@@ -253,10 +258,13 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// Measured while still the 25-point square and unseen, then shown at
     /// the size found.
     private func firstMeasure() {
-        guard let web, !shown else { return }
-        web.evaluateJavaScript("(\(ExtensionPopup.preferred))()") { [weak self] value, _ in
+        guard let web, !shown, measuringWeb == nil else { return }
+        measuringWeb = web
+        web.evaluateJavaScript("(\(ExtensionPopup.preferred))()") { [weak self, weak web] value, _ in
             MainActor.assumeIsolated {
-                guard let self, web === self.web, !self.shown else { return }
+                guard let self, let web, web === self.web else { return }
+                self.measuringWeb = nil
+                guard !self.shown else { return }
                 guard let pair = value as? [Double], pair.count == 2 else { return }
                 self.apply(NSSize(width: pair[0], height: pair[1]))
             }
@@ -304,12 +312,15 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     /// it rocking.
     private var ticks = 0
     private func grow() {
-        guard shown, let web, let popover else { return }
+        guard shown, let web, let popover, measuringWeb == nil else { return }
         ticks += 1
         if ticks <= 8 {
-            web.evaluateJavaScript("(\(ExtensionPopup.preferred))()") { [weak self] value, _ in
+            measuringWeb = web
+            web.evaluateJavaScript("(\(ExtensionPopup.preferred))()") { [weak self, weak web, weak popover] value, _ in
                 MainActor.assumeIsolated {
-                    guard let self, let pair = value as? [Double], pair.count == 2 else { return }
+                    guard let self, let web, let popover, web === self.web, popover === self.popover else { return }
+                    self.measuringWeb = nil
+                    guard let pair = value as? [Double], pair.count == 2 else { return }
                     let wanted = NSSize(width: pair[0], height: pair[1])
                     let now = popover.contentSize
                     if abs(wanted.width - now.width) > 2 || abs(wanted.height - now.height) > 2 { self.apply(wanted) }
@@ -321,8 +332,11 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
         if ticks > 24, ticks % 4 != 0 { return }
         // a width the page names for itself, remembered as the first measure does, is followed both ways:
         // Bitwarden's narrow setting shrinks it.
-        web.evaluateJavaScript("[\(ExtensionPopup.reach)('width'), (() => { const d = document.documentElement; return d && d.scrollHeight > d.clientHeight ? d.scrollHeight : 0; })(), (() => { const m = window.__searchSizing || (window.__searchSizing = {}), w = document.documentElement.getBoundingClientRect().width; if (Math.abs(w - innerWidth) > 1) return m.w = w; return m.w && Math.abs(m.w - innerWidth) <= 1 ? m.w : 0; })()]") { value, _ in
+        measuringWeb = web
+        web.evaluateJavaScript("[\(ExtensionPopup.reach)('width'), (() => { const d = document.documentElement; return d && d.scrollHeight > d.clientHeight ? d.scrollHeight : 0; })(), (() => { const m = window.__searchSizing || (window.__searchSizing = {}), w = document.documentElement.getBoundingClientRect().width; if (Math.abs(w - innerWidth) > 1) return m.w = w; return m.w && Math.abs(m.w - innerWidth) <= 1 ? m.w : 0; })()]") { [weak self, weak web, weak popover] value, _ in
             MainActor.assumeIsolated {
+                guard let self, let web, let popover, web === self.web, popover === self.popover else { return }
+                self.measuringWeb = nil
                 guard let pair = value as? [Double], pair.count == 3 else { return }
                 let now = popover.contentSize
                 let width = pair[2] > 0 ? max(25, pair[2].rounded(.up)) : max(now.width, pair[0])
@@ -334,9 +348,9 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
 
     // MARK: - the page asking
 
-    func webViewDidClose(_ webView: WKWebView) { close() }
+    func webViewDidClose(_ webView: WKWebView) { if webView === web { close() } }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { follow() }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { if webView === web { follow() } }
 
     /// A link that asks for a new window becomes a tab, and the popup goes —
     /// the way it does in Chrome when you follow a link out of one.

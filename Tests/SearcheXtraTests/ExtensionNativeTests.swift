@@ -54,4 +54,15 @@ final class ExtensionNativeTests: XCTestCase {
         do { _ = try await read(pipe); XCTFail("An empty exited host must fail its pending read") }
         catch { XCTAssertTrue(error is ExtensionNative.Refused) }
     }
+
+    func testOversizedReplyHeaderStopsHostWithoutWaitingForItsBody() async throws {
+        let (pipe, folder) = try host(#"printf '\377\377\377\377'; exec sleep 10"#)
+        defer { pipe.stop(); try? FileManager.default.removeItem(at: folder) }
+        let exited = expectation(description: "Oversized native reply was refused")
+        pipe.onExit = { exited.fulfill() }
+        try pipe.start()
+        await fulfillment(of: [exited], timeout: 2)
+        do { _ = try await read(pipe); XCTFail("An oversized native reply must close the host") }
+        catch { XCTAssertTrue(error is ExtensionNative.Refused) }
+    }
 }

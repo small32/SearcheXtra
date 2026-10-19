@@ -41,6 +41,10 @@ Check(BookmarkImport.Move(dragTree, [movedB.Id, movedA.Id], destination.Id) && d
 Check(!BookmarkImport.Move(dragTree, [destination.Id], dragNestedFolder.Id) && dragTree.Contains(destination), "Reject moving folder inside its descendant without deleting contents");
 Check(BookmarkImport.Move(dragTree, [destination.Id, movedA.Id], null, 0) && dragTree[0] == destination && destination.Children!.Contains(movedA), "Dragging selected folder and child moves the folder once");
 Check(!BookmarkImport.Move(dragTree, [movedC.Id], Guid.NewGuid()) && dragTree.Contains(movedC), "Reject unknown destination without losing bookmarks");
+var bulkBookmarks = Enumerable.Range(0, 4000).Select(index => new Bookmark { Title = index.ToString(), Url = "https://example.com/" + index }).ToList();
+var bulkSelected = bulkBookmarks.Where((_, index) => index % 2 == 0).ToArray();
+var bulkRetained = bulkBookmarks.Where((_, index) => index % 2 != 0).ToArray();
+Check(BookmarkImport.Move(bulkBookmarks, bulkSelected.Reverse().Select(node => node.Id), null, bulkBookmarks.Count) && bulkBookmarks.SequenceEqual(bulkRetained.Concat(bulkSelected)), "Large bookmark selections reorder once per parent while retaining tree order");
 Check(SiteSearch.Match(new(), "yout")?.Name == "YouTube" && SiteSearch.Match(new(), "so")?.Name == "Stack Overflow", "Built-in site search prefixes and aliases");
 Check(SiteSearch.Match(new(), "youtube cats") == null && SiteSearch.Match(new(), "y") == null, "Site search needs a name prefix");
 var chromeTree = BrowserImport.ChromeBookmarks("""{"roots":{"bookmark_bar":{"name":"Bar","children":[{"name":"Example","url":"https://example.com"},{"name":"Bad","url":"javascript:bad"}]}}}""");
@@ -170,6 +174,19 @@ using var siteManifest = JsonDocument.Parse("""{"content_scripts":[{"matches":["
 Check(ExtensionPermissions.Describe(siteManifest.RootElement, false).Single() == "Read and change data on example.com and its subdomains", "Content-script site access is described in English");
 using var emptyManifest = JsonDocument.Parse("{}");
 Check(ExtensionPermissions.Describe(emptyManifest.RootElement, true).Count == 0, "Extensions without additional permissions have an empty consent list");
+using var userScriptsRequired = JsonDocument.Parse("""{"permissions":["storage","userScripts"]}""");
+using var userScriptsOptional = JsonDocument.Parse("""{"optional_permissions":["userScripts"]}""");
+using var malformedUserScripts = JsonDocument.Parse("""{"permissions":"userScripts","optional_permissions":[null,1,{"userScripts":true},"UserScripts"]}""");
+Check(ExtensionPermissions.DeclaresUserScripts(userScriptsRequired.RootElement), "Detect required userScripts permission");
+Check(ExtensionPermissions.DeclaresUserScripts(userScriptsOptional.RootElement), "Detect optional userScripts permission");
+Check(!ExtensionPermissions.DeclaresUserScripts(emptyManifest.RootElement) && !ExtensionPermissions.DeclaresUserScripts(malformedUserScripts.RootElement), "Only declared userScripts permission strings expose the capability row");
+Check(ExtensionPermissions.Describe(userScriptsRequired.RootElement, true).Contains("在网页中运行用户脚本"), "User script permission has a readable Chinese label");
+var userScriptsFolder = Path.Combine(DataStore.Root, "UserScriptsManifest"); Directory.CreateDirectory(userScriptsFolder);
+Check(!ExtensionPermissions.DeclaresUserScripts(userScriptsFolder), "Missing extension manifest does not prevent showing extension details");
+await File.WriteAllTextAsync(Path.Combine(userScriptsFolder, "manifest.json"), userScriptsOptional.RootElement.GetRawText());
+Check(ExtensionPermissions.DeclaresUserScripts(userScriptsFolder), "Read user script declaration from installed extension folder");
+await File.WriteAllTextAsync(Path.Combine(userScriptsFolder, "manifest.json"), "invalid json");
+Check(!ExtensionPermissions.DeclaresUserScripts(userScriptsFolder), "Invalid extension manifest does not prevent showing extension details");
 Check(CrxInstaller.IsNewerVersion("1.10", "1.9") && CrxInstaller.IsNewerVersion("2", "1.99.99.99"), "Extension updates compare numeric version components");
 Check(!CrxInstaller.IsNewerVersion("1.2.0.0", "1.2") && !CrxInstaller.IsNewerVersion("1.9", "1.10"), "Equal padded versions and older store versions do not reinstall");
 Check(Reject(() => CrxInstaller.IsNewerVersion("not-a-version", "1")) && Reject(() => CrxInstaller.IsNewerVersion("65536", "1")), "Invalid extension versions cannot be treated as updates");
@@ -192,4 +209,20 @@ var flowRoundTrip=FlowDrag.Import(JsonSerializer.Serialize(importedFlow,FlowDrag
 Check(FlowDrag.Search("超级拖拽 & search","https://search.example/?q=%s")=="https://search.example/?q="+Uri.EscapeDataString("超级拖拽 & search"),"Drag search encodes Unicode and query delimiters");
 Check(FlowDrag.Template("system","https://default.example/?q={0}","")=="https://default.example/?q={0}","Default drag engine follows the browser engine");
 var badFlow=false;try{new FlowDragConfig{Rules=[new("image","→","saveImage",Subdir:"../escape")]}.Validate();}catch(FormatException){badFlow=true;}Check(badFlow,"Download subfolders cannot escape the downloads directory");
-Console.WriteLine($"PASS: {count} checks including FlowMouse drag semantics");
+foreach (var field in new[] { "pattern", "url", "subdir" })
+{
+    var invalid = FlowDrag.Import("{\"rules\":[{\"object\":\"text\",\"pattern\":\"→\",\"action\":\"search\",\"" + field + "\":null}]}");
+    var rejected = false;
+    try { invalid.Validate(); } catch (FormatException) { rejected = true; }
+    Check(rejected, "A null drag rule " + field + " is rejected as invalid configuration instead of crashing");
+}
+var nullExclusion = FlowDrag.Import("{\"excludedSites\":[null]}");
+var rejectedExclusion = false;
+try { nullExclusion.Validate(); } catch (FormatException) { rejectedExclusion = true; }
+Check(rejectedExclusion, "Null drag exclusions are rejected as invalid configuration instead of crashing");
+var rejectedShape = false;
+try { FlowDrag.Import("{\"textDragGestures\":false}"); } catch (FormatException) { rejectedShape = true; }
+Check(rejectedShape, "A malformed FlowMouse rule collection reports invalid configuration instead of an unhandled exception");
+ExtensionUserScriptsPackageTests.Run(Check);
+await UserScriptStoreTests.RunAsync(Check);
+Console.WriteLine($"PASS: {count} checks including FlowMouse and MV3 user scripts");

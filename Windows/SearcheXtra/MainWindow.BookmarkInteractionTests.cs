@@ -33,13 +33,21 @@ public sealed partial class MainWindow
                 foreach (var child in Descendants<T>(VisualTreeHelper.GetChild(root, i))) yield return child;
         }
         void InvokeButton(Button button) => ((IInvokeProvider)new ButtonAutomationPeer(button).GetPattern(PatternInterface.Invoke)).Invoke();
-        void InvokeMenu(MenuFlyout menu, string en, string zh, FrameworkElement? anchor = null)
+        async Task InvokeMenu(MenuFlyout menu, string en, string zh, FrameworkElement? anchor = null)
         {
-            menu.ShowAt(anchor ?? BookmarkScroller);
-            Root.UpdateLayout();
-            var item = menu.Items.OfType<MenuFlyoutItem>().Single(entry => entry.Text == T(en, zh));
-            ((IInvokeProvider)new MenuFlyoutItemAutomationPeer(item).GetPattern(PatternInterface.Invoke)).Invoke();
-            menu.Hide();
+            var opened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler<object> opening = (_, _) => opened.TrySetResult();
+            menu.Opening += opening;
+            try
+            {
+                menu.ShowAt(anchor ?? BookmarkScroller);
+                await opened.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                Root.UpdateLayout();
+                var item = menu.Items.OfType<MenuFlyoutItem>().Single(entry => entry.Text == T(en, zh));
+                ((IInvokeProvider)new MenuFlyoutItemAutomationPeer(item).GetPattern(PatternInterface.Invoke)).Invoke();
+                await CloseTestFlyoutAsync(menu);
+            }
+            finally { menu.Opening -= opening; }
         }
         async Task SavePrompt(string title, string value)
         {
@@ -70,17 +78,29 @@ public sealed partial class MainWindow
             var leafButton = BookmarkRow.Children.OfType<Button>().Single(button => ReferenceEquals(button.Tag, leaf));
             var folderButton = BookmarkRow.Children.OfType<Button>().Single(button => ReferenceEquals(button.Tag, folder));
             var leafMenu = (MenuFlyout)leafButton.ContextFlyout;
+            var dropdown = (MenuFlyout)folderButton.Flyout;
+            check(leafMenu.Items.Count == 0 && dropdown.Items.Count == 0,
+                "Bookmark controls defer context actions and folder descendants until their menus are opened");
+            leafMenu.ShowAt(leafButton); Root.UpdateLayout();
+            await Wait(() => leafMenu.IsOpen && leafMenu.Items.Count > 0);
+            await CloseTestFlyoutAsync(leafMenu);
             check(leafMenu.Items.OfType<MenuFlyoutItem>().Any(item => item.Text == T("Edit bookmark…", "修改书签…")) &&
                 leafMenu.Items.OfType<MenuFlyoutItem>().Any(item => item.Text == T("Open in new tab", "在新标签页中打开")) &&
                 leafMenu.Items.OfType<MenuFlyoutItem>().Any(item => item.Text == T("Delete", "删除")),
                 "Top-level bookmark context menus include opening, address editing and removal");
-            var dropdown = (MenuFlyout)folderButton.Flyout;
+            dropdown.ShowAt(folderButton); Root.UpdateLayout();
+            await Wait(() => dropdown.IsOpen && dropdown.Items.Count > 0);
+            await CloseTestFlyoutAsync(dropdown);
             var childItem = dropdown.Items.OfType<MenuFlyoutItem>().Single(item => ReferenceEquals(item.Tag, nestedLeaf));
             var subItem = dropdown.Items.OfType<MenuFlyoutSubItem>().Single(item => ReferenceEquals(item.Tag, deepFolder));
             var deepItem = subItem.Items.OfType<MenuFlyoutItem>().Single(item => ReferenceEquals(item.Tag, deepLeaf));
             check(childItem.ContextFlyout is MenuFlyout && subItem.ContextFlyout is MenuFlyout && deepItem.ContextFlyout is MenuFlyout,
                 "Dropdown bookmarks and folders retain their own context menus at every nesting level");
-            check(((MenuFlyout)subItem.ContextFlyout).Items.OfType<MenuFlyoutItem>().Any(item => item.Text == T("Rename…", "重命名…")),
+            var subContext = (MenuFlyout)subItem.ContextFlyout;
+            subContext.ShowAt(folderButton); Root.UpdateLayout();
+            await Wait(() => subContext.IsOpen && subContext.Items.Count > 0);
+            await CloseTestFlyoutAsync(subContext);
+            check(subContext.Items.OfType<MenuFlyoutItem>().Any(item => item.Text == T("Rename…", "重命名…")),
                 "Nested folder context menus include folder management actions");
 
             Settings.BookmarkOpening = BookmarkOpening.Default;
@@ -116,7 +136,7 @@ public sealed partial class MainWindow
             check(tabs.Count == before, "Middle-click opening ignores folders and non-web addresses");
 
             existing = tabs.ToHashSet();
-            InvokeMenu((MenuFlyout)deepItem.ContextFlyout, "Open in new tab", "在新标签页中打开");
+            await InvokeMenu((MenuFlyout)deepItem.ContextFlyout, "Open in new tab", "在新标签页中打开");
             await Wait(() => tabs.Count == existing.Count + 1);
             var menuTab = tabs.Single(tab => !existing.Contains(tab));
             check(active == source && menuTab.Url == deepLeaf.Url && Settings.BookmarkOpening == BookmarkOpening.Foreground,
@@ -135,30 +155,30 @@ public sealed partial class MainWindow
             CloseTab(privateResult);
             CloseTab(privateSource);
 
-            InvokeMenu(leafMenu, "Edit bookmark…", "修改书签…");
+            await InvokeMenu(leafMenu, "Edit bookmark…", "修改书签…");
             await SavePrompt(T("Edit bookmark…", "修改书签…"), "Edited bookmark");
             await SavePrompt(T("Bookmark address", "书签网址"), fixture + "bookmark-edited");
             await Wait(() => leaf.Title == "Edited bookmark" && leaf.Url == fixture + "bookmark-edited");
             check(leaf.Title == "Edited bookmark" && leaf.Url == fixture + "bookmark-edited",
                 "Bookmark context-menu editing saves both the displayed title and destination address");
-            InvokeMenu((MenuFlyout)subItem.ContextFlyout, "Add folder…", "添加文件夹…");
+            await InvokeMenu((MenuFlyout)subItem.ContextFlyout, "Add folder…", "添加文件夹…");
             await SavePrompt(T("New folder", "新建文件夹"), "Created inside deep folder");
             await Wait(() => deepFolder.Children!.Any(node => node.Title == "Created inside deep folder"));
             var created = deepFolder.Children!.Single(node => node.Title == "Created inside deep folder");
             check(created.Children is { Count: 0 } && !store.Bookmarks.Contains(created),
                 "Creating a folder from a nested folder's context menu places it inside that folder");
-            InvokeMenu(BookmarkBarContextMenu(created), "Rename…", "重命名…");
+            await InvokeMenu(BookmarkBarContextMenu(created), "Rename…", "重命名…");
             await SavePrompt(T("Rename", "重命名"), "Renamed nested folder");
             await Wait(() => created.Title == "Renamed nested folder");
             check(created.Title == "Renamed nested folder", "Nested folder context-menu renaming updates its model");
-            InvokeMenu((MenuFlyout)childItem.ContextFlyout, "Add page…", "添加网页…");
+            await InvokeMenu((MenuFlyout)childItem.ContextFlyout, "Add page…", "添加网页…");
             await SavePrompt(T("Add bookmark", "添加书签"), "Sibling bookmark");
             await SavePrompt(T("Bookmark address", "书签网址"), fixture + "bookmark-sibling");
             await Wait(() => folder.Children!.Any(node => node.Title == "Sibling bookmark"));
             check(folder.Children!.Any(node => node.Url == fixture + "bookmark-sibling") &&
                 store.Bookmarks.All(node => node.Url != fixture + "bookmark-sibling"),
                 "A nested bookmark's add-page context action creates a sibling in its actual parent folder");
-            InvokeMenu(BookmarkBarContextMenu(created), "Delete", "删除");
+            await InvokeMenu(BookmarkBarContextMenu(created), "Delete", "删除");
             await Wait(() => !deepFolder.Children!.Contains(created));
             check(!deepFolder.Children!.Contains(created), "Deleting a nested folder through its context menu removes it from the correct parent");
 
@@ -171,7 +191,7 @@ public sealed partial class MainWindow
                 var managerItem = list.Items.Cast<ListViewItem>().Single(item => ReferenceEquals(item.Tag, nestedLeaf));
                 check(managerItem.ContextFlyout is MenuFlyout && list.ContextFlyout is MenuFlyout,
                     "Bookmark manager rows and folder empty space expose their context menus");
-                InvokeMenu((MenuFlyout)managerItem.ContextFlyout, "Edit bookmark…", "修改书签…", managerItem);
+                await InvokeMenu((MenuFlyout)managerItem.ContextFlyout, "Edit bookmark…", "修改书签…", managerItem);
                 await SavePrompt(T("Edit bookmark…", "修改书签…"), "Edited in manager");
                 await SavePrompt(T("Bookmark address", "书签网址"), fixture + "bookmark-manager-edited");
                 await Wait(() => FindAddressPart<ListView>(OverlayLayer, "BookmarkManagerList") != null && nestedLeaf.Title == "Edited in manager");
@@ -182,7 +202,7 @@ public sealed partial class MainWindow
                     list.Items.Cast<ListViewItem>().Select(item => (Bookmark)item.Tag).SequenceEqual(folder.Children!) &&
                     Descendants<TextBlock>(managerItem).Any(label => label.Text.Contains("Edited in manager") && label.Text.Contains(nestedLeaf.Url)),
                     "Bookmark manager context editing saves the name and address and returns to the same folder with refreshed rows");
-                InvokeMenu((MenuFlyout)list.ContextFlyout, "Add folder…", "添加文件夹…", list);
+                await InvokeMenu((MenuFlyout)list.ContextFlyout, "Add folder…", "添加文件夹…", list);
                 await SavePrompt(T("New folder", "新建文件夹"), "Created in manager");
                 await Wait(() => FindAddressPart<ListView>(OverlayLayer, "BookmarkManagerList") != null && folder.Children!.Any(node => node.Title == "Created in manager"));
                 Root.UpdateLayout();
@@ -191,7 +211,7 @@ public sealed partial class MainWindow
                     folder.Children!.Single(node => node.Title == "Created in manager").Children is { Count: 0 },
                     "Bookmark manager empty-space folder creation returns to the original directory and displays the new folder");
                 managerItem = list.Items.Cast<ListViewItem>().Single(item => ReferenceEquals(item.Tag, nestedLeaf));
-                InvokeMenu((MenuFlyout)managerItem.ContextFlyout, "Delete", "删除", managerItem);
+                await InvokeMenu((MenuFlyout)managerItem.ContextFlyout, "Delete", "删除", managerItem);
                 await Wait(() => !folder.Children!.Contains(nestedLeaf) && list.Items.Cast<ListViewItem>().All(item => !ReferenceEquals(item.Tag, nestedLeaf)));
                 check(OverlayLayer.Visibility == Visibility.Visible && !folder.Children!.Contains(nestedLeaf),
                     "Bookmark manager context deletion refreshes the open list without dismissing the manager");

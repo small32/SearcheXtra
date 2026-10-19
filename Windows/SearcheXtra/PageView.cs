@@ -15,10 +15,13 @@ public sealed partial class PageView : IDisposable
     private readonly bool recordVisits;
     private Task? initialization;
     private bool disposed;
+    private bool resourceFilterInstalled;
+    private bool suspending;
     private readonly CancellationTokenSource lifetime = new();
     private string? documentScript, documentScriptSource;
     private readonly SemaphoreSlim ScriptGate = new(1, 1);
     private CoreWebView2DevToolsProtocolEventReceiver? securityReceiver;
+    private UserScriptPageHost? userScripts;
     public WebView2 Control { get; } = new() { Visibility = Visibility.Collapsed };
     public Window? FloatingWindow { get; set; }
     public bool IsDisposed => disposed;
@@ -77,7 +80,6 @@ public sealed partial class PageView : IDisposable
         core.ProcessFailed += ProcessFailed;
         core.FaviconChanged += FaviconChanged;
         core.PermissionRequested += CorePermissionRequested;
-        core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
         core.WebResourceRequested += ResourceRequested;
         foreach (var extension in await core.Profile.GetBrowserExtensionsAsync()) if (store.Settings.RemovedExtensionIds.Contains(extension.Id)) await extension.RemoveAsync();
         ApplySettings();
@@ -91,6 +93,11 @@ public sealed partial class PageView : IDisposable
                 try { await Task.Run(() => CrxInstaller.ValidateFolder(folder)); await core.Profile.AddBrowserExtensionAsync(folder); }
                 catch { /* Legacy imports must not prevent browsing. */ }
             }
+        }
+        if (!disposed && !tab.IsPrivate)
+        {
+            var host = await ExtensionUserScripts.AttachAsync(core, store.Settings);
+            if (disposed) ExtensionUserScripts.Detach(host); else userScripts = host;
         }
         if (!disposed && tab.Url.Length > 0) Navigate(tab.Url);
     }
@@ -108,13 +115,14 @@ public sealed partial class PageView : IDisposable
                 if (!Directory.Exists(item.Folder)) continue;
                 try
                 {
+                    var prepared = await ExtensionUserScripts.PrepareAsync(item.Folder);
+                    var signature = item.Folder + (prepared ? "|userScripts:" + ExtensionUserScriptsPackage.Version : "");
                     installed.TryGetValue(item.Id, out var extension);
-                    if (extension == null || folders.GetValueOrDefault(item.Id) != item.Folder)
+                    if (extension == null || folders.GetValueOrDefault(item.Id) != signature)
                     {
                         await Task.Run(() => CrxInstaller.ValidateFolder(item.Folder));
-                        if (extension != null) await extension.RemoveAsync();
                         extension = await profile.AddBrowserExtensionAsync(item.Folder);
-                        folders[item.Id] = item.Folder;
+                        folders[item.Id] = signature;
                     }
                     if (extension.IsEnabled != item.Enabled) await extension.EnableAsync(item.Enabled);
                 }
@@ -138,8 +146,15 @@ public sealed partial class PageView : IDisposable
         Uri.TryCreate(storedOrigin, UriKind.Absolute, out var stored) && stored.GetLeftPart(UriPartial.Authority).Equals(origin, StringComparison.OrdinalIgnoreCase);
     public void ApplySettings()
     {
+        if (disposed) return;
         ConfigureFlowDrag();
         if (Control.CoreWebView2 is not { } core) return;
+        if (resourceFilterInstalled != store.Settings.BlockTrackers)
+        {
+            if (store.Settings.BlockTrackers) core.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+            else core.RemoveWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+            resourceFilterInstalled = store.Settings.BlockTrackers;
+        }
         core.Profile.PreferredColorScheme = store.Settings.Theme switch { "dark" => CoreWebView2PreferredColorScheme.Dark, "light" => CoreWebView2PreferredColorScheme.Light, _ => CoreWebView2PreferredColorScheme.Auto };
         core.Settings.IsPasswordAutosaveEnabled = !tab.IsPrivate && store.Settings.SavesPasswords;
         core.Settings.IsGeneralAutofillEnabled = !tab.IsPrivate && store.Settings.FillsPasswords;
@@ -155,6 +170,16 @@ public sealed partial class PageView : IDisposable
     }
     private async void NavigationCompleted(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
     {
+        try { await CompleteNavigationAsync(sender, args); }
+        catch (Exception error) when (error is System.Runtime.InteropServices.COMException or IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException or JsonException)
+        {
+            // A closed WebView or unavailable password data must not terminate the app.
+            System.Diagnostics.Debug.WriteLine(error.Message);
+        }
+    }
+    private async Task CompleteNavigationAsync(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
+    {
+        if (disposed) return;
         tab.Loading = false;
         if (args.IsSuccess && recordVisits && !tab.IsPrivate && AddressParser.IsWeb(tab.Url))
         {
@@ -165,6 +190,7 @@ public sealed partial class PageView : IDisposable
         changed();
         if (args.IsSuccess && recordVisits && !tab.IsPrivate && store.Settings.SearchesSites && Uri.TryCreate(tab.Url, UriKind.Absolute, out var page))
         { var description = JsonSerializer.Deserialize<string>(await sender.ExecuteScriptAsync("document.querySelector('link[rel~=search][type=\"application/opensearchdescription+xml\"]')?.href || ''")) ?? ""; await SiteSearch.LearnAsync(store.Settings, page, description); changed(); }
+        if (disposed) return;
         ApplySettings();
         if (args.IsSuccess && !tab.IsPrivate && store.Settings.FillsPasswords && AddressParser.IsWeb(sender.Source))
         {
@@ -215,23 +241,42 @@ public sealed partial class PageView : IDisposable
         if (Uri.TryCreate(tab.Url, UriKind.Absolute, out var top) && (store.Settings.Sites.GetValueOrDefault(top.Host)?.BlockTrackers == false || uriSameSite(args.Request.Uri, top.Host))) return;
         if (!Uri.TryCreate(args.Request.Uri, UriKind.Absolute, out var uri)) return;
         var host = uri.Host;
-        if (Trackers.Any(domain => host.Equals(domain, StringComparison.OrdinalIgnoreCase) || host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase)))
+        while (!Trackers.Contains(host))
+        {
+            var dot = host.IndexOf('.');
+            if (dot < 0) return;
+            host = host[(dot + 1)..];
+        }
             args.Response = sender.Environment.CreateWebResourceResponse(null, 403, "Blocked", "Content-Type: text/plain");
     }
     private static bool uriSameSite(string url, string top) => Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Host == top;
     private async void DownloadStarting(CoreWebView2 sender, CoreWebView2DownloadStartingEventArgs args)
     {
         var deferral = args.GetDeferral();
-        args.Handled = true;
-        if (store.Settings.AskDownloadLocation && DownloadLocationRequested != null) { await DownloadLocationRequested(args); if (!args.Cancel) DownloadStarted?.Invoke(new(args.DownloadOperation, args.ResultFilePath)); deferral.Complete(); return; }
-        Directory.CreateDirectory(store.Settings.DownloadsFolder);
-        var file = Path.GetFileName(args.ResultFilePath);
-        var path = Path.Combine(store.Settings.DownloadsFolder, file);
-        var stem = Path.GetFileNameWithoutExtension(file);
-        for (var i = 1; File.Exists(path); i++) path = Path.Combine(store.Settings.DownloadsFolder, $"{stem} ({i}){Path.GetExtension(file)}");
-        args.ResultFilePath = path;
-        DownloadStarted?.Invoke(new(args.DownloadOperation, path));
-        deferral.Complete();
+        try
+        {
+            args.Handled = true;
+            if (store.Settings.AskDownloadLocation && DownloadLocationRequested != null)
+            {
+                await DownloadLocationRequested(args);
+                if (!args.Cancel && !disposed) DownloadStarted?.Invoke(new(args.DownloadOperation, args.ResultFilePath));
+                else args.Cancel = true;
+                return;
+            }
+            Directory.CreateDirectory(store.Settings.DownloadsFolder);
+            var file = Path.GetFileName(args.ResultFilePath);
+            var path = Path.Combine(store.Settings.DownloadsFolder, file);
+            var stem = Path.GetFileNameWithoutExtension(file);
+            for (var i = 1; File.Exists(path); i++) path = Path.Combine(store.Settings.DownloadsFolder, $"{stem} ({i}){Path.GetExtension(file)}");
+            args.ResultFilePath = path;
+            DownloadStarted?.Invoke(new(args.DownloadOperation, path));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or ArgumentException)
+        {
+            args.Cancel = true;
+            System.Diagnostics.Debug.WriteLine(error.Message);
+        }
+        finally { deferral.Complete(); }
     }
     private async void MessageReceived(CoreWebView2 sender, CoreWebView2WebMessageReceivedEventArgs args)
     {
@@ -287,17 +332,19 @@ public sealed partial class PageView : IDisposable
     public void Resume() { if (Control.CoreWebView2 is { } core) core.Resume(); tab.Sleeping = false; }
     public async Task TrySuspendAsync()
     {
-        if (disposed || FloatingWindow != null || Control.Visibility == Visibility.Visible || tab.Sleeping || Control.CoreWebView2 is not { } core) return;
+        if (disposed || suspending || FloatingWindow != null || Control.Visibility == Visibility.Visible || tab.Sleeping || Control.CoreWebView2 is not { } core) return;
+        suspending = true;
         try
         {
             // Keep media, capture and unsaved form interactions running.
             var busy = await core.ExecuteScriptAsync(PageScripts.Busy);
             if (busy == "true") return;
-            if (disposed || Control.Visibility == Visibility.Visible) return;
+            if (disposed || FloatingWindow != null || Control.Visibility == Visibility.Visible) return;
             tab.Sleeping = await core.TrySuspendAsync();
         }
         catch (Exception) when (disposed || Control.CoreWebView2 == null) { }
         catch (System.Runtime.InteropServices.COMException ex) when (ex.HResult == unchecked((int)0x8007139F)) { /* Visibility changes may not have reached the native controller yet. Retry at the next idle tick. */ }
+        finally { suspending = false; }
     }
     public async Task ReaderAsync() { if (Control.CoreWebView2 is { } core) await core.ExecuteScriptAsync(PageScripts.Reader); }
     private async void CorePermissionRequested(CoreWebView2 sender, CoreWebView2PermissionRequestedEventArgs args)
@@ -327,6 +374,7 @@ public sealed partial class PageView : IDisposable
     {
         if (disposed) return;
         disposed = true;
+        if (userScripts != null) { ExtensionUserScripts.Detach(userScripts); userScripts = null; }
         lifetime.Cancel();
         FloatingWindow?.Close(); FloatingWindow = null;
         if (Control.CoreWebView2 is { } core)

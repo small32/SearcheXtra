@@ -21,9 +21,11 @@ internal static partial class PageScripts
           let lastRead=0;document.addEventListener('scroll',()=>{if(!window.__searchPrefs?.reading||performance.now()-lastRead<100)return;lastRead=performance.now();send({type:'reading',value:Math.min(100,100*(scrollY+innerHeight)/Math.max(innerHeight,document.documentElement.scrollHeight))});},{passive:true});
           document.addEventListener('wheel',e=>{if(window.__searchFloating&&window.__searchPrefs?.flicks&&(Math.abs(e.deltaX)>20||Math.abs(e.deltaY)>40))send({type:'flick',x:e.deltaX,y:e.deltaY});},{passive:true});
           let scroll=null;
-          document.addEventListener('mousedown',e=>{if(e.button!==1||!window.__searchPrefs?.scroll||e.target.closest?.('a[href]'))return;e.preventDefault();if(scroll){cancelAnimationFrame(scroll.frame);scroll=null;return;}scroll={x:e.clientX,y:e.clientY,dx:0,dy:0};const tick=()=>{if(!scroll)return;window.scrollBy(scroll.dx/8,scroll.dy/8);scroll.frame=requestAnimationFrame(tick);};tick();});
+          const stopScroll=()=>{if(scroll){cancelAnimationFrame(scroll.frame);scroll=null;}};
+          document.addEventListener('mousedown',e=>{if(e.button!==1||!window.__searchPrefs?.scroll||e.target.closest?.('a[href]'))return;e.preventDefault();if(scroll){stopScroll();return;}scroll={x:e.clientX,y:e.clientY,dx:0,dy:0};const tick=()=>{if(!scroll)return;if(!window.__searchPrefs?.scroll){stopScroll();return;}window.scrollBy(scroll.dx/8,scroll.dy/8);scroll.frame=requestAnimationFrame(tick);};tick();});
           document.addEventListener('mousemove',e=>{if(scroll){scroll.dx=e.clientX-scroll.x;scroll.dy=e.clientY-scroll.y;}});
-          document.addEventListener('keydown',e=>{if(e.key==='Escape'&&scroll){cancelAnimationFrame(scroll.frame);scroll=null;}});
+          document.addEventListener('keydown',e=>{if(e.key==='Escape')stopScroll();});
+          addEventListener('pagehide',stopScroll);
           if(navigator.credentials){const get=navigator.credentials.get.bind(navigator.credentials);const create=navigator.credentials.create.bind(navigator.credentials);navigator.credentials.get=o=>o?.publicKey&&window.__searchPrefs?.passkeys===false?Promise.reject(new DOMException('Passkeys disabled','NotAllowedError')):get(o);navigator.credentials.create=o=>o?.publicKey&&window.__searchPrefs?.passkeys===false?Promise.reject(new DOMException('Passkeys disabled','NotAllowedError')):create(o);}
         })();
         """;

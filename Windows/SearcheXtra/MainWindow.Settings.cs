@@ -13,7 +13,7 @@ public sealed partial class MainWindow
     private async Task ShowSettingsAsync()
     {
         var pages = SettingsPages;
-        if (OverlayLayer.Visibility == Visibility.Visible) return;
+        if (closing || OverlayLayer.Visibility == Visibility.Visible) return;
         var done = new TaskCompletionSource();
         var shell = new Grid { Width = 660, Height = 500 };
         shell.ColumnDefinitions.Add(new() { Width = new(168) }); shell.ColumnDefinitions.Add(new() { Width = new(1) }); shell.ColumnDefinitions.Add(new() { Width = new(1, GridUnitType.Star) });

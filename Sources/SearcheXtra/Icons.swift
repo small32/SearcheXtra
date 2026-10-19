@@ -20,7 +20,7 @@ final class Favicons: ObservableObject {
     /// that host can put it on at once.
     var arrived: ((String, NSImage) -> Void)?
 
-    private var memory: [String: NSImage] = [:]
+    private let memory = NSCache<NSString, NSImage>()
     private var busy: Set<String> = []
     private var missing: Set<String> = []
     /// Keys with no file on disk, as far as `known` has looked.
@@ -32,6 +32,8 @@ final class Favicons: ObservableObject {
     private let session: URLSession
 
     init(session: URLSession? = nil) {
+        memory.countLimit = 512
+        memory.totalCostLimit = 8 * 1024 * 1024
         if let session { self.session = session }
         else {
             let config = URLSessionConfiguration.ephemeral
@@ -95,7 +97,7 @@ final class Favicons: ObservableObject {
     }
 
     private func known(_ key: String) -> NSImage? {
-        if let hit = memory[key] { return hit }
+        if let hit = memory.object(forKey: key as NSString) { return hit }
         // A host with no icon on disk is looked for there once, not on every
         // line of every list that shows it: the History panel asked for two
         // thousand of them each time it drew. One that arrives later goes
@@ -105,8 +107,12 @@ final class Favicons: ObservableObject {
             absent.insert(key)
             return nil
         }
-        memory[key] = image
+        remember(image, for: key)
         return image
+    }
+
+    private func remember(_ image: NSImage, for key: String) {
+        memory.setObject(image, forKey: key as NSString, cost: 64 * 64 * 4)
     }
 
     private static func fresh(_ key: String) -> Bool {
@@ -131,7 +137,7 @@ final class Favicons: ObservableObject {
     func adopt(_ data: Data, for host: String) async {
         guard cached(host) == nil, let image = await Favicons.square(data) else { return }
         objectWillChange.send()
-        memory[host] = image
+        remember(image, for: host)
         Favicons.keep(image, for: host)
         arrived?(host, image)
     }
@@ -272,6 +278,7 @@ final class Favicons: ObservableObject {
             config.timeoutIntervalForRequest = 8
             session = URLSession(configuration: config)
         }
+        defer { if !bookmark { session.finishTasksAndInvalidate() } }
         for candidate in candidates {
             guard let (data, response) = try? await session.data(from: candidate),
                   (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
@@ -279,7 +286,7 @@ final class Favicons: ObservableObject {
             else { continue }
             guard let image = await Favicons.square(data) else { continue }
             objectWillChange.send()
-            memory[key] = image
+            remember(image, for: key)
             absent.remove(key)
             if !shy { Favicons.keep(image, for: key) }
             arrived?(host, image)

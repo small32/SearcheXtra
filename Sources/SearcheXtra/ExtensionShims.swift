@@ -41,9 +41,9 @@ enum ExtensionShims {
     nonisolated static let stamp = ".search-shim"
     /// Raised when `prepare` changes what it does to a package, so that
     /// extensions prepared before are prepared again.
-    nonisolated private static let preparation = "2"
+    nonisolated private static let preparation = "4"
     nonisolated static let version: String = {
-        SHA256.hash(data: Data((script + PasskeyRelay.page + preparation).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() + (Store.testing ? "-test" : "")
+        SHA256.hash(data: Data((script + PasskeyRelay.page + ExtensionUserScripts.hostHTML + ExtensionUserScripts.hostScript + preparation).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() + (Store.testing ? "-test" : "")
     }()
 
     /// `fresh`: a package just unpacked or copied in. What only Search writes
@@ -65,6 +65,10 @@ enum ExtensionShims {
         let script = shim(for: folder)
         try script.write(to: folder.appendingPathComponent(file), atomically: true, encoding: .utf8)
         try PasskeyRelay.page.write(to: folder.appendingPathComponent(passkeys), atomically: true, encoding: .utf8)
+        let userScriptDirectory = folder.appendingPathComponent("_search", isDirectory: true)
+        try files.createDirectory(at: userScriptDirectory, withIntermediateDirectories: true)
+        try ExtensionUserScripts.hostHTML.write(to: folder.appendingPathComponent(ExtensionUserScripts.hostPath), atomically: true, encoding: .utf8)
+        try ExtensionUserScripts.hostScript.write(to: userScriptDirectory.appendingPathComponent("user-script-host.js"), atomically: true, encoding: .utf8)
 
         // Native messaging is how the shim reaches the browser; user scripts
         // are carried out through WebKit's registered content scripts, which
@@ -73,7 +77,8 @@ enum ExtensionShims {
         var permissions = manifest["permissions"] as? [Any] ?? []
         let asked = Set(permissions.compactMap { $0 as? String })
         var added = (try? JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent(".search-added")))) as? [String] ?? []
-        for needed in ["nativeMessaging"] + (asked.contains("userScripts") ? ["scripting"] : []) where !asked.contains(needed) {
+        let optional = Set((manifest["optional_permissions"] as? [Any] ?? []).compactMap { $0 as? String })
+        for needed in ["nativeMessaging"] + (asked.union(optional).contains("userScripts") ? ["scripting"] : []) where !asked.contains(needed) {
             permissions.append(needed)
             added.append(needed)
         }
@@ -246,6 +251,10 @@ enum ExtensionShims {
       // (There, Search's passkey patch holds navigator.credentials.)
       const ours = (() => { try { return !!(chrome && chrome.runtime && chrome.runtime.id); } catch (e) { return false; } })();
       if (!ours || root.__searchShim) return;
+      const needsUserScriptRuntime = (() => {
+        try { const m = chrome.runtime.getManifest(); return !chrome.userScripts && [...(m.permissions || []), ...(m.optional_permissions || [])].includes("userScripts"); }
+        catch (e) { return false; }
+      })();
       // Bitwarden's bundled TypeScript uses these as computed class keys
       // before it registers disposable resources. Define them before any
       // extension code runs; Symbol.for keeps the key shared by its frames.
@@ -318,7 +327,7 @@ enum ExtensionShims {
         // from WebKit too, and nothing would reach the extension again. A
         // replacement that still carries them is taken.
         const carries = (v) => { try { return !!(v && v.runtime && v.runtime.id); } catch (e) { return false; } };
-        try { Object.defineProperty(root, key, { configurable: false, enumerable: d.enumerable, get: () => value, set: (v) => { if (carries(v)) value = v; } }); } catch (e) {}
+        try { Object.defineProperty(root, key, { configurable: false, enumerable: d.enumerable, get: () => value, set: (v) => { if (carries(v) && !(needsUserScriptRuntime && key === "browser")) value = v; } }); } catch (e) {}
       }
       // On a web page this is a content script: only Chrome's behaviour is
       // mended there, no API that Chrome doesn't give content scripts either.
@@ -335,8 +344,6 @@ enum ExtensionShims {
         try { const a = location.ancestorOrigins; if (a && a.length) return [...a].some((o) => o !== location.origin); } catch (e) {}
         try { return window.top.location.origin !== location.origin; } catch (e) { return true; }
       })();
-      const runtime = chrome.runtime;
-
       // WebKit's objects are kept — WebKit finds an extension's listeners
       // through them, and a replacement would hide them. Members are set on
       // them instead: a method lives on the prototype, so an own property of
@@ -373,6 +380,9 @@ enum ExtensionShims {
         }
         for (const sub of ["local", "sync", "session", "managed"]) { try { if (ns[sub] && typeof ns[sub] === "object") kept.add(ns[sub]); } catch (e) {} }
       }
+      // Capture the fixed namespace, not an earlier wrapper the loop may
+      // have replaced: methods set on that earlier object are never called.
+      const runtime = chrome.runtime;
       const withLastError = (error, callback) => {
         put(runtime, "lastError", { message: String(error && error.message || error) });
         try { callback(); } finally { try { delete runtime.lastError; } catch (e) {} }
@@ -903,7 +913,8 @@ enum ExtensionShims {
           if (message && (message.__searchUserScript === true || message.__searchToFrame) && !fromHere) return;
           if (message && message.__searchUserScript === true) {
             const route = root.__searchUserScriptMessage;
-            return route && route(message.message, sender, sendResponse) && !settled ? true : undefined;
+            const bridge = sender.url === runtime.getURL("_search/user-script-host.html");
+            return route && route(message.message, bridge && message.__searchUserSender || sender, sendResponse) && !settled ? true : undefined;
           }
           // A tab's message, handed on by the worker (see alsoFramed): taken
           // by the frame it names, in the tab it names; every other page lets
@@ -1721,6 +1732,18 @@ enum ExtensionShims {
         ContextType: { TAB: "TAB", POPUP: "POPUP", BACKGROUND: "BACKGROUND", OFFSCREEN_DOCUMENT: "OFFSCREEN_DOCUMENT",
           SIDE_PANEL: "SIDE_PANEL", DEVELOPER_TOOLS: "DEVELOPER_TOOLS" },
       });
+      // Older WebKit bindings mistake Chrome's optional third callback for
+      // the alarm info dictionary. Keep the native scheduler, and settle the
+      // Chrome callback from its promise instead.
+      if (chrome.alarms && typeof chrome.alarms.create === "function") {
+        const alarms = chrome.alarms, create = alarms.create.bind(alarms);
+        put(alarms, "create", (...args) => {
+          const callback = typeof args[args.length - 1] === "function" ? args.pop() : null;
+          const promise = Promise.resolve().then(() => create(...args));
+          if (!callback) return promise;
+          promise.then(() => callback(), error => withLastError(error, callback));
+        });
+      }
       // The popup Search shows is a page of its own, known to WebKit as a
       // tab with no place in the row (no index). Chrome has no current
       // tab in a popup, and lists it among the popup views; extensions lay
@@ -2456,14 +2479,9 @@ enum ExtensionShims {
         }));
       }
 
-      // chrome.userScripts — what Tampermonkey, Violentmonkey and the
-      // advanced rules of the ad blockers run on — carried out through
-      // WebKit's registered content scripts. The browser writes each script
-      // into a file of the extension's (content scripts come from files),
-      // wrapped so the globs Chrome takes are honoured and, for Chrome's
-      // USER_SCRIPT world, so its messages reach onUserScriptMessage rather
-      // than the extension's own onMessage. The list lives with the browser,
-      // and is registered again whenever the worker starts.
+      // User scripts live in browser-owned WKContentWorlds. Registering them
+      // as ordinary extension content scripts would inherit extension CSP,
+      // expose extension privileges, and hide runtime from new Function().
       const scripting = chrome.scripting;
       // What an extension registers for a page's own world has Search's
       // passkey patch before it, as its manifest's do (see prepare): a
@@ -2483,70 +2501,40 @@ enum ExtensionShims {
           }
         }
       }
-      const wantsUserScripts = (() => { try { return (runtime.getManifest().permissions || []).includes("userScripts"); } catch (e) { return false; } })();
-      if (!chrome.userScripts && wantsUserScripts && scripting && typeof scripting.registerContentScripts === "function") {
-        const tag = "search-us-";
-        const content = async (script) => ({
-          id: tag + script.id,
-          matches: script.matches && script.matches.length ? script.matches : ["*://*/*"],
-          excludeMatches: script.excludeMatches || [],
-          js: [await native("userScripts.file", [script])],
-          runAt: script.runAt || "document_idle",
-          allFrames: !!script.allFrames,
-          world: script.world === "MAIN" ? "MAIN" : "ISOLATED",
-          persistAcrossSessions: false,
-        });
-        const registered = async () => (await scripting.getRegisteredContentScripts()).filter((s) => s.id.startsWith(tag));
-        const list = () => native("userScripts.list", []).then((l) => l || []);
-        const save = (l) => native("userScripts.save", [l]);
-        const sync = async () => {
-          const want = await list();
-          const have = new Set((await registered()).map((s) => s.id));
-          const missing = want.filter((s) => !have.has(tag + s.id));
-          if (!missing.length) return;
-          const scripts = await Promise.all(missing.map(content));
-          // Two starts of the worker racing each other: the later one takes
-          // the registration over.
-          await scripting.registerContentScripts(scripts).catch(async (e) => {
-            if (!/duplicate/i.test(String(e && e.message))) throw e;
-            await scripting.unregisterContentScripts({ ids: scripts.map((s) => s.id) }).catch(() => {});
-            await scripting.registerContentScripts(scripts);
-          });
+      const wantsUserScripts = (() => { try { const m = runtime.getManifest(); return [...(m.permissions || []), ...(m.optional_permissions || [])].includes("userScripts"); } catch (e) { return false; } })();
+      if (!chrome.userScripts && wantsUserScripts) {
+        // MainWorldOnly native methods are JSClass dynamic properties:
+        // WebKit reads them before ordinary own properties, so an override
+        // written with defineProperty is ignored. Keep the real `browser`
+        // namespace for WebKit's native event lookup and give Chrome code
+        // a runtime view whose other methods/events still use native objects.
+        const reload = () => { void native("runtime.reload", []).catch(error => console.error(error)); };
+        const functions = new WeakMap();
+        const runtimeView = new Proxy(runtime, { get(target, key) {
+          if (key === "reload") return reload;
+          const value = Reflect.get(target, key, target);
+          if (typeof value !== "function") return value;
+          if (!functions.has(value)) functions.set(value, value.bind(target));
+          return functions.get(value);
+        } });
+        root.chrome = new Proxy(chrome, { get(target, key) { return key === "runtime" ? runtimeView : Reflect.get(target, key, target); } });
+        if (__SEARCH_VERBOSE__) root.__searchUserScriptRuntimeInstall = {
+          installed: root.chrome.runtime.reload === reload,
+          reload: String(root.chrome.runtime.reload),
+          browserReload: String(root.browser?.runtime?.reload),
+          nativeEvents: root.chrome.runtime.onMessage === runtime.onMessage,
         };
-        const pick = (filter, l) => filter && Array.isArray(filter.ids) ? l.filter((s) => filter.ids.includes(s.id)) : l;
         const api = {
-          register: async (scripts) => {
-            const l = await list();
-            for (const s of scripts) if (l.some((o) => o.id === s.id)) throw new Error("Duplicate script id '" + s.id + "'");
-            await scripting.registerContentScripts(await Promise.all(scripts.map(content)));
-            await save([...l, ...scripts]);
-          },
-          update: async (scripts) => {
-            const l = await list();
-            const merged = scripts.map((s) => {
-              const old = l.find((o) => o.id === s.id);
-              if (!old) throw new Error("Script with id '" + s.id + "' does not exist");
-              return { ...old, ...s };
-            });
-            await scripting.unregisterContentScripts({ ids: merged.map((s) => tag + s.id) }).catch(() => {});
-            await scripting.registerContentScripts(await Promise.all(merged.map(content)));
-            await save(l.map((o) => merged.find((m) => m.id === o.id) || o));
-          },
-          unregister: async (filter) => {
-            const l = await list();
-            const gone = pick(filter, l);
-            const ids = (await registered()).map((s) => s.id).filter((id) => gone.some((g) => tag + g.id === id));
-            if (ids.length) await scripting.unregisterContentScripts({ ids });
-            await save(l.filter((o) => !gone.includes(o)));
-          },
-          getScripts: async (filter) => pick(filter, await list()),
+          register: (scripts) => native("userScripts.register", [scripts]),
+          update: (scripts) => native("userScripts.update", [scripts]),
+          unregister: (filter) => native("userScripts.unregister", [filter || {}]),
+          getScripts: (filter) => native("userScripts.list", [filter || {}]),
           configureWorld: (properties) => native("userScripts.world", [properties || {}]),
           getWorldConfigurations: () => native("userScripts.worlds", []),
           resetWorldConfiguration: (worldId) => native("userScripts.world", [{ worldId, reset: true }]),
           execute: async (injection) => {
-            const file = await native("userScripts.file", [{ id: "execute-" + Date.now(), js: injection.js || [], world: injection.world }]);
-            return scripting.executeScript({ target: injection.target, files: [file], world: injection.world === "MAIN" ? "MAIN" : "ISOLATED",
-              injectImmediately: !!injection.injectImmediately });
+            const tab = await chrome.tabs.get(injection.target.tabId);
+            return native("userScripts.execute", [{ ...injection, place: placeOf(tab, await frames()) }]);
           },
         };
         const callbacks = Object.fromEntries(Object.entries(api).map(([k, f]) => [k, (...args) => {
@@ -2556,8 +2544,6 @@ enum ExtensionShims {
           p.then((v) => callback(v), (e) => withLastError(e, callback));
         }]));
         put2("userScripts", { ...callbacks, ExecutionWorld: { MAIN: "MAIN", USER_SCRIPT: "USER_SCRIPT" } });
-        if (background) sync().catch((e) => { try { native("debug.error", ["userScripts: " + e.message]).catch(() => {}); } catch (x) {} });
-
         // Messages from the USER_SCRIPT world come tagged (see the file's
         // wrapper); they go to onUserScriptMessage and onUserScriptConnect.
         const onMessage = runtime.onUserScriptMessage, onConnect = runtime.onUserScriptConnect;
@@ -2570,6 +2556,7 @@ enum ExtensionShims {
           }
           return keep;
         };
+        runtime.onMessage.addListener(() => undefined);
         if (runtime.onConnect && typeof runtime.onConnect.addListener === "function") {
           const marker = "search-us:";
           const add = runtime.onConnect.addListener.bind(runtime.onConnect);
@@ -2578,8 +2565,22 @@ enum ExtensionShims {
           try {
             add((port) => {
               if (!String(port.name).startsWith(marker)) return;
-              const view = Object.create(port, { name: { value: port.name.slice(marker.length) } });
-              for (const f of [...onConnect.listeners]) f(view);
+              // This listener was installed before the ordinary onConnect
+              // wrapper below. Apply its own-page numbering here too, so a
+              // native bridge handshake is unwrapped and delivered once.
+              if (typeof runtime.__searchNumberPort === "function") port = runtime.__searchNumberPort(port);
+              const publish = (sender) => {
+                const view = Object.create(port, { name: { value: port.name.slice(marker.length) }, sender: { value: sender } });
+                for (const f of [...onConnect.listeners]) f(view);
+              };
+              if (port.sender && port.sender.url === runtime.getURL("_search/user-script-host.html")) {
+                const handshake = (message) => {
+                  port.onMessage.removeListener(handshake);
+                  if (!message || message.__searchUserHandshake !== true || !message.sender || message.sender.id !== runtime.id) return port.disconnect();
+                  publish(message.sender);
+                };
+                port.onMessage.addListener(handshake);
+              } else publish(port.sender);
             });
           } catch (e) {}
           put(runtime.onConnect, "addListener", (listener) => {
@@ -2697,6 +2698,7 @@ enum ExtensionShims {
           set(event, "hasListeners", () => listeners.size > 0);
           return port;
         };
+        put(runtime, "__searchNumberPort", number);
         const connect = runtime.connect;
         // Only a port to the extension itself, and never a content script's:
         // another extension would hear the numbered wrapper, not the message,
@@ -3389,9 +3391,19 @@ enum ExtensionShims {
     }
 
     private static func run(_ api: String, _ args: [Any], context: WKWebExtensionContext, owner: Extensions) async throws -> Any? {
+        let id = context.uniqueIdentifier
+        if api == "permissions.userScriptsAllowed" { return Extensions.userScriptsAllowed(id) }
+        if api == "runtime.reload" { owner.reloadRuntime(context); return nil }
+        // Enforced at the native boundary as well as during registration:
+        // extension code can call the bridge without going through our shim.
+        if api.hasPrefix("userScripts."), !Extensions.userScriptsAllowed(id) {
+            throw Unsupported(what: L10n.text("extensions.userScripts.disabled"))
+        }
+        if ["userScripts.register", "userScripts.update", "userScripts.unregister", "userScripts.list", "userScripts.world", "userScripts.worlds"].contains(api) {
+            return try await ExtensionUserScripts.call(api, args: args, context: context)
+        }
         guard let browser = owner.browser else { throw Unsupported(what: "No browser window") }
         let first = args.first
-        let id = context.uniqueIdentifier
 
         if api.hasPrefix("setting.") {
             // A browser setting (chrome.privacy…) belongs to the family its
@@ -3539,8 +3551,14 @@ enum ExtensionShims {
                 browser.namedDownloads[url] = (name as NSString).lastPathComponent
             }
             ExtensionShims.askedDownloads[url] = id
-            let download = await web.startDownload(using: URLRequest(url: url))
-            browser.keep(download)
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                web.startDownload(using: URLRequest(url: url)) { download in
+                    // WebKit needs the delegate before this callback returns,
+                    // while the async overload resumes the actor afterwards.
+                    browser.keep(download, from: web)
+                    continuation.resume()
+                }
+            }
             return browser.loot.kept.count + 1
         case "downloads.search":
             return browser.loot.kept.enumerated().map { index, keep in
@@ -3682,6 +3700,12 @@ enum ExtensionShims {
             let named = first as? String
             let options = (named == nil ? first : (args.count > 1 ? args[1] : nil)) as? [String: Any] ?? [:]
             let key = named ?? UUID().uuidString
+            // Command-line XCTest has no application bundle for macOS's
+            // notification center. Match the website notification test policy.
+            if Store.testing {
+                NSLog("Extensions test notification %@: %@ — %@", id, options["title"] as? String ?? "", options["message"] as? String ?? "")
+                return key
+            }
             let center = UNUserNotificationCenter.current()
             _ = try? await center.requestAuthorization(options: [.alert, .sound])
             let content = UNMutableNotificationContent()
@@ -3691,7 +3715,7 @@ enum ExtensionShims {
             try? await center.add(UNNotificationRequest(identifier: "\(id).\(key)", content: content, trigger: nil))
             return key
         case "notifications.clear":
-            if let key = first as? String {
+            if !Store.testing, let key = first as? String {
                 UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["\(id).\(key)"])
             }
             return true
@@ -3799,36 +3823,9 @@ enum ExtensionShims {
         // MARK: script injection and user scripts
         case "scripting.file":
             return try scriptingFile(first as? String ?? "", arguments: args.dropFirst().first as? [Any] ?? [], in: Extensions.folder(for: id))
-        case "userScripts.file":
-            return try userScriptFile(first as? [String: Any] ?? [:], in: Extensions.folder(for: id))
-        case "userScripts.list":
-            return (try? JSONSerialization.jsonObject(with: Data(contentsOf: Extensions.folder(for: id).appendingPathComponent("_search/userscripts.json")))) ?? []
-        case "userScripts.save":
-            let folder = Extensions.folder(for: id).appendingPathComponent("_search", isDirectory: true)
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let scripts = first as? [[String: Any]] ?? []
-            try JSONSerialization.data(withJSONObject: scripts).write(to: folder.appendingPathComponent("userscripts.json"), options: .atomic)
-            // Files no saved script is written in any more, once a moment
-            // has passed — one being injected right now is left alone.
-            let keep = Set(scripts.compactMap { try? userScriptFile($0, in: Extensions.folder(for: id)) }.map { URL(fileURLWithPath: $0).lastPathComponent })
-            for file in (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-            where file.lastPathComponent.hasPrefix("us-") && !keep.contains(file.lastPathComponent) {
-                let age = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate).map { -$0.timeIntervalSinceNow } ?? 999
-                if age > 60 { try? FileManager.default.removeItem(at: file) }
-            }
-            return nil
-        case "userScripts.world", "userScripts.worlds":
-            let url = Extensions.folder(for: id).appendingPathComponent("_search/worlds.json")
-            var worlds = (try? JSONSerialization.jsonObject(with: Data(contentsOf: url))) as? [[String: Any]] ?? []
-            if api == "userScripts.worlds" { return worlds }
-            let props = first as? [String: Any] ?? [:]
-            let world = props["worldId"] as? String ?? ""
-            worlds.removeAll { ($0["worldId"] as? String ?? "") == world }
-            if props["reset"] as? Bool != true { worlds.append(props) }
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try JSONSerialization.data(withJSONObject: worlds).write(to: url, options: .atomic)
-            return nil
-
+        case "userScripts.execute":
+            guard let injection = first as? [String: Any], let tab = located(injection["place"], owner: owner) else { throw Unsupported(what: "Unknown user-script tab") }
+            return try await ExtensionUserScripts.execute(injection, tab: tab, context: context)
         // MARK: permissions Search grants itself
         case "permissions.granted":
             return Store.settings.stringArray(forKey: "extensions.granted.\(id)") ?? []
@@ -4133,59 +4130,6 @@ enum ExtensionShims {
             let age = (try? old.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate).map { -$0.timeIntervalSinceNow } ?? 0
             if age > 60 { try? FileManager.default.removeItem(at: old) }
         }
-        return "_search/" + name
-    }
-
-    /// A user script as a file WebKit can inject: its code — inline, or read
-    /// from the extension's own files — inside a block that leaves at once
-    /// on a page its globs rule out and, for Chrome's USER_SCRIPT world,
-    /// gives the code a `chrome` whose messages are marked as a user
-    /// script's. Named by what is in it, so a changed script is a new file
-    /// and never a stale one WebKit has already read.
-    static func userScriptFile(_ script: [String: Any], in folder: URL) throws -> String {
-        let json = { (value: Any) in
-            (try? JSONSerialization.data(withJSONObject: value)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        }
-        var code = ""
-        for source in script["js"] as? [[String: Any]] ?? [] {
-            if let inline = source["code"] as? String {
-                code += inline + "\n;\n"
-            } else if let file = source["file"] as? String,
-                      // One of the extension's own files, and nothing outside
-                      // its folder: a name is resolved before it is read.
-                      let path = inside(file, of: folder),
-                      let text = try? String(contentsOf: path, encoding: .utf8) {
-                code += text + "\n;\n"
-            }
-        }
-        let userWorld = (script["world"] as? String) != "MAIN"
-        let prelude = #"""
-          const chrome = (() => {
-            const runtime = globalThis.chrome.runtime;
-            return { runtime: {
-              id: runtime.id, getURL: (path) => runtime.getURL(path), get lastError() { return runtime.lastError; },
-              sendMessage: (message, ...rest) => runtime.sendMessage({ __searchUserScript: true, message }, ...rest.filter((r) => typeof r === "function" || (r && typeof r === "object"))),
-              connect: (info) => runtime.connect({ ...(info || {}), name: "search-us:" + ((info && info.name) || "") }),
-            } };
-          })();
-          const browser = chrome;
-        """#
-        let text = #"""
-        /* Search: a user script (chrome.userScripts) */
-        search_user_script: {
-          const __searchHref = location.href;
-          const __searchGlob = (g) => new RegExp("^" + g.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
-          const __searchIn = \#(json(script["includeGlobs"] ?? [])), __searchOut = \#(json(script["excludeGlobs"] ?? []));
-          if ((__searchIn.length && !__searchIn.some((g) => __searchGlob(g).test(__searchHref))) || __searchOut.some((g) => __searchGlob(g).test(__searchHref))) break search_user_script;
-        \#(userWorld ? prelude : "")
-        \#(code)
-        }
-        """#
-        let name = "us-" + SHA256.hash(data: Data(text.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() + ".js"
-        let dir = folder.appendingPathComponent("_search", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent(name)
-        if !FileManager.default.fileExists(atPath: url.path) { try text.write(to: url, atomically: true, encoding: .utf8) }
         return "_search/" + name
     }
 

@@ -2,9 +2,9 @@ name: Windows x64
 on:
   push:
     branches: ['**']
-    paths: ['Windows/**', '.github/workflows/windows.yml', 'VERSION', 'Sources/SearcheXtra/Resources/AppIcon.png']
+    paths: ['Windows/**', 'Tests/ExtensionUserScriptsWindowsTests.mjs', 'Tests/FlowDragTests.mjs', 'Tests/AutoScrollWindowsTests.mjs', '.github/workflows/windows.yml', 'VERSION', 'Sources/SearcheXtra/Resources/**']
   pull_request:
-    paths: ['Windows/**', '.github/workflows/windows.yml', 'VERSION', 'Sources/SearcheXtra/Resources/AppIcon.png']
+    paths: ['Windows/**', 'Tests/ExtensionUserScriptsWindowsTests.mjs', 'Tests/FlowDragTests.mjs', 'Tests/AutoScrollWindowsTests.mjs', '.github/workflows/windows.yml', 'VERSION', 'Sources/SearcheXtra/Resources/**']
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -24,6 +24,12 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Test MV3 user-script bootstrap
+        run: node Tests/ExtensionUserScriptsWindowsTests.mjs
+      - name: Test shared drag gestures
+        run: |
+          node Tests/FlowDragTests.mjs
+          node Tests/AutoScrollWindowsTests.mjs
       - name: Prepare installer compiler
         shell: pwsh
         run: |

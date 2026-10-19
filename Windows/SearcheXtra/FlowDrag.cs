@@ -16,8 +16,9 @@ public sealed class FlowDragConfig
     public void Validate()
     {
         if(!double.IsFinite(DistanceThreshold)||DistanceThreshold is <1 or >200||Rules==null||ExcludedSites==null||Rules.Count>200)throw new FormatException();
-        foreach(var r in Rules)if(r==null||!FlowDrag.Objects.Contains(r.Object)||!FlowDrag.ValidPattern(r.Pattern)||!FlowDrag.Actions(r.Object).Contains(r.Action)||!FlowDrag.Positions.Contains(r.Position)||!FlowDrag.Engines.Contains(r.Engine)||r.Engine=="custom"&&(!r.Url.Contains("%s")||!AddressParser.IsWeb(r.Url.Replace("%s","x")))||r.Subdir.Split(['/','\\']).Any(p=>p is "." or "..")||Path.IsPathRooted(r.Subdir)||r.Subdir.Contains(':'))throw new FormatException();
+        foreach(var r in Rules)if(r==null||r.Url==null||r.Subdir==null||!FlowDrag.Objects.Contains(r.Object)||!FlowDrag.ValidPattern(r.Pattern)||!FlowDrag.Actions(r.Object).Contains(r.Action)||!FlowDrag.Positions.Contains(r.Position)||!FlowDrag.Engines.Contains(r.Engine)||r.Engine=="custom"&&(!r.Url.Contains("%s")||!AddressParser.IsWeb(r.Url.Replace("%s","x")))||r.Subdir.Split(['/','\\']).Any(p=>p is "." or "..")||Path.IsPathRooted(r.Subdir)||r.Subdir.Contains(':'))throw new FormatException();
         if(Rules.GroupBy(r=>(r.Object,r.Pattern)).Any(g=>g.Count()>1))throw new FormatException();
+        if(ExcludedSites.Any(h=>h==null))throw new FormatException();
         ExcludedSites=ExcludedSites.Select(h=>h.Trim().TrimStart('.').ToLowerInvariant()).Where(h=>h.Length>0).Distinct().ToList();
         if(ExcludedSites.Any(h=>Uri.CheckHostName(h)==UriHostNameType.Unknown))throw new FormatException();
     }
@@ -29,7 +30,7 @@ public static class FlowDrag
     public static readonly string[] Objects=["text","link","image"],Positions=["current","left","right","first","last"],Engines=["system","baidu","google","google_translate","bing","bing_translate","360","sogou","duckduckgo","yahoo","yahoo_jp","naver","seznam","tineye","yandex","saucenao","iqdb","trace","custom"];
     public static string[] EnginesFor(string type)=>type=="image"?["system","google","bing","tineye","yandex","saucenao","iqdb","trace","custom"]:Engines.Where(e=>!new[]{"tineye","saucenao","iqdb","trace"}.Contains(e)).ToArray();
     public static string[] Actions(string type)=>type switch {"text"=>["none","search","copy"],"link"=>["none","openTab","copyLink","copyLinkText","copyLinkAndText","bookmarkLink"],_=>["none","openImage","openLink","copyImageUrl","saveImage","imageSearch"]};
-    public static bool ValidPattern(string value)=>value=="*"||value.Length is >0 and <=32&&value.All(c=>"↑↓←→".Contains(c));
+    public static bool ValidPattern(string? value)=>value=="*"||value!=null&&value.Length is >0 and <=32&&value.All(c=>"↑↓←→".Contains(c));
     public static bool EnabledOn(FlowDragConfig c,string page,string type)=>c.Enabled&&Objects.Contains(type)&&(type=="text"?c.EnableText:type=="link"?c.EnableLink:c.EnableImage)&&AddressParser.IsWeb(page)&&!c.ExcludedSites.Any(h=>new Uri(page).Host.Equals(h,StringComparison.OrdinalIgnoreCase)||new Uri(page).Host.EndsWith("."+h,StringComparison.OrdinalIgnoreCase));
     public static FlowDragRule? Resolve(FlowDragConfig c,FlowDragRequest p)=>EnabledOn(c,p.PageUrl,p.Object)&&ValidPattern(p.Pattern)?c.Rules.FirstOrDefault(r=>r.Object==p.Object&&r.Pattern==p.Pattern)??c.Rules.FirstOrDefault(r=>r.Object==p.Object&&r.Pattern=="*"):null;
     public static string Template(string engine,string current,string custom,bool image=false)=>engine switch {
@@ -40,6 +41,14 @@ public static class FlowDrag
         _=>image?"https://lens.google.com/uploadbyurl?url=%s":current};
     public static string Search(string text,string template)=>template.Replace("%s",Uri.EscapeDataString(text)).Replace("{0}",Uri.EscapeDataString(text));
     public static FlowDragConfig Import(string text)
+    {
+        try { return ImportCore(text); }
+        catch (Exception error) when (error is InvalidOperationException or KeyNotFoundException)
+        {
+            throw new FormatException("Invalid drag configuration.", error);
+        }
+    }
+    private static FlowDragConfig ImportCore(string text)
     {
         using var doc=JsonDocument.Parse(text);var root=doc.RootElement;
         if(!root.TryGetProperty("textDragGestures",out _))return JsonSerializer.Deserialize<FlowDragConfig>(text,Json)??throw new FormatException();

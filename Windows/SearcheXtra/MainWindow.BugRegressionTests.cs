@@ -77,4 +77,79 @@ public sealed partial class MainWindow
         Settings.IconGlyphs = previousGlyphs;
         ApplySettings();
     }
+
+    private async Task VerifyResourceRegressionsAsync(string fixture, Action<bool, string> check)
+    {
+        var previousDownloads = store.Downloads;
+        var previousBlocking = Settings.BlockTrackers;
+        var original = active;
+        var viewTab = AddTab(fixture + "resource-test", false);
+        async Task Wait(Func<bool> predicate)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (!predicate())
+            {
+                if (DateTime.UtcNow > deadline) throw new TimeoutException("Resource regression timed out");
+                await Task.Delay(25);
+            }
+        }
+        try
+        {
+            var first = new DownloadRecord("first-download.txt", fixture + "first-download", DateTimeOffset.Now);
+            var incoming = new DownloadRecord("incoming-download.txt", fixture + "incoming-download", DateTimeOffset.Now);
+            store.Downloads = [first];
+            var downloadsPanel = ShowDownloadsAsync();
+            try
+            {
+                Root.UpdateLayout();
+                var history = FindAddressPart<ListView>(OverlayLayer, "DownloadHistoryList")!;
+                history.SelectedIndex = 0;
+                store.Downloads.Insert(0, incoming);
+                var forget = FindButtons(OverlayLayer).Single(button => Equals(button.Content, T("Forget record", "删除记录")));
+                ((IInvokeProvider)new ButtonAutomationPeer(forget).GetPattern(PatternInterface.Invoke)).Invoke();
+                check(store.Downloads.SequenceEqual(new[] { incoming }),
+                    "Deleting a displayed download retains a newer download added while the panel was open");
+            }
+            finally { DismissOverlay(); await downloadsPanel; }
+
+            await SelectAsync(viewTab);
+            var page = views[viewTab.Id];
+            await Wait(() => !viewTab.Loading);
+            var requests = 0;
+            void Requested(Microsoft.Web.WebView2.Core.CoreWebView2 sender, Microsoft.Web.WebView2.Core.CoreWebView2WebResourceRequestedEventArgs args) => requests++;
+            page.Control.CoreWebView2.WebResourceRequested += Requested;
+            try
+            {
+                foreach (var enabled in new[] { false, true })
+                {
+                    Settings.BlockTrackers = enabled; page.ApplySettings(); requests = 0;
+                    var address = fixture + "resource-test-" + enabled;
+                    page.Navigate(address);
+                    await Wait(() => !viewTab.Loading && page.Control.CoreWebView2.Source == address);
+                    check(enabled ? requests > 0 : requests == 0,
+                        enabled ? "Enabling tracker blocking restores native request filtering" : "Disabled tracker blocking avoids native request callbacks entirely");
+                }
+            }
+            finally { page.Control.CoreWebView2.WebResourceRequested -= Requested; }
+
+            var secondary = App.NewWindow();
+            var pendingPanel = secondary.ShowDownloadsAsync();
+            secondary.Close();
+            await pendingPanel.WaitAsync(TimeSpan.FromSeconds(10));
+            check(pendingPanel.IsCompletedSuccessfully, "Closing a window completes its downloads panel and releases its refresh timer");
+        }
+        finally
+        {
+            DismissOverlay(); store.Downloads = previousDownloads; Settings.BlockTrackers = previousBlocking;
+            if (original != null && tabs.Contains(original)) await SelectAsync(original);
+            CloseTab(viewTab); ApplySettings();
+        }
+
+        static IEnumerable<Button> FindButtons(DependencyObject root)
+        {
+            if (root is Button button) yield return button;
+            for (var index = 0; index < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root); index++)
+                foreach (var child in FindButtons(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, index))) yield return child;
+        }
+    }
 }

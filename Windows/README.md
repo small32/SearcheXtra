@@ -6,7 +6,7 @@ Windows 版使用 C# / .NET 8、WinUI 3 和 WebView2，与 macOS 的 Swift 源�
 
 - **仅支持 Windows 10 1809（build 17763）及更新版本，包含 Windows 11。**
 - **仅支持 x86_64 / x64 系统。** 不提供 x86 或 ARM64 构建；启动时检查系统架构。
-- 推荐运行 `SearcheXtra-2.1.1-win-x64-setup.exe` 安装。安装器检测 .NET 8 x64、Windows App SDK 1.8 x64 和 WebView2；缺失时从微软下载并安装，已有兼容版本会跳过。补装 .NET 时需要管理员权限和网络。
+- 推荐运行 `SearcheXtra-2.2.0-win-x64-setup.exe` 安装。安装器检测 .NET 8 x64、Windows App SDK 1.8 x64 和 WebView2；缺失时从微软下载并安装，已有兼容版本会跳过。补装 .NET 时需要管理员权限和网络。
 - ZIP 为依赖系统运行库的便携包，需先安装上述运行库；解压整个目录后运行 `SearcheXtra.exe`。
 - 应用目录不携带 .NET 或 Windows App SDK 运行库，只保留必要的托管接口、部署引导库与应用依赖。共享运行库不会随卸载应用而删除。
 - 此本地构建未作代码签名。
@@ -63,6 +63,20 @@ $env:SEARCHEXTRA_TEST_MV2_PACKAGE = 'C:\path\to\uBlock0_1.75.0.chromium.zip'
 Remove-Item Env:SEARCHEXTRA_TEST_MV2_PACKAGE
 ```
 
+### 用户脚本 / User scripts
+
+声明必需或可选 `userScripts` 权限的 MV3 扩展，在“设置 → 扩展 → 扩展管理 → 详情”中提供“允许用户脚本”开关，默认关闭。更改后会重新加载扩展；请刷新已打开的网页。macOS 提供相同入口与授权行为。
+
+MV3 extensions declaring required or optional `userScripts` have an “Allow user scripts” switch under Settings → Extensions → Manage extensions → Details. It defaults to off. Changing it reloads the extension; refresh open webpages afterward. macOS provides the same control and authorization behavior.
+
+Windows 保留 WebView2，通过应用提供的 `userScripts` 适配器保存脚本注册、配置独立执行环境并转发扩展消息；macOS 使用独立的 WebKit 内容世界。脚本仍受扩展的网站访问权限约束，页面无法通过此接口直接取得扩展存储、标签页或本机消息权限。MV2 扩展继续走原有原生加载路径；适配器不会把 MV2 清单改写为 MV3。
+
+Windows retains WebView2 and supplies a `userScripts` adapter for persisted registrations, separate execution worlds, and extension messaging. macOS uses separate WebKit content worlds. Scripts remain subject to the extension's website permissions; the interface does not directly expose extension storage, tabs, or native messaging to websites. MV2 extensions retain their native loading path and manifest version.
+
+自定义执行环境目前支持默认策略和 ScriptCat 使用的脚本策略；其他自定义 CSP 会明确报错。此兼容层针对用户脚本 API，不代表支持所有 Chrome 扩展 API。
+
+Custom execution worlds currently support the default policy and ScriptCat's script policy; other custom CSPs are rejected explicitly. This compatibility layer implements user-script APIs and does not imply support for every Chrome extension API.
+
 ## 快捷键
 
 | 操作 | 快捷键 |
@@ -94,8 +108,8 @@ Remove-Item Env:SEARCHEXTRA_TEST_MV2_PACKAGE
 
 ```text
 Windows/artifacts/win-x64/SearcheXtra.exe
-Windows/artifacts/SearcheXtra-2.1.1-win-x64.zip
-Windows/artifacts/SearcheXtra-2.1.1-win-x64-setup.exe
+Windows/artifacts/SearcheXtra-2.2.0-win-x64.zip
+Windows/artifacts/SearcheXtra-2.2.0-win-x64-setup.exe
 Windows/artifacts/SHA256SUMS.txt
 ```
 
@@ -108,6 +122,10 @@ Windows/artifacts/SHA256SUMS.txt
 模型测试：`dotnet run --project Windows/Tests/Tests.csproj -c Release`。
 
 真实 WebView2 集成测试：设置 `SEARCHEXTRA_DATA_DIR` 为独立测试目录，`SEARCHEXTRA_SMOKE_TEST` 为 JSON 报告路径，再启动应用。测试使用本机临时 HTTP 服务器，检查导航、三种书签打开方式、按需加载、状态保留、分屏、挂起与无痕隔离，完成后自动关闭。不要把该环境变量用于普通浏览。
+
+原版 ScriptCat MV3 集成测试：将 `SEARCHEXTRA_MV3_TEST_ONLY` 设为 `1`，`SEARCHEXTRA_TEST_MV3_FOLDER` 设为原版扩展 ZIP 或目录，然后运行 `Windows/test-ui.ps1 -Executable <构建后的 SearcheXtra.exe>`。测试会复制扩展到独立测试目录，验证授权、真实脚本执行、GM 存储与网络请求、扩展重载，以及与 MV2 扩展共存。测试结束后清除这两个环境变量。
+
+For original ScriptCat MV3 integration tests, set `SEARCHEXTRA_MV3_TEST_ONLY=1` and `SEARCHEXTRA_TEST_MV3_FOLDER` to its original ZIP or folder, then run `Windows/test-ui.ps1 -Executable <built SearcheXtra.exe>`. The fixture is copied into an isolated test directory. Tests cover permission, real script execution, GM storage and networking, extension reload, and MV2 coexistence. Clear both environment variables afterward.
 
 Win10 最低版本及不同 Runtime 的兼容性仍需对应机器验证；本机成功构建和运行不等于已经完成所有支持系统的验收。
 

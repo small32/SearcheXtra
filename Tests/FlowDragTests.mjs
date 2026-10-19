@@ -186,3 +186,16 @@ handlers.get('dragover')(event(blank,150,100));
 assert.equal(previews().length,0,'Native fallback drags retain the system preview without a duplicate overlay');
 assert.equal(nativeStart.defaultPrevented,false,'Native drag preview is not canceled');handlers.get('dragend')();
 console.log('PASS: pointer content previews for text, selected links, link URLs and image thumbnails, independent hint settings, positioning, no-action directions and cleanup; native preview retained');
+
+ctx.window.__sxFlowDrag.configure({config,labels:{},pointerDrag:true});
+selectWords('navigating frame');hold(text);preview();
+handlers.get('pagehide')({persisted:true});
+assert.equal(previews().length,0,'Leaving a frame removes drag DOM before entering the back-forward cache');
+assert.ok(messages.some(message=>message.phase==='cancel'),'Leaving a frame cancels its pending native action');
+const gone=messages.find(message=>message.phase==='gone');assert.ok(gone?.id,'Native host can release the exact departing frame');
+handlers.get('pageshow')({persisted:false});
+assert.equal(messages.filter(message=>message.phase==='ready').length,0,'Initial pageshow does not duplicate document-start registration');
+handlers.get('pageshow')({persisted:true});
+assert.equal(messages.find(message=>message.phase==='ready')?.id,gone.id,'Restored frames register again using the same document identity');
+assert.equal(ctx.window.__sxFlowDrag.isDragging(),false,'A cached document cannot resume a canceled gesture');
+console.log('PASS: detached frame cleanup and back-forward cache restoration');

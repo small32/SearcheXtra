@@ -94,8 +94,9 @@ public sealed partial class MainWindow : Window
     private bool settingsRefreshPending;
     private void OnStoreChanged()
     {
-        if (settingsRefreshPending) return;
-        settingsRefreshPending = DispatcherQueue.TryEnqueue(() => { settingsRefreshPending = false; ApplySettings(); });
+        bookmarkIconOrigins = null;
+        if (closing || settingsRefreshPending) return;
+        settingsRefreshPending = DispatcherQueue.TryEnqueue(() => { settingsRefreshPending = false; if (!closing) ApplySettings(); });
     }
     private void ApplySettings()
     {
@@ -220,7 +221,13 @@ public sealed partial class MainWindow : Window
 
     private async Task LoadBackgroundAsync(BrowserTab tab)
     {
-        try { var view = await GetViewAsync(tab); view.Control.Visibility = Visibility.Collapsed; }
+        try
+        {
+            var view = await GetViewAsync(tab);
+            // Initialization can finish after this background tab was selected.
+            if (!view.IsDisposed && active != tab && tab != split && tab != splitOwner && view.FloatingWindow == null)
+                view.Control.Visibility = Visibility.Collapsed;
+        }
         catch (Exception e) { Status.Text = e.Message; }
     }
 
@@ -399,6 +406,8 @@ public sealed partial class MainWindow : Window
     private void Window_Closed(object sender, WindowEventArgs args)
     {
         closing = true; selectionVersion++;
+        // Complete pending panels so their finally blocks stop timers and close WebViews.
+        overlayClose?.Invoke();
         sleepTimer.Stop(); saveTimer.Stop(); store.Changed -= OnStoreChanged;
         benchCancellation?.Cancel(); benchCancellation?.Dispose(); benchCancellation = null;
         foreach (var view in views.Values) view.Dispose();

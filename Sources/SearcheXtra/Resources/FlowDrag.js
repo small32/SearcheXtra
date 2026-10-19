@@ -148,6 +148,10 @@ function sxInstallFlowDrag(options, send) {
   addEventListener('dragend',()=>{if(!opts.pointerDrag)cancel();},true);
   addEventListener('keydown',e=>{if(e.key==='Escape')cancel();},true);
   addEventListener('blur',e=>{if(e.target===window)cancel();},true);
+  const frameId=[...crypto.getRandomValues(new Uint32Array(4))].map(n=>n.toString(16)).join('-');
+  const announce=phase=>send({phase,id:frameId,object:'',text:'',linkUrl:'',imageUrl:'',linkText:'',pageUrl:location.href,pattern:''});
+  addEventListener('pagehide',()=>{cancel();announce('gone');},true);
+  addEventListener('pageshow',e=>{if(e.persisted)announce('ready');},true);
   window.__sxFlowDrag={configure(value){opts=value;if(!enabled())cancel();},isDragging(){return !!drag;}};
-  send({phase:'ready',id:'',object:'',text:'',linkUrl:'',imageUrl:'',linkText:'',pageUrl:location.href,pattern:''});
+  announce('ready');
 }

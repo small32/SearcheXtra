@@ -8,6 +8,20 @@ namespace SearcheXtra.Windows;
 
 public sealed partial class MainWindow
 {
+    private HashSet<string>? bookmarkIconOrigins;
+    private List<Bookmark>? bookmarkIconRoots;
+
+    private bool HasBookmarkIconOrigin(string page)
+    {
+        if (BookmarkIcons.OriginFor(page) is not { } origin) return false;
+        if (bookmarkIconOrigins == null || bookmarkIconRoots != store.Bookmarks)
+        {
+            bookmarkIconRoots = store.Bookmarks;
+            bookmarkIconOrigins = BookmarkImport.Flatten(store.Bookmarks).Select(node => BookmarkIcons.OriginFor(node.Url ?? "")).OfType<string>().ToHashSet();
+        }
+        return bookmarkIconOrigins.Contains(origin);
+    }
+
     private Grid BookmarkWebsiteIcon(string url, double size)
     {
         var mark = new Grid { Name = "BookmarkWebsiteIcon", Width = size, Height = size, VerticalAlignment = VerticalAlignment.Center };
@@ -47,7 +61,7 @@ public sealed partial class MainWindow
     private async Task AdoptBookmarkIconAsync(PageView view, BrowserTab tab)
     {
         var core = view.Control.CoreWebView2;
-        if (core == null || !AddressParser.IsWeb(core.Source) || string.IsNullOrEmpty(core.FaviconUri)) return;
+        if (core == null || !HasBookmarkIconOrigin(core.Source) || string.IsNullOrEmpty(core.FaviconUri)) return;
         var page = core.Source;
         var icon = core.FaviconUri;
         try {

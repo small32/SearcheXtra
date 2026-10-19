@@ -10,6 +10,14 @@ namespace SearcheXtra.Windows;
 
 public sealed partial class MainWindow
 {
+    private static async Task CloseTestFlyoutAsync(Microsoft.UI.Xaml.Controls.Primitives.FlyoutBase flyout)
+    {
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler<object> completed = (_, _) => closed.TrySetResult();
+        flyout.Closed += completed;
+        try { flyout.Hide(); await closed.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+        finally { flyout.Closed -= completed; }
+    }
     private async Task RunSmokeTestsAsync(string reportPath)
     {
         var checks = new List<string>();
@@ -63,6 +71,13 @@ public sealed partial class MainWindow
                 }
             });
             var fixture = $"http://127.0.0.1:{port}/";
+            if (Environment.GetEnvironmentVariable("SEARCHEXTRA_MV3_TEST_ONLY") == "1")
+            {
+                await Task.Delay(250);
+                await RunUserScriptTestsAsync(fixture, Check);
+                await File.WriteAllTextAsync(reportPath, JsonSerializer.Serialize(new { success = true, checks, measurements }));
+                return;
+            }
             if(Environment.GetEnvironmentVariable("SEARCHEXTRA_BOOKMARK_ICON_TEST_ONLY")=="1"){await Task.Delay(250);await VerifyBookmarkIconsAsync(Check);await VerifyBookmarkSiteIconAsync(Check);await File.WriteAllTextAsync(reportPath,JsonSerializer.Serialize(new{success=true,checks,measurements}));return;}
             if(Environment.GetEnvironmentVariable("SEARCHEXTRA_BOOKMARK_TEST_ONLY")=="1"){await Task.Delay(250);await VerifyBookmarkInteractionsAsync(fixture,Check);await File.WriteAllTextAsync(reportPath,JsonSerializer.Serialize(new{success=true,checks,measurements}));return;}
             if(Environment.GetEnvironmentVariable("SEARCHEXTRA_FLOW_DRAG_TEST_ONLY")=="1"){await Task.Delay(250);await VerifyFlowDragAsync(fixture,Check);await File.WriteAllTextAsync(reportPath,JsonSerializer.Serialize(new{success=true,checks,measurements}));return;}
@@ -83,9 +98,10 @@ public sealed partial class MainWindow
             Check(ReopenButton.IsEnabled, "History menu is available without closed tabs");
             ShowRecentHistory();
             var emptyHistoryMenu = (Microsoft.UI.Xaml.Controls.MenuFlyout)ReopenButton.Tag;
+            await Wait(() => emptyHistoryMenu.IsOpen);
             Check(emptyHistoryMenu.Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutItem>().Any(item => item.IsEnabled && item.Text == T("Open history", "打开历史记录")),
                 "Empty closed-tab list still offers the full history entry");
-            emptyHistoryMenu.Hide();
+            await CloseTestFlyoutAsync(emptyHistoryMenu);
             Check(Helm.Children.IndexOf(HomeButton) == Helm.Children.IndexOf(ReloadButton) + 1 &&
                 Helm.Children.IndexOf(ReopenButton) == Helm.Children.IndexOf(HomeButton) + 1, "Home and reopen buttons follow reload in order");
             var previousStart = Settings.StartPage;
@@ -121,13 +137,14 @@ public sealed partial class MainWindow
             Check(ReopenButton.IsEnabled, "Closing a normal tab enables reopen");
             ShowRecentHistory();
             var historyMenu = (Microsoft.UI.Xaml.Controls.MenuFlyout)ReopenButton.Tag;
+            await Wait(() => historyMenu.IsOpen);
             var closedItems = historyMenu.Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutItem>().Where(item => item.IsEnabled).ToArray();
             Check(closedItems[1].Text == "Restored title" && closedItems[2].Text == (string.IsNullOrWhiteSpace(olderClosed.Title) ? olderClosed.Url : olderClosed.Title),
                 "Closed tabs are listed newest first with their titles");
             var olderItem = closedItems[2];
             var olderPeer = new Microsoft.UI.Xaml.Automation.Peers.MenuFlyoutItemAutomationPeer(olderItem);
             ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)olderPeer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
-            historyMenu.Hide();
+            await CloseTestFlyoutAsync(historyMenu);
             await Wait(() => active?.Url == fixture + "older-closed");
             Check(closedTabs.Count == 1 && closedTabs.Peek().Url == fixture + "last-closed",
                 "Selecting an older closed tab restores only that tab and preserves the latest undo entry");
@@ -140,9 +157,10 @@ public sealed partial class MainWindow
             Check(closedTabs.Count == 0 && active == restoredClosed && ReopenButton.IsEnabled, "Exhausted undo leaves the active tab intact and history available");
             ShowRecentHistory();
             historyMenu = (Microsoft.UI.Xaml.Controls.MenuFlyout)ReopenButton.Tag;
+            await Wait(() => historyMenu.IsOpen);
             var historyPeer = new Microsoft.UI.Xaml.Automation.Peers.MenuFlyoutItemAutomationPeer((Microsoft.UI.Xaml.Controls.MenuFlyoutItem)historyMenu.Items[0]);
             ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)historyPeer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
-            historyMenu.Hide();
+            await CloseTestFlyoutAsync(historyMenu);
             await Wait(() => OverlayLayer.Visibility == Visibility.Visible);
             Check(FindAddressPart<Microsoft.UI.Xaml.Controls.TextBox>(OverlayLayer)?.PlaceholderText == T("Search history", "搜索历史记录"),
                 "History menu opens the searchable history panel");
@@ -153,6 +171,8 @@ public sealed partial class MainWindow
             store.Bookmarks = [new() { Title = "Zulu", Url = fixture + "z" }, bookmarkFolder, new() { Title = "Alpha", Url = fixture + "a" }];
             RefreshBookmarkBar();
             var bookmarkContext = (Microsoft.UI.Xaml.Controls.MenuFlyout)((Microsoft.UI.Xaml.Controls.Button)BookmarkRow.Children[1]).ContextFlyout;
+            bookmarkContext.ShowAt(ExtensionsButton); Root.UpdateLayout();
+            await Wait(() => bookmarkContext.IsOpen && bookmarkContext.Items.Count > 0);
             Check(bookmarkContext.Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutItem>().Any(item => item.Text == T("Rename…", "重命名…")) &&
                 bookmarkContext.Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutItem>().Any(item => item.Text == T("Cut", "剪切")), "Bookmarks bar context menu includes rename and clipboard operations");
             Check(bookmarkContext.Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutSubItem>().Single().Items.Count == 4,
@@ -162,6 +182,7 @@ public sealed partial class MainWindow
             var openBookmarks = bookmarkContext.Items.OfType<Microsoft.UI.Xaml.Controls.MenuFlyoutItem>().Single(item => item.Text == T("Open all (1) bookmarks", "打开全部（1 个）书签"));
             var openBookmarksPeer = new Microsoft.UI.Xaml.Automation.Peers.MenuFlyoutItemAutomationPeer(openBookmarks);
             ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)openBookmarksPeer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
+            await CloseTestFlyoutAsync(bookmarkContext);
             Check(tabs.Count == tabsBeforeBookmarkOpen.Length + 1 && active == activeBeforeBookmarkOpen, "Bookmarks bar open-all creates background tabs without switching the active page");
             foreach (var tab in tabs.Where(tab => !tabsBeforeBookmarkOpen.Contains(tab)).ToArray()) CloseTab(tab);
             closedTabs.Clear();
@@ -439,6 +460,10 @@ public sealed partial class MainWindow
                 Check(Address.Parent == AddressParking && editingAddressTab == null, "Ending address edit restores the tab label");
             }
             Settings.Sidebar = false; ApplySettings();
+            // Finish prior layout/focus notifications before the next user action.
+            var addressReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => addressReady.TrySetResult());
+            await addressReady.Task.WaitAsync(TimeSpan.FromSeconds(10));
             FocusAddress(); Root.UpdateLayout();
             var infoItem = (Microsoft.UI.Xaml.Controls.ListViewItem)TopTabs.ContainerFromItem(active);
             var infoButton = FindAddressPart<Microsoft.UI.Xaml.Controls.Button>(infoItem, "TabSiteInfo")!;
@@ -446,6 +471,12 @@ public sealed partial class MainWindow
             SiteInfo_Click(infoButton, new());
             var siteFlyout = (Microsoft.UI.Xaml.Controls.Flyout)infoButton.Tag;
             var sitePanel = (Microsoft.UI.Xaml.Controls.StackPanel)siteFlyout.Content;
+            var siteOpened = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            EventHandler<object> siteOpenedHandler = (_, _) => siteOpened.TrySetResult();
+            siteFlyout.Opened += siteOpenedHandler;
+            try { await siteOpened.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+            finally { siteFlyout.Opened -= siteOpenedHandler; }
+            Root.UpdateLayout();
             Check(sitePanel.Children.OfType<Microsoft.UI.Xaml.Controls.Button>().Count() == 3 && editingAddressTab == active,
                 "Site information flyout contains connection, cookies and settings without ending address editing");
             void InvokeSiteButton(Microsoft.UI.Xaml.Controls.Button button)
@@ -587,6 +618,7 @@ public sealed partial class MainWindow
             await VerifySitePermissionsAsync(fixture, Check);
             await VerifyBookmarkSiteIconAsync(Check);
             await VerifyPrivacyAndTitleRegressionsAsync(Check);
+            await VerifyResourceRegressionsAsync(fixture, Check);
             await File.WriteAllTextAsync(reportPath, JsonSerializer.Serialize(new { success = true, checks, measurements }, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch (Exception ex)

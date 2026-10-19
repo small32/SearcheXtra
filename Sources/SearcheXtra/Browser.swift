@@ -1622,6 +1622,12 @@ final class Browser: NSObject, ObservableObject {
         if prefs.usesSpaces { preloadSpaces() }
     }
 
+    deinit {
+        dozing?.invalidate()
+        pressure?.cancel()
+        hush?.cancel()
+    }
+
     /// The floating video's buttons answer the window whose video it is:
     /// set as it comes out of one (see lift).
     private func ownFloater() {
@@ -3837,18 +3843,17 @@ final class Browser: NSObject, ObservableObject {
         // A page's title lands a beat after the page itself, and a history
         // entry that only ever holds an address is half a memory.
         // Anywhere a tab lands is worth remembering for next launch.
-        tab.$address
-            .dropFirst()
-            .sink { [weak self] _ in self?.rememberSession() }
-            .store(in: &bag)
-
-        tab.$title
-            .dropFirst()
-            .sink { [weak self, weak tab] title in
-                guard let tab, !tab.shy, let url = tab.address else { return }
-                self?.history.retitle(url, title)
-            }
-            .store(in: &bag)
+        tab.browserWatch = [
+            tab.$address
+                .dropFirst()
+                .sink { [weak self] _ in self?.rememberSession() },
+            tab.$title
+                .dropFirst()
+                .sink { [weak self, weak tab] title in
+                    guard let tab, !tab.shy, let url = tab.address else { return }
+                    self?.history.retitle(url, title)
+                },
+        ]
     }
 
     /// Put the cursor back in the field, from wherever asked.
@@ -4284,6 +4289,14 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // The next document gets this site's stylesheet of hidden things,
         // decided here because here is the last moment before it loads.
         if action.targetFrame?.isMainFrame ?? true, let tab = tab(for: webView) {
+            if action.navigationType == .reload, action.request.httpMethod == "GET", tab.needsExtensionReload {
+                decisionHandler(.cancel)
+                DispatchQueue.main.async { [weak tab, weak webView] in
+                    guard let tab, let webView, tab.built === webView else { return }
+                    tab.reload()
+                }
+                return
+            }
             let host = curtain.host(of: url)
             tab.arm(hiding: curtain.css(on: host))
             // And the blocker, on or off for where it is going.

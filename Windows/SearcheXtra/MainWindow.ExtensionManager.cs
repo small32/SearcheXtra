@@ -42,6 +42,24 @@ public sealed partial class MainWindow
                 Grid.SetColumn(toggle, 1); actions.Children.Add(toggle); content.Children.Add(actions);
                 var status = new TextBlock { FontSize = 12, Opacity = .65, TextWrapping = TextWrapping.Wrap, Text = item.Enabled ? T("Enabled", "已启用") : T("Disabled", "已停用") }; content.Children.Add(status);
                 var details = new StackPanel { Spacing = 10, Visibility = Visibility.Collapsed };
+                if (ExtensionPermissions.DeclaresUserScripts(item.Folder))
+                {
+                    if (ExtensionUserScripts.Failed(item.Id)) status.Text = T("Could not load this extension's user-script configuration. Its data has been preserved.", "无法加载此扩展的用户脚本配置，原有数据已保留。");
+                    var userScripts = new ToggleSwitch { Header = T("Allow user scripts", "允许用户脚本"), IsOn = item.AllowUserScripts, OnContent = "", OffContent = "" };
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(userScripts, T("Allow user scripts", "允许用户脚本"));
+                    details.Children.Add(userScripts);
+                    details.Children.Add(new TextBlock { Text = T("Allow this extension to run user scripts on websites. Changing this setting reloads the extension. Refresh open webpages to apply it.", "允许此扩展在网站上运行用户脚本。更改后会重新加载扩展，请刷新已打开的网页使其生效。"), FontSize = 12, Opacity = .65, TextWrapping = TextWrapping.Wrap });
+                    var changingScripts = false;
+                    userScripts.Toggled += async (_, _) =>
+                    {
+                        if (changingScripts) return;
+                        changingScripts = true; userScripts.IsEnabled = toggle.IsEnabled = false;
+                        var previous = item.AllowUserScripts;
+                        try { await SetUserScriptsAllowedAsync(item, userScripts.IsOn); status.Text = T("User-script permission updated. Refresh open webpages.", "用户脚本权限已更新，请刷新已打开的网页。"); }
+                        catch { item.AllowUserScripts = previous; userScripts.IsOn = previous; ScheduleSave(); status.Text = T("Could not change user-script permission. Try again.", "无法更改用户脚本权限，请重试。"); }
+                        finally { changingScripts = false; userScripts.IsEnabled = toggle.IsEnabled = true; }
+                    };
+                }
                 var pin = new CheckBox { Content = T("Pin to title bar", "固定到标题栏"), IsChecked = item.Pinned };
                 pin.Checked += (_, _) => SetExtensionPinned(item, true); pin.Unchecked += (_, _) => SetExtensionPinned(item, false); details.Children.Add(pin);
                 var open = QuietButton(T("Open extension", "打开扩展")); open.HorizontalAlignment = HorizontalAlignment.Left;

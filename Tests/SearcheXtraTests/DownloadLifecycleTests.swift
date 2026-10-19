@@ -80,12 +80,17 @@ final class DownloadLifecycleTests: XCTestCase {
 
     func testWebKitFailureWithResumeDataResumesSameEntryAndDestination() async throws {
         let tab = try await openFixturePage()
+        fixture.hold("/failure.bin", afterBytes: 256 * 1024)
+        defer { fixture.release("/failure.bin") }
         let entry = try await startDownload("/failure.bin", in: tab)
+        try await waitUntil { entry.completedBytes >= 64 * 1024 && entry.destination != nil }
+        let destination = try XCTUnwrap(entry.destination)
+        fixture.release("/failure.bin")
         try await waitUntil { entry.state == .failed }
 
         let originalID = entry.id
         let reason = try XCTUnwrap(entry.errorDescription)
-        let destination = try XCTUnwrap(entry.destination)
+        XCTAssertEqual(entry.destination, destination, "A failed partial transfer must retain its target")
         XCTAssertFalse(reason.isEmpty)
         XCTAssertTrue(entry.canResume, "WebKit should return resume data for the ranged fixture")
         XCTAssertTrue(entry.canRetry)
@@ -164,7 +169,11 @@ final class DownloadLifecycleTests: XCTestCase {
 
     func testFailureWithoutResumeDataKeepsReasonAndCanRetryFromStart() async throws {
         let tab = try await openFixturePage()
+        fixture.hold("/retry.bin", afterBytes: 256 * 1024)
+        defer { fixture.release("/retry.bin") }
         let entry = try await startDownload("/retry.bin", in: tab)
+        try await waitUntil { entry.completedBytes >= 64 * 1024 && entry.destination != nil }
+        fixture.release("/retry.bin")
         try await waitUntil { entry.state == .failed }
 
         let originalID = entry.id
@@ -205,8 +214,12 @@ final class DownloadLifecycleTests: XCTestCase {
 
     func testCancelRemovesEntryAndPartialFile() async throws {
         let tab = try await openFixturePage()
+        fixture.hold("/cancel.bin", afterBytes: 256 * 1024)
+        defer { fixture.release("/cancel.bin") }
         let entry = try await startDownload("/cancel.bin", in: tab)
         try await waitUntil { entry.completedBytes >= 64 * 1024 && entry.destination != nil }
+        XCTAssertEqual(entry.state, .downloading)
+        XCTAssertEqual(fixture.completed("/cancel.bin"), 0, "Cancellation must exercise an unfinished response")
         let destination = try XCTUnwrap(entry.destination)
         let id = entry.id
 
@@ -248,7 +261,7 @@ final class DownloadLifecycleTests: XCTestCase {
         try await waitUntil { fixture.completed("/page") == 1 }
 
         let download = try await requestDownload("/private.bin", from: tab.web)
-        browser.keep(download, from: tab.web)
+        XCTAssertTrue(download.delegate === browser)
         XCTAssertTrue(browser.fetches.entries.isEmpty)
 
         try await waitUntil {
@@ -272,14 +285,17 @@ final class DownloadLifecycleTests: XCTestCase {
 
     private func startDownload(_ path: String, in tab: BrowserTab) async throws -> FetchEntry {
         let download = try await requestDownload(path, from: tab.web)
-        browser.keep(download, from: tab.web)
         return try XCTUnwrap(browser.fetches.entry(for: download))
     }
 
     private func requestDownload(_ path: String, from webView: WKWebView) async throws -> WKDownload {
         let request = URLRequest(url: fixture.url(path))
+        let browser = try XCTUnwrap(browser)
         return await withCheckedContinuation { continuation in
             webView.startDownload(using: request) { download in
+                // Assign the delegate before returning to WebKit: resuming
+                // the actor first can lose the destination request to nil.
+                browser.keep(download, from: webView)
                 continuation.resume(returning: download)
             }
         }
@@ -333,7 +349,10 @@ final class DownloadLifecycleTests: XCTestCase {
             if condition() { return }
             try await Task.sleep(nanoseconds: 20_000_000)
         }
-        XCTFail("Timed out waiting for the download state", file: file, line: line)
+        let entries = browser.fetches.entries.map {
+            "\($0.state): \($0.completedBytes)/\($0.totalBytes) bytes, destination=\($0.destination?.lastPathComponent ?? "nil"), error=\($0.errorDescription ?? "nil")"
+        }
+        XCTFail("Timed out waiting for the download state; active=\(browser.downloading.count), entries=\(entries)", file: file, line: line)
         throw WaitError.timedOut
     }
 

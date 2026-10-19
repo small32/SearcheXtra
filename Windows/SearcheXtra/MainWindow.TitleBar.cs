@@ -33,7 +33,7 @@ public sealed partial class MainWindow
 
     private void UpdateTitleBarRegions()
     {
-        if (Root.XamlRoot == null || Toolbar.ActualWidth <= 0) return;
+        if (closing || Root.XamlRoot == null || Toolbar.ActualWidth <= 0) return;
         var pinnedRoom = Math.Max(0, (int)((Toolbar.ActualWidth - CaptionInset.Width.Value - Helm.ActualWidth - 380) / 30));
         for (var i = 0; i < PinnedExtensions.Children.Count; i++)
             PinnedExtensions.Children[i].Visibility = i < pinnedRoom ? Visibility.Visible : Visibility.Collapsed;

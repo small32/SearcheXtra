@@ -494,6 +494,9 @@ final class Extensions: NSObject, ObservableObject {
             for permission in found.requestedPermissions {
                 context.setPermissionStatus(.grantedExplicitly, for: permission)
             }
+            if !Extensions.userScriptsAllowed(item.id) {
+                context.setPermissionStatus(.deniedExplicitly, for: WKWebExtension.Permission(rawValue: "userScripts"))
+            }
             context.setPermissionStatus(.grantedExplicitly, for: .nativeMessaging)
             // Never one for extension pages, another's or all of them (see
             // `fence`).
@@ -511,14 +514,7 @@ final class Extensions: NSObject, ObservableObject {
             }
             Extensions.fence(context)
             Extensions.watchTouches()
-            try controller.load(context)
-            watch(context)
-            if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
-            loadsThisRun.insert(item.id)
-            contexts[item.id] = context
-            // Keys you gave its commands in Settings › Shortcuts (#189).
-            ShortcutStore.shared.adopt(context, id: item.id)
-            actionsChanged += 1
+            try admit(context)
             return true
         } catch {
             NSLog("Extensions: couldn't load %@: %@", item.id, error.localizedDescription)
@@ -526,8 +522,26 @@ final class Extensions: NSObject, ObservableObject {
         }
     }
 
+    private func admit(_ context: WKWebExtensionContext) throws {
+        let id = context.uniqueIdentifier
+        try controller.load(context)
+        watch(context)
+        if contexts[id] == nil, loadsThisRun.contains(id) { loadedBefore.insert(id) }
+        loadsThisRun.insert(id)
+        contexts[id] = context
+        ExtensionUserScripts.loaded(context)
+        // Keys you gave its commands in Settings › Shortcuts (#189).
+        ShortcutStore.shared.adopt(context, id: id)
+        actionsChanged += 1
+    }
+
     private func unload(_ id: String) {
         loading[id] = nil
+        if let observer = errorWatchers.removeValue(forKey: id) { NotificationCenter.default.removeObserver(observer) }
+        if let context = contexts[id], Extensions.declaresUserScripts(context.webExtension.manifest) {
+            ExtensionUserScripts.contextWillReload()
+        }
+        ExtensionUserScripts.unloaded(id)
         guard let context = contexts[id] else { return }
         Browsers.closePopups(of: id)
         try? controller.unload(context)
@@ -844,6 +858,7 @@ final class Extensions: NSObject, ObservableObject {
         loadsThisRun.remove(id)
         loadedBefore.remove(id)
         Store.settings.removeObject(forKey: "extensions.newtab.\(id)")
+        Store.settings.removeObject(forKey: "extensions.userscripts.\(id)")
         installed.removeAll { $0.id == id }
         save()
         try? FileManager.default.removeItem(at: Extensions.folder(for: id))
@@ -983,12 +998,74 @@ final class Extensions: NSObject, ObservableObject {
         return nil
     }
 
+    static func declaresUserScripts(_ manifest: [String: Any]) -> Bool {
+        let names = (manifest["permissions"] as? [String] ?? []) + (manifest["optional_permissions"] as? [String] ?? [])
+        return names.contains("userScripts")
+    }
+
+    func supportsUserScripts(_ id: String) -> Bool {
+        if let context = contexts[id] { return Extensions.declaresUserScripts(context.webExtension.manifest) }
+        let url = Extensions.folder(for: id).appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: url),
+              let manifest = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
+        return Extensions.declaresUserScripts(manifest)
+    }
+
+    static func userScriptsAllowed(_ id: String) -> Bool {
+        Store.settings.bool(forKey: "extensions.userscripts.\(id)")
+    }
+
+    /// Separate from the extension's manifest permission, as in Chrome.
+    /// Reloading drops injected registrations; the saved user-script list is
+    /// retained so enabling the switch can register the same scripts again.
+    @discardableResult
+    func setUserScriptsAllowed(_ id: String, _ on: Bool) -> Task<Bool, Never>? {
+        guard let item = installed.first(where: { $0.id == id }), supportsUserScripts(id),
+              Extensions.userScriptsAllowed(id) != on else { return nil }
+        Store.settings.set(on, forKey: "extensions.userscripts.\(id)")
+        objectWillChange.send()
+        let context = contexts[id]
+        unload(id)
+        guard item.enabled else { return nil }
+        return Task {
+            guard Extensions.userScriptsAllowed(id) == on,
+                  installed.contains(where: { $0.id == id && $0.enabled && $0.version == item.version }) else { return false }
+            guard let context else { return await load(item) }
+            // WebKit reloads by unloading and loading the same context. A
+            // permission change keeps its package and native storage runtime;
+            // browser-owned worlds/handlers were retired by unload above.
+            context.setPermissionStatus(on ? .grantedExplicitly : .deniedExplicitly,
+                                        for: WKWebExtension.Permission(rawValue: "userScripts"))
+            do { try admit(context); return true }
+            catch { noteError(error.localizedDescription, for: id); return false }
+        }
+    }
+
     func openOptions(_ id: String) {
         guard let url = contexts[id]?.optionsPageURL else { return }
         browser?.open(url, foreground: true)
     }
 
     // MARK: - updates
+
+    /// The native runtime.reload must pass through the same lifecycle as
+    /// browser reloads so hidden user-script pages and worlds cannot retain
+    /// the old worker. Reload the installed copy, without copying its source.
+    @discardableResult
+    func reloadRuntime(_ context: WKWebExtensionContext) -> Task<Bool, Never>? {
+        let id = context.uniqueIdentifier
+        guard contexts[id] === context, let item = installed.first(where: { $0.id == id && $0.enabled }) else { return nil }
+        return Task {
+            // Return the native API reply before unloading its caller.
+            await Task.yield()
+            guard contexts[id] === context else { return false }
+            unload(id)
+            do { try ExtensionUserScripts.reset(id) }
+            catch { noteError(error.localizedDescription, for: id); return false }
+            workersChanged()
+            return await load(item)
+        }
+    }
 
     /// Once a day, the store is asked whether anything installed from it has
     /// a newer version; if so it is fetched, checked and swapped in. One that

@@ -38,6 +38,7 @@ public sealed class BookmarkIcons
     }
 
     public string? SourceUrl(string pageUrl) => TryPage(pageUrl, out _, out var origin) && entries.TryGetValue(origin, out var entry) ? entry.Source : null;
+    internal static string? OriginFor(string pageUrl) => TryPage(pageUrl, out _, out var origin) ? origin : null;
 
     public async Task AdoptAsync(string pageUrl, string iconUrl, byte[] png, bool persist = true)
     {

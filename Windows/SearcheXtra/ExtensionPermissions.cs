@@ -4,6 +4,24 @@ namespace SearcheXtra.Windows;
 
 internal static class ExtensionPermissions
 {
+    public static bool DeclaresUserScripts(JsonElement manifest)
+    {
+        if (manifest.ValueKind != JsonValueKind.Object) return false;
+        return new[] { "permissions", "optional_permissions" }.Any(key =>
+            manifest.TryGetProperty(key, out var values) && values.ValueKind == JsonValueKind.Array &&
+            values.EnumerateArray().Any(value => value.ValueKind == JsonValueKind.String && value.GetString() == "userScripts"));
+    }
+
+    public static bool DeclaresUserScripts(string folder)
+    {
+        try
+        {
+            using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "manifest.json")));
+            return DeclaresUserScripts(manifest.RootElement);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException) { return false; }
+    }
+
     public static IReadOnlyList<string> Describe(JsonElement manifest, bool chinese)
     {
         var permissions = new List<string>();
@@ -43,6 +61,7 @@ internal static class ExtensionPermissions
                 "cookies" => Text("Read and change website sign-in data and cookies", "读取和更改网站的登录状态及 Cookie"),
                 "nativeMessaging" => Text("Communicate with other applications on this computer", "与电脑上的其他应用通信"),
                 "scripting" or "activeTab" => Text("Run extension features on webpages", "在网页中运行扩展功能"),
+                "userScripts" => Text("Run user scripts on webpages", "在网页中运行用户脚本"),
                 "sidePanel" => Text("Show an extension side panel", "显示扩展侧边栏"),
                 "alarms" => Text("Run scheduled extension tasks", "定时运行扩展任务"),
                 "clipboardRead" => Text("Read clipboard contents", "读取剪贴板内容"),

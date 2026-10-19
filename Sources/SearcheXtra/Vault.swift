@@ -221,13 +221,12 @@ enum Vault {
 
     /// A password is shown only to the person the Mac belongs to. Touch ID,
     /// the watch, or the account password — whatever the Mac itself takes.
-    static func prove(_ reason: String, _ done: @escaping (Bool) -> Void) {
-        let context = LAContext()
+    static func prove(_ reason: String, context: LAContext = LAContext(), _ done: @escaping (Bool) -> Void) {
         var trouble: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &trouble) else {
-            // No way to ask at all — a Mac with no password set. Then there is
-            // nothing to prove.
-            done(true)
+            // No account password is the only exemption. Authentication
+            // being unavailable or interrupted must never reveal a secret.
+            done(trouble?.domain == LAErrorDomain && trouble?.code == LAError.passcodeNotSet.rawValue)
             return
         }
         context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { ok, _ in
