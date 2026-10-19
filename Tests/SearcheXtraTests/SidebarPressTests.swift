@@ -285,7 +285,7 @@ final class SidebarPressTests: XCTestCase {
 
     private func addressField(in view: NSView) -> TabAddressField.Field? {
         if let field = view as? TabAddressField.Field { return field }
-        return view.subviews.lazy.compactMap { addressField(in: $0) }.first
+        return view.subviews.lazy.compactMap { self.addressField(in: $0) }.first
     }
 
     private func settle() async throws {
