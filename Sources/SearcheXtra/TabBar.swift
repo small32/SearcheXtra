@@ -1553,8 +1553,8 @@ struct PinField: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(browser: browser, tab: tab) }
 
-    func makeNSView(context: Context) -> Field {
-        let field = Field()
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
         field.delegate = context.coordinator
         field.isBordered = false
         field.drawsBackground = false

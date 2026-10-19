@@ -1182,7 +1182,11 @@ final class Bench {
                 ["depth": depth, "title": item.title, "folder": item.submenu != nil, "image": item.image != nil]
             }
             let bar = browser.bookmarks.roots.map { node -> [String: Any] in
-                let size = NSHostingView(rootView: BookmarksBar.Item(node: node, act: {})).fittingSize
+                let size = NSHostingView(rootView: BookmarksBar.Item(
+                    node: node, compact: browser.prefs.compactBookmarksBar,
+                    folderIcons: browser.prefs.bookmarkBarFolderIcons,
+                    websiteIcons: browser.prefs.bookmarkWebsiteIcons, act: { _ in }
+                )).fittingSize
                 return ["label": node.label, "title": node.title, "unnamed": node.unnamed,
                         "width": Double(size.width), "height": Double(size.height)]
             }
