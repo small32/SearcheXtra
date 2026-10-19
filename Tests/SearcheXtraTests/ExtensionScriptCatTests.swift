@@ -114,9 +114,9 @@ final class ExtensionScriptCatTests: XCTestCase {
             let enable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, true))
             let enabled = await enable.value
             XCTAssertTrue(enabled)
-            let context = try XCTUnwrap(Extensions.shared.contexts[identifier])
+            var context = try XCTUnwrap(Extensions.shared.contexts[identifier])
             browser.close(firstOptions)
-            let options = browser.open(try XCTUnwrap(context.optionsPageURL), foreground: true)
+            var options = browser.open(try XCTUnwrap(context.optionsPageURL), foreground: true)
             show(options)
             try await until("ScriptCat native user-world registration") {
                 let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: context) as? [[String: Any]] ?? []
@@ -207,6 +207,8 @@ final class ExtensionScriptCatTests: XCTestCase {
                 guard service?["code"] as? Int == 0, (service?["data"] as? [String: Any])?["ok"] is Bool else {
                     throw FixtureFailure("ScriptCat runtime was not initialized: \(label) \(service ?? [:])")
                 }
+                context = restoredContext
+                options = restoredOptions
                 show(website)
                 try await reload(website.web)
                 trace("permission cycle actual native page relay: \(label) \(try await nativeRelayState(restoredOptions) ?? "unavailable")")
@@ -271,8 +273,10 @@ final class ExtensionScriptCatTests: XCTestCase {
             trace("native allFrames, frameId, documentId and MAIN execution succeeded")
             try await permissionCycle("before runtime.reload", mv2: false)
             let countBeforeExtensionReload = Int((try await state())["count"] as? String ?? "0") ?? 0
-            let runtimeContext = try XCTUnwrap(Extensions.shared.contexts[identifier])
-            let runtimeOptions = browser.open(try XCTUnwrap(runtimeContext.optionsPageURL), foreground: true)
+            let runtimeContext = context
+            // The cycle already loaded this page and called its native API.
+            // A new tab initially contains about:blank and has no chrome.
+            let runtimeOptions = options
             diagnosticOptions = runtimeOptions
             trace("runtime.reload requested from context \(ObjectIdentifier(runtimeContext))")
             show(runtimeOptions)
