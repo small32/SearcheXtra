@@ -3034,7 +3034,7 @@ final class Browser: NSObject, ObservableObject {
         if prefs.newTabAfterLast, activeID == tab.id,
            !tabs.contains(where: { $0.id != tab.id && $0.pin == nil }) {
             if tab.isBlank {
-                NSApp.keyWindow?.performClose(nil)
+                window?.performClose(nil)
                 return
             }
             let fresh = Tab(configuration: Web.configuration(space: spaceID))

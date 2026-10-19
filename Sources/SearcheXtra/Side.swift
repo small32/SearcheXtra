@@ -418,7 +418,7 @@ struct SideBar: View {
                 // The hand's travel is the square's own, as a row's is
                 // (Carried): a move redraws the one square being carried,
                 // not the column (idea 31).
-                .modifier(PinCarried(index: index, cells: cells) { browser.move(tab, to: $0) })
+                .modifier(PinCarried(index: index, cells: cells, enabled: browser.editingPin != tab.id) { browser.move(tab, to: $0) })
             }
         } }
         .coordinateSpace(name: "pins")
@@ -815,7 +815,7 @@ private struct SideRow: View {
         .modifier(Shake(travel: shake))
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .modifier(OneClick(double: false) {
-            guard interactive, !selectedOnPress, NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty else { return }
+            guard interactive, !editing, !selectedOnPress, NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty else { return }
             browser.clearTabSelection()
             if live { browser.beginTabEdit(tab) } else { browser.select(tab) }
         })
@@ -1004,6 +1004,7 @@ struct Door: View {
 struct PinCarried: ViewModifier {
     let index: Int
     let cells: [CGRect]
+    var enabled = true
     let move: (Int) -> Void
 
     @State private var held = false
@@ -1020,9 +1021,12 @@ struct PinCarried: ViewModifier {
             // Measured in the grid's own space, not the square's: a square
             // that has just been moved to a new cell would otherwise report
             // the drag from where it now is, and shuttle between two cells.
-            .gesture(
+            // Observe alongside TabPress; its press observer must not win
+            // the gesture and prevent carrying the selected square.
+            .simultaneousGesture(
                 DragGesture(minimumDistance: 5, coordinateSpace: .named("pins"))
                     .onChanged { value in
+                        guard enabled else { return }
                         if !held {
                             held = true
                             from = index
@@ -1034,6 +1038,7 @@ struct PinCarried: ViewModifier {
                         }
                     }
                     .onEnded { _ in
+                        guard held else { return }
                         withAnimation(Motion.settle) {
                             held = false
                             travel = .zero

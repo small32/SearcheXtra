@@ -669,7 +669,7 @@ private struct TabPill: View {
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         // Active tabs edit immediately; other tabs switch on the first click.
         .modifier(OneClick(double: false) {
-            guard NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty else { return }
+            guard !editing, NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty else { return }
             browser.clearTabSelection()
             if live {
                 browser.beginTabEdit(tab)
@@ -909,9 +909,11 @@ struct Carried: ViewModifier {
             .transaction { if held { $0.animation = nil } }
             .zIndex(held ? 1 : 0)
             .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
-            .gesture(
+            // Selection starts on press, without taking this drag away.
+            .simultaneousGesture(
                 DragGesture(minimumDistance: 5, coordinateSpace: .named(space))
                     .onChanged { value in
+                        if !held, let browser, let tab, browser.editingTab == tab.id { return }
                         if !held {
                             held = true
                             from = index
@@ -926,6 +928,7 @@ struct Carried: ViewModifier {
                         }
                     }
                     .onEnded { value in
+                        guard held else { return }
                         if let browser, let tab, browser.prefs.splitView {
                             let finished = TabDrag.shared.finish(browser: browser, tab: tab)
                             let source = finished.source

@@ -5,6 +5,11 @@ import XCTest
 
 @MainActor
 final class PrivacyAndWindowTests: XCTestCase {
+    override class func setUp() {
+        setenv("SEARCH_PROBE", "privacy-window-\(getpid())", 1)
+        super.setUp()
+    }
+
     override func setUp() async throws {
         guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
         _ = NSApplication.shared
@@ -22,6 +27,27 @@ final class PrivacyAndWindowTests: XCTestCase {
         XCTAssertTrue(tab.isBlank)
         XCTAssertFalse(window.isKeyWindow)
         browser.close(tab)
+        XCTAssertEqual(window.closeRequests, 1)
+    }
+
+    func testClosingLastBlankTabBesidePinsTargetsItsOwnWindow() throws {
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        let previous = browser.prefs.newTabAfterLast
+        browser.prefs.newTabAfterLast = true
+        defer { browser.prefs.newTabAfterLast = previous; browser.closeAll() }
+        let window = CloseTrackingWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        browser.window = window
+        let blank = try XCTUnwrap(browser.active)
+        let pin = SearcheXtra.Tab()
+        pin.restore(url: URL(string: "https://pin.example/")!, title: "Pinned")
+        pin.pin = "P"
+        browser.prepare(pin)
+        browser.insert(pin, at: 0)
+        browser.activeID = blank.id
+        XCTAssertFalse(window.isKeyWindow)
+        browser.close(blank)
         XCTAssertEqual(window.closeRequests, 1)
     }
 

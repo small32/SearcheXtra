@@ -55,13 +55,17 @@ final class BrowserDiscoveryTests: XCTestCase {
         let empty = source.discovery
         XCTAssertTrue(empty.profiles.isEmpty)
         XCTAssertNil(empty.error)
-        XCTAssertTrue(Chromium.Unavailable(source: source, error: empty.error).message.contains("no browser profile"))
+        let emptyPath = source.root.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        XCTAssertEqual(Chromium.Unavailable(source: source, error: empty.error).message,
+                       L10n.text("import.noProfile", source.name, emptyPath))
 
         source.rootOverride = root.appendingPathComponent("missing")
         let missing = source.discovery
         XCTAssertTrue(missing.profiles.isEmpty)
         XCTAssertNotNil(missing.error)
-        XCTAssertTrue(Chromium.Unavailable(source: source, error: missing.error).message.contains("data folder was not found"))
+        let missingPath = source.root.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        XCTAssertEqual(Chromium.Unavailable(source: source, error: missing.error).message,
+                       L10n.text("import.noDataFolder", source.name, missingPath))
     }
 
     func testDeniedFolderKeepsPermissionErrorAndRecoversAfterAccessIsRestored() throws {
@@ -81,8 +85,8 @@ final class BrowserDiscoveryTests: XCTestCase {
         XCTAssertTrue(denied.profiles.isEmpty)
         XCTAssertNotNil(denied.error)
         let message = Chromium.Unavailable(source: source, error: denied.error).message
-        XCTAssertTrue(message.contains("macOS hasn't allowed Search"))
-        XCTAssertTrue(message.contains("for this session"))
+        let path = source.root.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        XCTAssertEqual(message, L10n.text("import.dataDenied", source.name, path))
 
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
         XCTAssertNil(source.discovery.error)
@@ -111,8 +115,9 @@ final class BrowserDiscoveryTests: XCTestCase {
         XCTAssertEqual(partial.profiles.map(\.lastPathComponent), ["Profile 1"])
         XCTAssertNotNil(partial.error)
         let message = Chromium.Unavailable(source: source, error: partial.error, partial: true).message
-        XCTAssertTrue(message.contains("Some of Fixture's profiles"))
-        XCTAssertTrue(message.contains("all of them"))
+        let path = source.root.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        XCTAssertEqual(message, L10n.text("import.someProfilesUnreadable", source.name, path,
+                                        L10n.text("import.someProfilesDenied")))
 
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: denied.path)
         let restored = source.discovery

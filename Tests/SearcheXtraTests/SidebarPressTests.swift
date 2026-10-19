@@ -180,7 +180,8 @@ final class SidebarPressTests: XCTestCase {
         try await settle()
         // The field's own press waits in a loop for its release from the
         // queue: the release is queued first, in this process only.
-        let point = rowPoint(0, in: window)
+        let field = try XCTUnwrap(addressField(in: window.contentView!))
+        let point = field.convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), to: nil)
         NSApp.postEvent(try event(.leftMouseUp, at: point, in: window), atStart: false)
         window.sendEvent(try event(.leftMouseDown, at: point, in: window))
         try await settle()
@@ -211,6 +212,7 @@ final class SidebarPressTests: XCTestCase {
         browser.beginTabEdit(browser.tabs[0])
         let coordinator = TabAddressField.Coordinator(browser: browser)
         let field = TabAddressField.Field(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        field.delegate = coordinator
         coordinator.focus(field)
         XCTAssertNotNil(field.arrived, "The focus request must wait while SwiftUI has not attached the field")
         browser.cancelTabEdit()
@@ -279,6 +281,11 @@ final class SidebarPressTests: XCTestCase {
 
     private func rowPoint(_ index: Int, in window: NSWindow) -> NSPoint {
         NSPoint(x: 70, y: window.frame.height - Metrics.strip - 14 - CGFloat(index) * 30)
+    }
+
+    private func addressField(in view: NSView) -> TabAddressField.Field? {
+        if let field = view as? TabAddressField.Field { return field }
+        return view.subviews.lazy.compactMap { addressField(in: $0) }.first
     }
 
     private func settle() async throws {
