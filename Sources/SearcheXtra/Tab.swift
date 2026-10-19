@@ -494,6 +494,7 @@ final class Tab: ObservableObject, Identifiable {
     /// Native extension worlds can retain storage listeners from an unloaded
     /// runtime. Retire the view on the user's next refresh, leaving the
     /// current document and any unfinished input alone until then.
+    @available(macOS 15.4, *)
     func extensionRuntimeChanged() {
         if built != nil, carriesExtensions, let address, Browser.extensionHost(of: address) == nil {
             needsExtensionReload = true
