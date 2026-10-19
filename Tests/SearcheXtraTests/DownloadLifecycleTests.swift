@@ -337,8 +337,10 @@ final class DownloadLifecycleTests: XCTestCase {
         throw WaitError.timedOut
     }
 
+    // Hosted runners initialize WebKit services from a clean image.
+    // Preserve the state assertions with a larger bounded CI deadline.
     private func waitUntil(
-        timeout: TimeInterval = 15,
+        timeout: TimeInterval = ProcessInfo.processInfo.environment["CI"] == "true" ? 60 : 15,
         file: StaticString = #filePath,
         line: UInt = #line,
         _ condition: @MainActor () -> Bool

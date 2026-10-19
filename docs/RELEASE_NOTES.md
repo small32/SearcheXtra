@@ -22,6 +22,15 @@
 - 修正 macOS 密码认证不可用或中断时的判断，并修复无效拖拽配置、扩展原生消息和图标捕获等边界问题。
 - 修复关闭自动滚动后动画仍继续运行、拖拽框架记录未及时清理，以及扩展弹窗异步尺寸更新作用于旧窗口的问题。
 
+### 本次覆盖更新
+
+- **macOS 上游同步**：整合 Search 至 `6294b6a` 的适用更新，修复关闭窗口后的资源释放、视频与全屏、网址解析、拦截器域名匹配，以及浏览器导入和分步登录兼容问题。
+- **macOS 扩展体验**：加入扩展侧边栏、静默登录、后台端口恢复、周期更新，以及多个新标签页扩展之间的选择；保留现有 MV2/MV3 用户脚本实现。
+- **macOS 标签与界面**：加入标签多选及复制网址、新标签位置、休眠时机、闲置自动关闭、网站保活、共享固定页、网页深色、120Hz 电源策略和整页 PDF 导出，新增设置提供中英双语。
+- **Windows 扩展悬浮面板**：点击扩展图标后在图标下方展开，随内容调整尺寸；点击外部或按 Esc 关闭，设置按钮保持原有方式。
+- **保留已有操作习惯**：网址继续在标签页内部编辑；书签左键遵循设置、中键后台打开；保留超级拖拽，不恢复 AI 或浮动地址输入框。
+- 本次仍同时提供 Windows x64 和 macOS ARM64 安装包。上述上游新增功能主要适用于 macOS，Windows 继续提供现有功能及本次扩展面板改进。
+
 ### 平台说明
 
 - Windows：仅支持 Windows 10 1809 及以上的 x86_64 系统。
@@ -49,6 +58,15 @@ Adds MV3 user-script support, fixes browser issues on Windows and macOS, and red
 - Improved saving and clearing history, site-search settings, and hidden-element rules so stale asynchronous results cannot restore cleared data.
 - Corrected macOS password authentication handling when system authentication is unavailable or interrupted. Fixed invalid drag configurations, extension native-message handling, and favicon capture edge cases.
 - Fixed automatic scrolling continuing after being disabled, stale drag-frame records, and asynchronous extension-popup sizing affecting an outdated window.
+
+### Changes in this rebuild
+
+- **macOS upstream updates:** Ports applicable Search changes through `6294b6a`, including closed-window resource release, video/fullscreen behavior, URL parsing, blocker domain matching, browser imports, and multi-step sign-ins.
+- **macOS extensions:** Adds side panels, quiet authentication, worker-port recovery, periodic updates, and selection between extension new-tab pages while preserving the existing MV2/MV3 user-script implementation.
+- **macOS tabs and appearance:** Adds tab selection and URL copying, new-tab placement, sleep timing, optional automatic closing, per-site keep-awake choices, shared pins, webpage darkening, power-aware 120Hz, and full-page PDF export. New settings have English and Simplified Chinese text.
+- **Windows extension flyouts:** Extension icons open an anchored flyout that adapts to its contents. Click outside or press Esc to close it; the settings button retains its existing behavior.
+- **Existing interactions retained:** Addresses remain embedded in tabs; bookmark left-click follows preferences and middle-click opens in the background. Super drag remains available; AI and floating address fields remain excluded.
+- This rebuild still supplies Windows x64 and macOS ARM64 packages. The upstream additions above primarily target macOS; Windows retains its existing features and gains the extension-flyout improvements.
 
 ### Platform notes
 

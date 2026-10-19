@@ -14,7 +14,8 @@ struct ImportPanel: View {
     @ObservedObject var browser: Browser
 
     @State private var sources: [ImportSource] = []
-    @State private var unreadable: [String] = []
+    @State private var unreadable: [Chromium.Unavailable] = []
+    @State private var folderError: String?
     @State private var looking = true
     @State private var pick: ImportSource?
     /// Each browser's profiles, and the one used most recently.
@@ -62,7 +63,7 @@ struct ImportPanel: View {
                     Text(L10n.text("ImportPanel.0555")).font(.system(size: 12)).foregroundStyle(Palette.muted)
                 }
             } else if sources.isEmpty {
-                Card { Nothing(L10n.text("ImportPanel.0556")) }
+                Card { Nothing(unreadable.isEmpty ? L10n.text("ImportPanel.0556") : L10n.text("import.chooseFolderHelp")) }
             } else {
                 Caption(L10n.text("ImportPanel.0557"))
                 Card {
@@ -173,23 +174,81 @@ struct ImportPanel: View {
         }
     }
 
+    /// What Arc's side of the import will do, which depends on whether pinned
+    /// rows are on: with them on, the pages Arc keeps loose become rows under
+    /// the pins and the ones it filed stay tabs in a group of that folder's
+    /// name, so that neither the keeping nor the folder is lost.
+    private func arcDetail(_ arc: (spaces: Int, pinned: Int)) -> String {
+        let spaces = L10n.text("import.arc.spaceCount", String(arc.spaces))
+        let head = L10n.text("import.arc.summary", spaces, String(arc.pinned))
+        return browser.prefs.listsPins
+            ? head + L10n.text("import.arc.rowsResult")
+            : head + L10n.text("import.arc.sleepResult")
+    }
+
     /// Safari, and browsers on this Mac with nothing where their data should
     /// be: said by name rather than left out.
     @ViewBuilder
     private var notes: some View {
-        let lines = (ImportSource.safari
-                     ? [L10n.text("ImportPanel.0564")]
-                     : []) + unreadable
-        if !lines.isEmpty {
+        if ImportSource.safari || !unreadable.isEmpty || folderError != nil {
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(lines, id: \.self) { line in
-                    Text(line)
+                if ImportSource.safari {
+                    Text(L10n.text("ImportPanel.0564"))
                         .font(.system(size: 11.5))
                         .foregroundStyle(Palette.faint)
-                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(unreadable.indices, id: \.self) { index in
+                    let missing = unreadable[index]
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(missing.message)
+                        Spacer(minLength: 4)
+                        Pill(L10n.text("import.chooseFolder")) { chooseFolder(for: missing.source) }
+                    }
+                }
+                if let folderError {
+                    Text(folderError)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.muted)
                 }
             }
+            .font(.system(size: 11.5))
+            .foregroundStyle(Palette.faint)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.leading, 2)
+        }
+    }
+
+    /// macOS protects another app's data. Choosing its folder in the system
+    /// panel grants this browser access without asking for Full Disk Access.
+    private func chooseFolder(for source: Chromium.Source) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = source.root.deletingLastPathComponent()
+        panel.message = L10n.text("import.chooseFolderPrompt", source.name)
+        panel.prompt = L10n.text("import.useFolder")
+        panel.begin { answer in
+            guard answer == .OK, let folder = panel.url else { return }
+            looking = true
+            DispatchQueue.global(qos: .userInitiated).async {
+                var selected = source
+                selected.rootOverride = folder.resolvingSymlinksInPath()
+                let found = !selected.profiles.isEmpty
+                DispatchQueue.main.async {
+                    guard found else {
+                        looking = false
+                        folderError = L10n.text("import.folderNoProfile", folder.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                        return
+                    }
+                    Chromium.useForSession(folder, for: source)
+                    folderError = nil
+                    previews = [:]
+                    profiles = [:]
+                    usual = [:]
+                    look()
+                }
+            }
         }
     }
 
@@ -197,6 +256,14 @@ struct ImportPanel: View {
         let preview = previews[key(source, profile(of: source))]
         let extensions = fresh(source)
         return Card {
+            if case .chromium(let chromium) = source,
+               let root = Chromium.chosenRoot(for: chromium.name), !Store.testing {
+                Text(L10n.text("import.fromFolder", root.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")))
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+                    .textSelection(.enabled)
+                Rule()
+            }
             if let record = ImportRecords.of(source.name) {
                 Line(L10n.text("ImportPanel.0565"), broughtBefore(record)) { EmptyView() }
                 Rule()
@@ -224,10 +291,10 @@ struct ImportPanel: View {
                 Rule()
             }
             // A kind the browser has none of is said so, and can't be picked.
-            Line(L10n.text("ImportPanel.0569"), preview?.passwords == 0 ? L10n.text("ImportPanel.0570", String(describing: source.name)) : source.asksForKey
-                 ? L10n.text("ImportPanel.0571", String(describing: source.name))
-                 : L10n.text("ImportPanel.0572", String(describing: source.name))) {
-                option($wantsPasswords, none: preview?.passwords == 0)
+            Line(L10n.text("ImportPanel.0569"), !source.importsPasswords ? L10n.text("import.passwordSourceUnsupported", source.name) : preview?.passwords == 0 ? L10n.text("ImportPanel.0570", source.name) : source.asksForKey
+                 ? L10n.text("ImportPanel.0571", source.name)
+                 : L10n.text("ImportPanel.0572", source.name)) {
+                option($wantsPasswords, none: !source.importsPasswords || preview?.passwords == 0)
             }
             Rule()
             Line(L10n.text("ImportPanel.0573"), preview?.bookmarks == 0 ? L10n.text("ImportPanel.0574", String(describing: source.name)) : L10n.text("ImportPanel.0575", String(describing: source.name))) {
@@ -252,9 +319,23 @@ struct ImportPanel: View {
             // Arc's own: its spaces, what is pinned in them, its favourites.
             if let arc = arcCounts[key(source, profile(of: source))], arc.spaces + arc.pinned > 0 {
                 Rule()
-                Line(L10n.text("ImportPanel.0582"),
-                     L10n.text("ImportPanel.0583", String(describing: arc.spaces == 1 ? "1 space" : "\(arc.spaces) spaces"), String(describing: arc.pinned))) {
+                Line(L10n.text("ImportPanel.0582"), arcDetail(arc)) {
                     Switch(on: $wantsArc)
+                }
+                // Arc's pinned pages only keep their shape as pinned rows, and
+                // those are off until asked for. This is the moment someone
+                // would ask, so the sheet offers the switch here, once, rather
+                // than bringing them in as tabs and leaving the setting to be
+                // found afterwards.
+                if wantsArc, arc.pinned > 0, !browser.prefs.listsPins {
+                    Rule()
+                    Line(L10n.text("import.arc.keepRows"),
+                         L10n.text("import.arc.keepRows.detail")
+                         + (browser.prefs.sidebar ? "" : L10n.text("import.arc.rowsSidebar"))) {
+                        Pill(L10n.text("import.arc.enableRows")) {
+                            withAnimation(Motion.glide) { browser.prefs.listsPins = true }
+                        }
+                    }
                 }
             }
             if !extensions.isEmpty {
@@ -331,7 +412,7 @@ struct ImportPanel: View {
         let wanted = browser.bringingIn ?? ""
         DispatchQueue.global(qos: .userInitiated).async {
             let found = ImportSource.installed()
-            let missing = Chromium.unreadable().map { L10n.text("ImportPanel.0586", String(describing: $0.source.name), String(describing: $0.looked)) }
+            let missing = Chromium.unreadable()
             let lists = found.map { ($0.id, $0.profiles, $0.usual) }
             DispatchQueue.main.async {
                 sources = found
@@ -373,7 +454,7 @@ struct ImportPanel: View {
         // A kind it has none of isn't read at all: no keychain question for
         // a browser with no passwords.
         let preview = previews[key(source, profile)]
-        let passwords = wantsPasswords && preview?.passwords != 0
+        let passwords = wantsPasswords && source.importsPasswords && preview?.passwords != 0
         let marks = wantsBookmarks && preview?.bookmarks != 0
         let places = wantsHistory && preview?.places != 0
         bringing = true

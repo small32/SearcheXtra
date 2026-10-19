@@ -164,3 +164,51 @@ struct StoreOffer: View {
             || (host == "chrome.google.com" && url.path.hasPrefix("/webstore"))
     }
 }
+
+/// Settings › Tabs › New tab page: what a new tab opens to, while an
+/// extension offers a page for it. Search's own page with the address field
+/// ready, or the page of an extension that asked to take its place, and
+/// the way back from one that did. With nothing offered there is nothing to
+/// pick, so the line isn't there at all, and neither is its hairline.
+struct NewTabPageLine: View {
+    var body: some View {
+        if #available(macOS 15.4, *) {
+            Chooser(extensions: .shared)
+        }
+    }
+
+    @available(macOS 15.4, *)
+    private struct Chooser: View {
+        @ObservedObject var extensions: Extensions
+
+        var body: some View {
+            let askers = extensions.newTabAskers
+            let current = extensions.newTabPageID
+            if !askers.isEmpty {
+                Line(L10n.text("upstream.newTab.page"), detail(askers, current)) {
+                    Picker("", selection: Binding(
+                        get: { current ?? "" },
+                        set: { extensions.setNewTabPage($0.isEmpty ? nil : $0) }
+                    )) {
+                        Text(L10n.text("upstream.newTab.blank")).tag("")
+                        Divider()
+                        ForEach(askers) { Text($0.name).tag($0.id) }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                }
+                Rule()
+            }
+        }
+
+        private func detail(_ askers: [Installed], _ current: String?) -> String {
+            if let current, let name = askers.first(where: { $0.id == current })?.name {
+                return L10n.text("upstream.newTab.showExtension", name)
+            }
+            return askers.count == 1
+                ? L10n.text("upstream.newTab.askedOne", askers[0].name)
+                : L10n.text("upstream.newTab.askedMany", String(askers.count))
+        }
+    }
+}

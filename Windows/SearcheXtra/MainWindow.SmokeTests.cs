@@ -350,16 +350,28 @@ public sealed partial class MainWindow
             Check(await views[mv2Popup.Id].Control.CoreWebView2.ExecuteScriptAsync("document.querySelector('#status').textContent") == "\"MV2 persistent background\"", "MV2 browser_action popup accesses native extension storage");
             Check(mv2Instance != "null" && await views[mv2Popup.Id].Control.CoreWebView2.ExecuteScriptAsync("document.body.dataset.instance") == mv2Instance, "Opening another WebView preserves the running MV2 background instance");
             CloseTab(mv2Popup); await SelectAsync(first);
-            var popupView = new Microsoft.UI.Xaml.Controls.WebView2 { Width = 360, Height = 480 };
-            var popupTask = ShowExtensionCardAsync(popupView, firstView.Control.CoreWebView2, mv2);
+            SetExtensionPinned(mv2, true);
+            await Wait(() => !settingsRefreshPending);
+            Root.UpdateLayout();
+            var popupButton = (Microsoft.UI.Xaml.Controls.Button)PinnedExtensions.Children.Single();
+            var popupFlyout = (Microsoft.UI.Xaml.Controls.Flyout)popupButton.Flyout;
+            var previousTabCount = tabs.Count;
+            var previousWindowCount = App.Windows.Count;
+            void ShowPopup() => popupFlyout.ShowAt(popupButton);
+            ShowPopup();
             try
             {
+                await Wait(() => extensionPopupView?.CoreWebView2 != null);
+                var popupView = extensionPopupView!;
                 await Wait(() => popupView.Width >= 520); Root.UpdateLayout();
-                Check(popupView.ActualWidth >= 520 && popupView.Height <= Root.ActualHeight - 140, "Extension popup fits its natural width and available window height");
+                Check(popupFlyout.IsOpen && popupFlyout.Target == popupButton && OverlayLayer.Visibility == Visibility.Collapsed,
+                    "Pinned extension opens a flyout anchored to its own icon without a modal overlay");
+                Check(tabs.Count == previousTabCount && App.Windows.Count == previousWindowCount, "Opening an extension flyout creates no browser tab or window");
+                Check(popupView.ActualWidth >= 520 && popupView.Height <= Root.ActualHeight - Toolbar.ActualHeight - 32, "Extension popup fits its natural width and available window height");
                 Check(await popupView.CoreWebView2.ExecuteScriptAsync("document.documentElement.scrollWidth <= innerWidth") == "true", "Wide extension popup is not clipped horizontally");
                 await popupView.CoreWebView2.ExecuteScriptAsync("document.body.style.width='700px'");
                 await Wait(() => popupView.Width >= 700); Root.UpdateLayout();
-                Check(popupView.Parent is Microsoft.UI.Xaml.Controls.Grid panel && panel.Width == popupView.Width + 44, "Extension popup and its card resize together after content changes");
+                Check(popupFlyout.Content == popupView && popupView.ActualWidth >= 700, "Extension flyout resizes after its content changes");
                 await popupView.CoreWebView2.ExecuteScriptAsync("window.marked=false;chrome.storage.local.set({removedMarker:'must disappear'},()=>window.marked=true)");
                 await WaitAsync(async () => await popupView.CoreWebView2.ExecuteScriptAsync("window.marked") == "true");
                 await popupView.CoreWebView2.ExecuteScriptAsync("localStorage.setItem('removedSiteMarker','must disappear');window.fileAccess='pending';chrome.extension.isAllowedFileSchemeAccess(value=>window.fileAccess=value)");
@@ -369,7 +381,28 @@ public sealed partial class MainWindow
                 await WaitAsync(async () => await popupView.CoreWebView2.ExecuteScriptAsync("window.filePermission") != "\"pending\"");
                 Check(await popupView.CoreWebView2.ExecuteScriptAsync("window.filePermission") == "false", "A native extension with only HTTP permissions has no file-origin permission");
             }
-            finally { DismissOverlay(); await popupTask; }
+            catch (Exception error)
+            {
+                throw new InvalidOperationException($"Extension flyout: open={popupFlyout.IsOpen}, anchorLoaded={popupButton.IsLoaded}, viewLoaded={extensionPopupView?.IsLoaded}, core={extensionPopupView?.CoreWebView2 != null}, status={Status.Text}", error);
+            }
+            finally { if (popupFlyout.IsOpen) await CloseTestFlyoutAsync(popupFlyout); await Wait(() => extensionPopupView == null); }
+            ShowPopup();
+            await Wait(() => extensionPopupView?.CoreWebView2 != null);
+            await WaitAsync(async () => await extensionPopupView!.CoreWebView2.ExecuteScriptAsync("document.querySelector('#status')?.textContent") == "\"MV2 persistent background\"");
+            var escape = extensionPopupView!.CoreWebView2.ExecuteScriptAsync("window.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))");
+            await Wait(() => !popupFlyout.IsOpen && extensionPopupView == null);
+            try { await escape; } catch when (!popupFlyout.IsOpen) { }
+            Check(true, "Escape closes an extension flyout and releases its WebView");
+            var savedPopup = mv2.Popup; mv2.Popup = ""; mv2.Options = savedPopup;
+            try
+            {
+                await OpenExtensionPopupAsync(mv2);
+                await Wait(() => extensionPopupView?.CoreWebView2 != null);
+                Check(tabs.Count == previousTabCount && extensionFlyout?.IsOpen == true, "An extension with only an options page also opens in a flyout");
+                await CloseTestFlyoutAsync(extensionFlyout!);
+                await Wait(() => extensionPopupView == null);
+            }
+            finally { mv2.Popup = savedPopup; mv2.Options = ""; closeExtensionPopup?.Invoke(); }
             await RemoveExtensionAsync(mv2);
             await InstallExtensionFolderAsync(mv2Folder);
             var reinstalled = Settings.Extensions.Single(extension => extension.Folder == mv2Folder);

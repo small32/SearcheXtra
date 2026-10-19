@@ -1,5 +1,26 @@
 # SearcheXtra 更新日志
 
+## 2.2.0 — 覆盖更新 / Rebuild — 2026-10-19
+
+### 简体中文
+
+- 本次 2.2.0 同时构建 macOS ARM64 和 Windows x64；上游新增功能主要移植到 macOS，Windows 改善扩展悬浮面板。后续开发以 macOS 为主。
+- 同步上游 Search 至 `6294b6a` 的适用修复：关闭窗口后的资源释放、视频与全屏、网址解析、拦截器域名匹配、导入及登录兼容。
+- 整合扩展侧边栏、后台端口恢复、静默登录、周期更新与互斥的新标签页扩展选择，保留 MV2/MV3 用户脚本实现。
+- 增加标签多选与复制网址、新标签位置、休眠时机、闲置自动关闭、网站保活、共享固定页及固定页返回原网址选项。
+- 增加网页自动深色、按电源控制 120Hz、整页 PDF 导出及更多快捷键设置；新增界面文案均提供中英双语。
+- 保留标签内地址输入、书签左键打开设置、中键后台打开和超级拖拽，不恢复 AI 或浮动地址输入框。
+
+### English
+
+- This 2.2.0 rebuild includes macOS ARM64 and Windows x64 packages. New upstream features primarily target macOS; Windows gains improved extension flyouts. Future development focuses on macOS.
+- Port applicable upstream Search changes through `6294b6a`, covering closed-window resource release, video/fullscreen behavior, URL parsing, blocker domain matching, imports, and sign-ins.
+- Integrate extension side panels, worker-port recovery, quiet authentication, periodic updates, and mutually exclusive extension new-tab selection while preserving MV2/MV3 user scripts.
+- Add tab selection and URL copying, new-tab placement, sleep timing, optional automatic closing, per-site keep-awake choices, shared pins, and optional pinned-page resets.
+- Add webpage darkening, power-aware 120Hz, full-page PDF export, and additional shortcut settings with bilingual interface text.
+- Preserve embedded tab address editing, bookmark opening preferences, middle-click background opening, and super drag. AI and floating address fields remain excluded.
+
+
 ## 2.1.0
 
 [简体中文](#简体中文) · [English](#english)

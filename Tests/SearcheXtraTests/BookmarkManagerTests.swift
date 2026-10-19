@@ -4,6 +4,19 @@ import XCTest
 
 @MainActor
 final class BookmarkManagerTests: XCTestCase {
+    func testEmptyBookmarkNameKeepsReadableListLabelAndPersists() throws {
+        guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
+        let bookmarks = Bookmarks()
+        let node = bookmarks.insert(Bookmark(title: "Original", url: "https://www.example.com/path"), into: nil)
+        defer { bookmarks.remove(node.id); Disk.drain() }
+        bookmarks.update(node.id, title: "", url: nil)
+        let changed = try XCTUnwrap(bookmarks.bookmark(node.id))
+        XCTAssertTrue(changed.unnamed)
+        XCTAssertEqual(changed.label, "example.com/path")
+        Disk.drain()
+        XCTAssertEqual(Bookmarks().bookmark(node.id)?.title, "")
+    }
+
     func testBatchDeletionPublishesOneChangeAndKeepsUnselectedSiblings() throws {
         guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
         let bookmarks = Bookmarks()

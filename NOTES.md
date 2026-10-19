@@ -1,4 +1,4 @@
-SearcheXtra 2.2.0 新增 Windows 与 macOS 的 MV3 用户脚本支持，兼容 ScriptCat 的脚本运行与权限控制，保留 MV2 扩展支持，并优化书签、标签页、下载、数据保存及资源释放。 SearcheXtra 2.2.0 adds MV3 user-script support on Windows and macOS, improves ScriptCat execution and permission handling, retains MV2 extension support, and improves bookmarks, tabs, downloads, persistence, and resource cleanup.
+SearcheXtra 2.2.0 本次重建继续提供 Windows 与 macOS 安装包。macOS 同步上游稳定性、扩展侧边栏、标签管理及网页外观更新；Windows 改善标题栏扩展悬浮面板；保留 MV2/MV3 用户脚本、超级拖拽和书签操作。 SearcheXtra 2.2.0 is rebuilt for Windows and macOS. macOS gains upstream stability, extension side panels, tab management, and webpage appearance updates; Windows improves toolbar extension flyouts. MV2/MV3 user scripts, super drag, and bookmark interactions are retained.
 
 SearcheXtra 2.1.1 修复了部分BUG。 SearcheXtra 2.1.1 fixes some bugs.
 

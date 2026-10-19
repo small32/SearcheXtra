@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.Web.WebView2.Core;
 using System.Text.Json;
 using Windows.Storage.Pickers;
@@ -183,36 +184,69 @@ public sealed partial class MainWindow
         try { var folder = await CrxInstaller.ImportAsync(file.Path, Path.Combine(DataStore.Root, "Extensions")); await InstallExtensionFolderAsync(folder); }
         catch (Exception ex) { Status.Text = ExtensionInstallError(ex); }
     }
-    private async Task OpenExtensionPopupAsync(InstalledExtension item)
+    private Flyout? extensionFlyout;
+    private WebView2? extensionPopupView;
+    private Action? closeExtensionPopup;
+
+    private Task OpenExtensionPopupAsync(InstalledExtension item)
     {
-        if (!item.Enabled) return;
-        if (active?.IsPrivate == true && !PageView.SupportsPrivateExtensions) { Status.Text = T("Extensions are unavailable in private tabs on Windows.", "Windows 的无痕标签页暂不支持扩展。"); return; }
-        if (item.Popup.Length == 0) { if (item.Options.Length > 0) AddTab($"chrome-extension://{item.Id}/{item.Options}"); return; }
-        DismissOverlay();
-        var view = new WebView2 { Width = 360, Height = 480 };
-        var source = ActiveView?.Control.CoreWebView2;
-        if (source == null) return;
-        await ShowExtensionCardAsync(view, source, item);
+        if (closing || !item.Enabled || item.Popup.Length == 0 && item.Options.Length == 0) return Task.CompletedTask;
+        if (active?.IsPrivate == true && !PageView.SupportsPrivateExtensions) { Status.Text = T("Extensions are unavailable in private tabs on Windows.", "Windows 的无痕标签页暂不支持扩展。"); return Task.CompletedTask; }
+        var button = PinnedExtensions.Children.OfType<Button>().FirstOrDefault(button => Equals(button.Tag, item.Id) && button.Visibility == Visibility.Visible);
+        var flyout = button?.Flyout as Flyout ?? CreateExtensionFlyout(item);
+        flyout.ShowAt(button ?? ExtensionsButton);
+        return Task.CompletedTask;
     }
-    private async Task ShowExtensionCardAsync(WebView2 view, CoreWebView2 source, InstalledExtension item)
+
+    private Flyout CreateExtensionFlyout(InstalledExtension item)
     {
+        var style = new Style(typeof(FlyoutPresenter));
+        style.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0)));
+        style.Setters.Add(new Setter(FrameworkElement.MinWidthProperty, 0d));
+        style.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, 0d));
+        style.Setters.Add(new Setter(FrameworkElement.MaxWidthProperty, double.PositiveInfinity));
+        style.Setters.Add(new Setter(FrameworkElement.MaxHeightProperty, double.PositiveInfinity));
+        var flyout = new Flyout { Placement = FlyoutPlacementMode.BottomEdgeAlignedRight, FlyoutPresenterStyle = style };
+        flyout.Opening += async (_, _) =>
+        {
+            if (active?.IsPrivate == true && !PageView.SupportsPrivateExtensions)
+            { Status.Text = T("Extensions are unavailable in private tabs on Windows.", "Windows 的无痕标签页暂不支持扩展。"); DispatcherQueue.TryEnqueue(flyout.Hide); return; }
+            if (closing || !item.Enabled || item.Popup.Length == 0 && item.Options.Length == 0 || active is not { } tab)
+            { DispatcherQueue.TryEnqueue(flyout.Hide); return; }
+            try { await ShowExtensionFlyoutAsync(flyout, tab, item); }
+            catch { flyout.Hide(); if (!closing) Status.Text = T("Could not open the extension. Try again.", "无法打开扩展，请重试。"); }
+        };
+        return flyout;
+    }
+
+    private async Task ShowExtensionFlyoutAsync(Flyout flyout, BrowserTab tab, InstalledExtension item)
+    {
+        closeExtensionPopup?.Invoke();
+        var view = new WebView2();
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Closed(object? sender, object args) => done.TrySetResult();
+        void Loaded(object sender, RoutedEventArgs args) => loaded.TrySetResult();
+        void Close() { if (flyout.IsOpen && ReferenceEquals(flyout.Content, view)) flyout.Hide(); done.TrySetResult(); }
+        extensionFlyout = flyout; extensionPopupView = view; closeExtensionPopup = Close;
         double width = 360, height = 480;
         void Resize()
         {
-            view.Width = Math.Min(width, Math.Max(120, Root.ActualWidth - 80));
-            view.Height = Math.Min(height, Math.Max(80, Root.ActualHeight - 140));
-            if (view.Parent is Grid panel) { panel.Width = view.Width + 44; panel.MaxHeight = Math.Max(120, Root.ActualHeight - 32); }
+            view.Width = Math.Min(width, Math.Max(120, Root.ActualWidth - 32));
+            view.Height = Math.Min(height, Math.Max(80, Root.ActualHeight - Toolbar.ActualHeight - 32));
         }
-        void WindowResized(object sender, SizeChangedEventArgs args) => Resize();
+        void WindowResized(object sender, SizeChangedEventArgs args) { if (!done.Task.IsCompleted) Resize(); }
         Resize();
-        var pending = ShowCardAsync(item.Name, view, fitWindow: true);
         void PopupResized(CoreWebView2 sender, CoreWebView2WebMessageReceivedEventArgs args)
         {
+            if (done.Task.IsCompleted || closing) return;
             if (args.Source != sender.Source || !args.Source.StartsWith($"chrome-extension://{item.Id}/", StringComparison.Ordinal)) return;
             try
             {
                 using var doc = JsonDocument.Parse(args.WebMessageAsJson);
-                if (!doc.RootElement.TryGetProperty("type", out var type) || type.GetString() != "popup-size") return;
+                if (!doc.RootElement.TryGetProperty("type", out var type)) return;
+                if (type.GetString() == "popup-close") { Close(); return; }
+                if (type.GetString() != "popup-size") return;
                 var requestedWidth = doc.RootElement.GetProperty("width").GetDouble();
                 var requestedHeight = doc.RootElement.GetProperty("height").GetDouble();
                 if (!double.IsFinite(requestedWidth) || !double.IsFinite(requestedHeight)) return;
@@ -220,12 +254,22 @@ public sealed partial class MainWindow
             }
             catch (JsonException) { }
         }
+        void WindowCloseRequested(CoreWebView2 sender, object args) => Close();
+        view.Loaded += Loaded;
+        flyout.Closed += Closed;
         Root.SizeChanged += WindowResized;
+        flyout.Content = view;
         try
         {
+            await Task.WhenAny(loaded.Task, done.Task);
+            if (done.Task.IsCompleted) return;
+            var source = (await GetViewAsync(tab)).Control.CoreWebView2;
+            if (done.Task.IsCompleted) return;
             var options = source.Environment.CreateCoreWebView2ControllerOptions(); options.ProfileName = source.Profile.ProfileName; options.IsInPrivateModeEnabled = source.Profile.IsInPrivateModeEnabled;
             await view.EnsureCoreWebView2Async(source.Environment, options);
+            if (done.Task.IsCompleted) return;
             view.CoreWebView2.WebMessageReceived += PopupResized;
+            view.CoreWebView2.WindowCloseRequested += WindowCloseRequested;
             await view.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync("""
                 (()=>{
                   if(window!==top)return;
@@ -240,12 +284,23 @@ public sealed partial class MainWindow
                   const queue=()=>{if(!queued){queued=true;requestAnimationFrame(measure);}};
                   document.addEventListener('DOMContentLoaded',()=>{new ResizeObserver(queue).observe(document.body);new MutationObserver(queue).observe(document.body,{childList:true,subtree:true,attributes:true});queue();},{once:true});
                   window.addEventListener('load',queue);
+                  window.addEventListener('keydown',event=>{if(event.key==='Escape'&&!event.defaultPrevented)chrome.webview.postMessage({type:'popup-close'});});
                 })();
                 """);
-            view.CoreWebView2.Navigate($"chrome-extension://{item.Id}/{item.Popup}");
-            await pending;
+            if (done.Task.IsCompleted) return;
+            view.CoreWebView2.Navigate($"chrome-extension://{item.Id}/{(item.Popup.Length > 0 ? item.Popup : item.Options)}");
+            await done.Task;
         }
-        finally { Root.SizeChanged -= WindowResized; if (view.CoreWebView2 is { } core) core.WebMessageReceived -= PopupResized; view.Close(); }
+        catch when (done.Task.IsCompleted || closing) { }
+        finally
+        {
+            Root.SizeChanged -= WindowResized;
+            view.Loaded -= Loaded; flyout.Closed -= Closed;
+            if (view.CoreWebView2 is { } core) { core.WebMessageReceived -= PopupResized; core.WindowCloseRequested -= WindowCloseRequested; }
+            if (ReferenceEquals(flyout.Content, view)) flyout.Content = null;
+            view.Close();
+            if (ReferenceEquals(extensionPopupView, view)) { extensionFlyout = null; extensionPopupView = null; closeExtensionPopup = null; }
+        }
     }
     private void RefreshPinnedExtensions()
     {
@@ -253,13 +308,14 @@ public sealed partial class MainWindow
         foreach (var item in Settings.Extensions.Where(e => e.Enabled && e.Pinned))
         {
             var button = QuietButton(item.Name.Length > 0 ? item.Name[..1] : "◇"); ToolTipService.SetToolTip(button, item.Name);
+            button.Tag = item.Id;
             if (ExtensionIconPath(item) is { } path)
                 button.Content = new Image { Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(path)), Width = 16, Height = 16 };
             Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, item.Name);
             var menu = new MenuFlyout();
             AddMenu(menu, T("Unpin from title bar", "从标题栏取消固定"), () => SetExtensionPinned(item, false));
             button.ContextFlyout = menu;
-            button.Click += async (_, _) => await OpenExtensionPopupAsync(item); PinnedExtensions.Children.Add(button);
+            button.Flyout = CreateExtensionFlyout(item); PinnedExtensions.Children.Add(button);
         }
         DownloadsButton.Visibility = Settings.AlwaysShowsDownloads || downloads.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -295,7 +351,18 @@ public sealed partial class MainWindow
         {
             var entry = new MenuFlyoutSubItem { Text = item.Name };
             var open = new MenuFlyoutItem { Text = T("Open extension", "打开扩展"), IsEnabled = active?.IsPrivate != true || PageView.SupportsPrivateExtensions };
-            open.Click += async (_, _) => await OpenExtensionPopupAsync(item);
+            open.Click += async (_, _) =>
+            {
+                if (menu.IsOpen)
+                {
+                    var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    void Closed(object? sender, object args) => closed.TrySetResult();
+                    menu.Closed += Closed;
+                    try { menu.Hide(); await closed.Task; }
+                    finally { menu.Closed -= Closed; }
+                }
+                await OpenExtensionPopupAsync(item);
+            };
             entry.Items.Add(open);
             if (item.Options.Length > 0)
             {

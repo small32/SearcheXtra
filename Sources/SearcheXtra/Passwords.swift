@@ -62,7 +62,16 @@ struct PasswordsPanel: View {
                     }
                     Pill(L10n.text("Passwords.0616")) { browser.importFile() }
                     Spacer(minLength: 0)
-                    Text(browser.saved.count == 1 ? L10n.text("Passwords.0617") : L10n.text("Passwords.0618", String(describing: browser.saved.count)))
+                    // What the list shows, all of it or what the search
+                    // leaves: never more than can be seen (Browser.forgetShown).
+                    let shown = browser.shownSites.reduce(0) { $0 + $1.logins.count }
+                    if shown > 0 {
+                        Pill(browser.hunting.trimmingCharacters(in: .whitespaces).isEmpty ? L10n.text("passwords.removeAll") : L10n.text("passwords.removeShown", String(shown))) {
+                            browser.forgetShown()
+                        }
+                        .disabled(browser.forgetting)
+                    }
+                    Text(browser.saved.count == 1 ? L10n.text("Passwords.0617") : L10n.text("Passwords.0618", String(browser.saved.count)))
                         .font(.system(size: 12))
                         .foregroundStyle(Palette.muted)
                 }

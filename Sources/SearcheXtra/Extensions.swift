@@ -56,6 +56,7 @@ final class Extensions: NSObject, ObservableObject {
     /// it can't be given one later.
     static func attach(_ configuration: WKWebViewConfiguration) {
         configuration.webExtensionController = shared.controller
+        ExtensionWorkerRecovery.shared.attach(configuration.userContentController)
     }
 
     let controller: WKWebExtensionController
@@ -179,6 +180,7 @@ final class Extensions: NSObject, ObservableObject {
         // which knows which page is asking (see ExtensionCapture).
         views.userContentController.addScriptMessageHandler(ExtensionCapture.shared, contentWorld: .page, name: ExtensionCapture.channel)
         Extensions.pages = views.userContentController
+        ExtensionWorkerRecovery.shared.attach(views.userContentController)
         ExtensionCapture.mockDevices(views.preferences)
         configuration.webViewConfiguration = views
         controller = WKWebExtensionController(configuration: configuration)
@@ -471,7 +473,8 @@ final class Extensions: NSObject, ObservableObject {
             do { try await Task.detached(priority: .userInitiated) { try Extensions.unlinkOutside(folder) }.value }
             catch { return false }
         }
-        try? await Task.detached(priority: .userInitiated) { try ExtensionShims.prepare(folder) }.value
+        let generation = ExtensionWorkerRecovery.shared.generation(for: item.id)
+        try? await Task.detached(priority: .userInitiated) { try ExtensionShims.prepare(folder, workerGeneration: generation) }.value
         guard loading[item.id] == token else { return false }
         do {
             let found = try await WKWebExtension(resourceBaseURL: Extensions.folder(for: item.id))
@@ -524,7 +527,9 @@ final class Extensions: NSObject, ObservableObject {
 
     private func admit(_ context: WKWebExtensionContext) throws {
         let id = context.uniqueIdentifier
-        try controller.load(context)
+        let undoRecovery = ExtensionWorkerRecovery.shared.register(context)
+        do { try controller.load(context) }
+        catch { undoRecovery(); throw error }
         watch(context)
         if contexts[id] == nil, loadsThisRun.contains(id) { loadedBefore.insert(id) }
         loadsThisRun.insert(id)
@@ -535,25 +540,47 @@ final class Extensions: NSObject, ObservableObject {
         actionsChanged += 1
     }
 
-    private func unload(_ id: String) {
+    @discardableResult
+    private func unload(_ id: String, replacingContext: Bool = true) -> Bool {
         loading[id] = nil
         if let observer = errorWatchers.removeValue(forKey: id) { NotificationCenter.default.removeObserver(observer) }
         if let context = contexts[id], Extensions.declaresUserScripts(context.webExtension.manifest) {
             ExtensionUserScripts.contextWillReload()
         }
         ExtensionUserScripts.unloaded(id)
-        guard let context = contexts[id] else { return }
+        guard let context = contexts[id] else { return false }
+        var unloaded = false
+        do { try controller.unload(context); unloaded = true } catch {}
+        // All paths retire the same endpoint: recovery, reload, disable and
+        // remove. Complete observers before their views are closed, too.
+        if unloaded { ExtensionWorkerRecovery.shared.restarted(id, replacingContext: replacingContext) }
+        if replacingContext || !unloaded { ExtensionWorkerRecovery.shared.unregister(id) }
+        // A reused context keeps native ports' weak context reference alive.
+        // Retire only this extension's host/socket resources explicitly, rather
+        // than waiting for isDisconnected to notice a deallocated context.
+        for port in nativePorts.removeValue(forKey: id)?.allObjects ?? [] {
+            let cleanup = port.disconnectHandler
+            port.disconnectHandler = nil
+            cleanup?(nil)
+            if !port.isDisconnected { port.disconnect() }
+        }
         Browsers.closePopups(of: id)
-        try? controller.unload(context)
         // What it kept going outside WebKit goes with it: its offscreen
         // page, and a Mac kept awake on its behalf.
         ExtensionOffscreen.close(for: id)
         ExtensionCapture.shared.purge(id)
+        // Its side panel, and what it said about it.
+        SidePanelPages.shared.forget(id)
+        ExtensionShims.panelTabs[id] = nil
+        ExtensionShims.panelOff.remove(id)
         if let held = ExtensionShims.awake.removeValue(forKey: id) { IOPMAssertionRelease(held) }
         // Its ports read as gone only once WebKit has had a turn.
         DispatchQueue.main.async { ExtensionNative.stopOrphans() }
         contexts[id] = nil
         actionsChanged += 1
+        // Disable/remove must release resources even when WebKit refuses the
+        // unload. Only revive uses this result to decide whether to reload.
+        return unloaded
     }
 
     private func save() {
@@ -764,26 +791,42 @@ final class Extensions: NSObject, ObservableObject {
     private var revived: [String: Date] = [:]
     /// Recent failed native messages, per extension and host.
     private var failures: [String: [Date]] = [:]
+    private var nativePorts: [String: NSHashTable<WKWebExtension.MessagePort>] = [:]
 
     /// Loaded at least once since the browser started, and loaded again.
     private var loadsThisRun: Set<String> = []
     private(set) var loadedBefore: Set<String> = []
 
-    func revive(_ id: String, because reason: String) {
+    @discardableResult
+    func revive(_ id: String, because reason: String) -> Bool {
         guard let item = installed.first(where: { $0.id == id }), item.enabled,
-              Date().timeIntervalSince(revived[id] ?? .distantPast) > 60 else { return }
+              let context = contexts[id],
+              Date().timeIntervalSince(revived[id] ?? .distantPast) > 60 else { return false }
+        let popup = ExtensionPopup.shared.extensionID == id ? ExtensionPopup.shared.view?.url : nil
+        guard unload(id, replacingContext: false) else { return false }
         revived[id] = Date()
         workersChanged()
         noteError("restarted the extension: \(reason)", for: id)
-        // Its popup goes with it; it is opened again once the extension is back.
-        let popup = ExtensionPopup.shared.extensionID == id ? ExtensionPopup.shared.view?.url : nil
-        unload(id)
-        Task {
-            guard await load(item), let popup, let context = contexts[id] else { return }
-            // Its button as it is now: the one it hung from may have gone
-            // with a folded column meanwhile.
-            ExtensionPopup.shared.show(popup, for: context, from: anchor(for: id))
+        // WebKit API objects held by existing pages address this context's
+        // internal identifier. A different context with the same extension id
+        // strands fresh connects in those pages. Match WebKit's own reload:
+        // unload and load the same instance, keeping its prepared resources.
+        do {
+            loadedBefore.insert(id)
+            try admit(context)
+            if let popup {
+                Task { [weak self] in
+                    guard let self, self.contexts[id] === context, context.isLoaded else { return }
+                    ExtensionPopup.shared.show(popup, for: context, from: self.anchor(for: id))
+                }
+            }
+        } catch {
+            if contexts[id] == nil, !context.isLoaded {
+                ExtensionWorkerRecovery.shared.unregister(id)
+            }
+            noteError("couldn't reload the extension: \(error.localizedDescription)", for: id)
         }
+        return true
     }
 
     /// WebKit records a worker that failed to start as an error on its
@@ -938,32 +981,52 @@ final class Extensions: NSObject, ObservableObject {
 
     // MARK: - new tab pages
 
-    /// The page an extension asks to show in new tabs, from the one added
-    /// last — once you've said yes to it. Nil while nobody asks, or you
-    /// said no.
+    /// The page an extension asks to show in new tabs — once you've said
+    /// yes to it. Nil while nobody asks, or you said no.
     var newTabPage: URL? {
-        guard let (id, url) = newTabCandidate else { return nil }
-        return Store.settings.object(forKey: "extensions.newtab.\(id)") as? Bool == true ? url : nil
+        newTabPageID.flatMap { contexts[$0]?.overrideNewTabPageURL }
     }
 
-    private var newTabCandidate: (String, URL)? {
-        for item in installed.reversed() where item.enabled {
-            if let url = contexts[item.id]?.overrideNewTabPageURL { return (item.id, url) }
+    /// The extension new tabs show, the one added last of those you said
+    /// yes to.
+    var newTabPageID: String? {
+        newTabAskers.last { Store.settings.object(forKey: "extensions.newtab.\($0.id)") as? Bool == true }?.id
+    }
+
+    /// The extensions, on and running, that ask to replace the new tab page,
+    /// in the order they were added.
+    var newTabAskers: [Installed] {
+        installed.filter { $0.enabled && contexts[$0.id]?.overrideNewTabPageURL != nil }
+    }
+
+    /// Settings › General › Home page: one extension's page in new tabs, or
+    /// nil for Search's own. Every other one that asks is answered no, so
+    /// none of them puts its page back in by asking again.
+    func setNewTabPage(_ id: String?) {
+        for item in newTabAskers {
+            Store.settings.set(item.id == id, forKey: "extensions.newtab.\(item.id)")
         }
-        return nil
+        objectWillChange.send()
     }
 
     /// Chrome asks the first time an extension's page takes the place of
     /// the new tab — an extension that did it quietly could be anything.
-    /// So does Search, and then shows the page in the tab just opened.
+    /// So does Search, and then shows the page in the tab just opened. It
+    /// asks even while another extension's page has new tabs, naming that
+    /// one, so the first to ask doesn't keep them for good.
     func offerNewTabPage(into tab: Tab) {
-        guard let (id, url) = newTabCandidate, Store.settings.object(forKey: "extensions.newtab.\(id)") == nil,
-              let name = installed.first(where: { $0.id == id })?.name else { return }
+        guard let item = newTabAskers.last(where: { Store.settings.object(forKey: "extensions.newtab.\($0.id)") == nil }),
+              let url = contexts[item.id]?.overrideNewTabPageURL else { return }
+        let holder = newTabPageID.flatMap { id in installed.first { $0.id == id } }
+        let shown = newTabPage.flatMap(Browser.extensionHost(of:))
+        let replacing = holder.map { L10n.text("upstream.newTab.replaceOther", $0.name) } ?? L10n.text("upstream.newTab.replaceBlank")
         Task {
-            let yes = await ask(L10n.text("Extensions.0414", String(describing: name)), detail: L10n.text("Extensions.0415"),
-                                icon: contexts[id]?.webExtension.icon(for: CGSize(width: 64, height: 64)), yes: L10n.text("Extensions.0416"), no: L10n.text("Extensions.0417"))
-            Store.settings.set(yes, forKey: "extensions.newtab.\(id)")
-            if yes, tab.isBlank, let browser { browser.replaceBlank(tab, with: url) }
+            let yes = await ask(L10n.text("upstream.newTab.confirm", item.name), detail: L10n.text("upstream.newTab.chooseLater", replacing),
+                                icon: contexts[item.id]?.webExtension.icon(for: CGSize(width: 64, height: 64)), yes: L10n.text("Extensions.0416"), no: L10n.text("Extensions.0417"))
+            if yes { setNewTabPage(item.id) } else { Store.settings.set(false, forKey: "extensions.newtab.\(item.id)") }
+            // The tab just opened, if it is still the page it opened on.
+            let untouched = tab.isBlank || (shown != nil && tab.address.flatMap(Browser.extensionHost(of:)) == shown)
+            if yes, untouched, let browser = browser(of: tab) { browser.replaceNewTab(tab, with: url) }
         }
     }
 
@@ -1025,7 +1088,9 @@ final class Extensions: NSObject, ObservableObject {
         Store.settings.set(on, forKey: "extensions.userscripts.\(id)")
         objectWillChange.send()
         let context = contexts[id]
-        unload(id)
+        // This path reloads the same native context and prepared shim.
+        // Retire old ports without advancing the embedded generation.
+        unload(id, replacingContext: false)
         guard item.enabled else { return nil }
         return Task {
             guard Extensions.userScriptsAllowed(id) == on,
@@ -1066,11 +1131,19 @@ final class Extensions: NSObject, ObservableObject {
             return await load(item)
         }
     }
+    private(set) var updateClock: Timer?
 
     /// Once a day, the store is asked whether anything installed from it has
     /// a newer version; if so it is fetched, checked and swapped in. One that
     /// asks for more than it was installed with is asked about first.
     func checkForUpdates() {
+        // A browser left open for days must keep checking, even if today's check is not due.
+        if updateClock == nil {
+            updateClock = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.checkForUpdates() }
+            }
+            updateClock?.tolerance = 60 * 5
+        }
         let key = "extensions.checked"
         let last = Store.settings.object(forKey: key) as? Date ?? .distantPast
         guard Date().timeIntervalSince(last) > 60 * 60 * 20 else { return }
@@ -1138,7 +1211,7 @@ final class Extensions: NSObject, ObservableObject {
                     progress?(L10n.text("extensions.confirmUpdate"))
                     accepted = await confirmPermissions(Extensions.describe(found, in: staged))
                 } else {
-                    accepted = await ask(install: L10n.text("Extensions.updateTo", item.name), wants: Extensions.describe(found, in: staged), icon: found.icon(for: CGSize(width: 64, height: 64)))
+                    accepted = await ask(install: L10n.text("Extensions.updateTo", item.name), wants: Extensions.describe(found, in: staged), icon: found.icon(for: CGSize(width: 64, height: 64)), updating: true)
                 }
                 guard accepted else { return manual ? L10n.text("extensions.cancelled") : nil }
             }
@@ -1277,11 +1350,11 @@ final class Extensions: NSObject, ObservableObject {
         return out
     }
 
-    private func ask(install name: String, wants: [String], icon: NSImage?) async -> Bool {
+    func ask(install name: String, wants: [String], icon: NSImage?, updating: Bool = false) async -> Bool {
         await ask(
             L10n.text("Extensions.0443", String(describing: name)),
             detail: wants.isEmpty ? L10n.text("Extensions.0444") : L10n.text("Extensions.0445") + wants.joined(separator: "\n• "),
-            icon: icon, yes: L10n.text("Extensions.0446"), no: L10n.text("Extensions.0447")
+            icon: icon, yes: L10n.text("Extensions.0446"), no: L10n.text("Extensions.0447"), updating: updating
         )
     }
 
@@ -1321,7 +1394,7 @@ final class Extensions: NSObject, ObservableObject {
     /// run modally would stop the whole browser — pages, downloads, every
     /// other extension — for as long as it waits, and an extension can ask
     /// when nobody is looking.
-    private func ask(_ title: String, detail: String, icon: NSImage?, yes: String, no: String) async -> Bool {
+    private func ask(_ title: String, detail: String, icon: NSImage?, yes: String, no: String, updating: Bool = false) async -> Bool {
         let before = question
         let task = Task { @MainActor [weak self] () -> Bool in
             _ = await before?.value
@@ -1331,9 +1404,22 @@ final class Extensions: NSObject, ObservableObject {
             alert.messageText = title
             alert.informativeText = detail
             if let icon { alert.icon = icon }
-            alert.addButton(withTitle: yes)
-            alert.addButton(withTitle: no)
+            let confirm = alert.addButton(withTitle: yes)
+            let cancel = alert.addButton(withTitle: no)
+            var escape: Any?
+            if updating {
+                confirm.keyEquivalent = ""
+                cancel.keyEquivalent = "\r"
+                // Cancel keeps Escape too, as in Ask.sure(returnCancels:).
+                escape = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                    guard event.window === alert.window, event.keyCode == 53 else { return event }
+                    cancel.performClick(nil)
+                    return nil
+                }
+            }
+            defer { if let escape { NSEvent.removeMonitor(escape) } }
             guard let window = NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) else {
+                guard !updating else { return false }
                 return alert.runModal() == .alertFirstButtonReturn
             }
             return await withCheckedContinuation { done in
@@ -1627,6 +1713,13 @@ extension Extensions: WKWebExtensionControllerDelegate {
         ExtensionPopup.shared.show(url, for: context, from: anchor(for: context.uniqueIdentifier))
     }
 
+    // WebKit supplies this before loading each new background view, including
+    // a worker woken inside the same extension context. No timer or JS probe.
+    @objc(_webExtensionController:didCreateBackgroundWebView:forExtensionContext:)
+    func createdBackground(_ controller: WKWebExtensionController, webView: WKWebView, context: WKWebExtensionContext) {
+        ExtensionWorkerRecovery.shared.created(webView, in: context)
+    }
+
     /// `runtime.sendNativeMessage`. To "search" — the APIs WebKit doesn't
     /// have, answered by this app. To anything else — a Chrome native
     /// messaging host installed on this Mac, spoken to the way Chrome would.
@@ -1655,6 +1748,10 @@ extension Extensions: WKWebExtensionControllerDelegate {
     }
 
     func webExtensionController(_ controller: WKWebExtensionController, connectUsing port: WKWebExtension.MessagePort, for extensionContext: WKWebExtensionContext) async throws {
+        let id = extensionContext.uniqueIdentifier
+        let ports = nativePorts[id] ?? NSHashTable<WKWebExtension.MessagePort>.weakObjects()
+        ports.add(port)
+        nativePorts[id] = ports
         if port.applicationIdentifier == ExtensionSocket.name {
             ExtensionSocket.connect(port, from: extensionContext.uniqueIdentifier)
             return

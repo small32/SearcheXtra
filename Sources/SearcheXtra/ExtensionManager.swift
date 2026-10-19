@@ -151,8 +151,8 @@ private struct ExtensionManagerCard: View {
                 }
                 if context?.overrideNewTabPageURL != nil {
                     Toggle(L10n.text("extensions.newTab"), isOn: Binding(
-                        get: { Store.settings.bool(forKey: "extensions.newtab.\(item.id)") },
-                        set: { Store.settings.set($0, forKey: "extensions.newtab.\(item.id)"); extensions.objectWillChange.send() }
+                        get: { extensions.newTabPageID == item.id },
+                        set: { extensions.setNewTabPage($0 ? item.id : nil) }
                     )).toggleStyle(.checkbox)
                 }
                 if item.source != nil || !item.fromStore {

@@ -7,6 +7,7 @@ import XCTest
 /// Nothing here touches the keychain: every CSV row below is one that is
 /// skipped, so nothing is ever saved.
 final class VaultAndUpdaterTests: XCTestCase {
+    @MainActor
     func testUnavailableAuthenticationDoesNotRevealPasswords() {
         for code in [LAError.notInteractive, .biometryNotAvailable, .systemCancel, .invalidContext] {
             let context = UnavailableAuthentication(code: code)

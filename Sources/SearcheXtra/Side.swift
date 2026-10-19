@@ -9,6 +9,11 @@ import SwiftUI
 struct SideBar: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
+    /// On the window's ground, beside the page's card (see CardEdge): the
+    /// ground's colour and no edge of its own, the card's edge being the line.
+    var onFrame = false
+    /// The greys for that ground, handed down to every row, pin and door.
+    private var greys: Greys { onFrame ? .frame : .white }
 
     @Namespace private var pill
 
@@ -26,7 +31,8 @@ struct SideBar: View {
 
     @State private var groupFrames: [UUID: CGRect] = [:]
 
-    private static let row: CGFloat = 28
+    /// A tab's line: taller with roomier tabs turned on.
+    private var rowHeight: CGFloat { prefs.sideRow }
     private static let gap: CGFloat = 2
     private static let square: CGFloat = 34
     private static let pinGap: CGFloat = 4
@@ -86,6 +92,7 @@ struct SideBar: View {
                 foot
             }
         }
+        .environment(\.greys, greys)
         .frame(width: prefs.sideWidth)
         .frame(maxHeight: .infinity)
         // Rows on their way to or from another space stay in the column.
@@ -93,14 +100,14 @@ struct SideBar: View {
         .onAppear { SpaceSwipe.shared.start(for: browser) }
         .background {
             ZStack {
-                landing ? Palette.hover : Palette.ground
+                landing ? greys.hover : onFrame ? Palette.frame : Palette.ground
                 if prefs.splitView {
                     SplitDropZone(browser: browser, tab: nil, kind: .strip)
                 }
             }
         }
         .overlay(alignment: innerEdge) {
-            Rectangle().fill(Palette.hairline).frame(width: 1)
+            if !onFrame { Rectangle().fill(Palette.hairline).frame(width: 1) }
         }
         .overlay(alignment: innerEdge) { edge }
         .onDrop(of: [.url, .text], isTargeted: $landing) { providers in
@@ -222,8 +229,15 @@ struct SideBar: View {
                                 let representative = browser.activeSplit?.left ?? id
                                 withAnimation(Motion.glide) { proxy.scrollTo(representative) }
                             }
+                            // A turn of the run loop later, as the row across
+                            // the top does it (TabBar.reveal): the folded
+                            // column comes out mid-animation, and asked at
+                            // once, before the rows had their height, the
+                            // scroll could be dropped and the tab you were on
+                            // left out of sight.
                             .onAppear {
-                                if let id = browser.activeID {
+                                guard let id = browser.activeID else { return }
+                                DispatchQueue.main.async {
                                     proxy.scrollTo(browser.activeSplit?.left ?? id, anchor: .center)
                                 }
                             }
@@ -288,7 +302,7 @@ struct SideBar: View {
         let pinBlock = pins == 0 ? 0 : (pinCells(pins).map(\.maxY).max() ?? 0) + 10
         let listed = browser.listedPins.count
         let ungrouped = displayed.filter { $0.pin == nil && (!prefs.usesTabGroups || browser.group(of: $0) == nil) }.count
-        let listBlock = CGFloat(listed) * (SideBar.row + SideBar.gap) + (listed > 0 ? SideBar.gap : 0)
+        let listBlock = CGFloat(listed) * (rowHeight + SideBar.gap) + (listed > 0 ? SideBar.gap : 0)
             + (showsLine(listed: listed, loose: ungrouped) ? KeepLine.height + SideBar.gap : 0)
         let rows = prefs.usesTabGroups
             ? displayed.filter { $0.pin == nil && browser.group(of: $0) == nil }
@@ -297,8 +311,8 @@ struct SideBar: View {
         // A pair is two lines (see SplitTabItem).
         let pairs = rows.filter { browser.split(for: $0) != nil }.count
         let headings = prefs.usesTabGroups ? CGFloat(browser.tabGroups.count) * (GroupHeading.height + SideBar.gap) : 0
-        let loose = CGFloat(rows.count) * (SideBar.row + SideBar.gap) + CGFloat(pairs) * SideBar.row + headings
-        return Metrics.strip + pinBlock + listBlock + loose + SideBar.row + 8
+        let loose = CGFloat(rows.count) * (rowHeight + SideBar.gap) + CGFloat(pairs) * rowHeight + headings
+        return Metrics.strip + pinBlock + listBlock + loose + rowHeight + 8
     }
 
     @ViewBuilder
@@ -314,7 +328,7 @@ struct SideBar: View {
         let pair = prefs.splitView ? splits.first(where: { $0.left == tab.id }) : nil
         if let pair, let right = tabs.first(where: { $0.id == pair.right }) {
             SplitTabItem(browser: browser, prefs: prefs, left: tab, right: right,
-                         width: nil, height: SideBar.row,
+                         width: nil, height: rowHeight,
                          live: activeID.map { pair.contains($0) } ?? false,
                          focusedID: activeID,
                          interactive: interactive, pill: pill)
@@ -423,7 +437,7 @@ struct SideBar: View {
                         live: tab.id == browser.activeID, pill: pill,
                         close: { browser.close(tab) })
                     .modifier(Carried(index: index, count: pins.count,
-                                      step: SideBar.row + SideBar.gap, vertical: true,
+                                      step: rowHeight + SideBar.gap, vertical: true,
                                       space: "listed") {
                         browser.moveDisplayedTab(tab, to: $0 + squares)
                     })
@@ -452,7 +466,7 @@ struct SideBar: View {
                 KeepLine(clears: !loose.isEmpty) { browser.clearTabs() }
             }
             ForEach(Array(loose.enumerated()), id: \.element.id) { index, tab in
-                let step = SideBar.row + SideBar.gap
+                let step = rowHeight + SideBar.gap
                 rowItem(tab, tabs: browser.tabs, splits: browser.splits,
                         activeID: browser.activeID, interactive: true, pill: pill,
                         close: { browser.close(tab) })
@@ -489,7 +503,7 @@ struct SideBar: View {
                         close: { browser.close(tab) })
                     .padding(.leading, 14)
                     .modifier(Carried(index: index, count: members.count,
-                                      step: SideBar.row + SideBar.gap, vertical: true,
+                                      step: rowHeight + SideBar.gap, vertical: true,
                                       space: "rows", onDropTab: { source, point in drop(source, at: point) },
                                       outside: { browser.dragOut(tab) }, browser: browser, tab: tab) {
                         browser.move(tab, within: group.id, to: $0)
@@ -512,7 +526,7 @@ struct SideBar: View {
     private static let footHeight: CGFloat = 26 + 10
 
     private var newTab: some View {
-        Quiet(icon: "plus", title: L10n.text("Side.0946"), height: SideBar.row) { browser.newTab() }
+        Quiet(icon: "plus", title: L10n.text("Side.0946"), height: rowHeight, size: prefs.sideTitle) { browser.newTab() }
             .padding(.top, SideBar.gap)
     }
 
@@ -586,6 +600,7 @@ private struct PinGrid: Layout {
 /// its row asks for, but never taller than the classic square, so a row with
 /// room to spare turns into a wide, short button rather than a bigger icon.
 private struct PinSquare: View {
+    @Environment(\.greys) private var greys
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
     @ObservedObject var tab: Tab
@@ -595,6 +610,7 @@ private struct PinSquare: View {
     var height: CGFloat = 34
 
     @State private var hovering = false
+    @State private var selectedOnPress = false
 
     /// Everything drawn inside scales off the shorter edge — the one that
     /// stays put — so the glyph sits at its usual size, centred, rather than
@@ -624,17 +640,32 @@ private struct PinSquare: View {
                 // row is darker than the white it sits on (Drice: the live
                 // pin barely showed among the others).
                 RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
-                    .fill(Palette.pinLive)
+                    .fill(greys.pinLive)
                     .matchedGeometryEffect(id: "live", in: pill)
             } else {
                 RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
-                    .fill(hovering ? Palette.hover : Palette.wash.opacity(0.55))
+                    .fill(browser.selectedTabIDs.contains(tab.id) ? greys.wash :
+                          hovering ? greys.hover : greys.tile)
+            }
+        }
+        .overlay {
+            if browser.selectedTabIDs.contains(tab.id) {
+                RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
+                    .strokeBorder(Palette.ink.opacity(0.35), lineWidth: 1)
+                    .allowsHitTesting(false)
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous))
+        .modifier(TabPress(enabled: browser.editingPin != tab.id, active: live, selected: $selectedOnPress) {
+            browser.clearTabSelection()
+            browser.select(tab)
+        })
         .modifier(OneClick(double: false) {
+            guard !selectedOnPress, NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty else { return }
+            browser.clearTabSelection()
             if live { browser.beginTabEdit(tab) } else { browser.select(tab) }
         })
+        .modifier(ModifiedTabClick { browser.extendTabSelection(to: tab, modifiers: $0) })
         // Put down, like ⌘W: close() is what knows a pin isn't removed.
         .overlay { MiddleClick { browser.close(tab) } }
         .onHover { hovering = $0 }
@@ -647,6 +678,7 @@ private struct PinSquare: View {
 
 /// One tab, as a line in the column.
 private struct SideRow: View {
+    @Environment(\.greys) private var greys
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
     @ObservedObject var tab: Tab
@@ -656,6 +688,7 @@ private struct SideRow: View {
     var interactive = true
 
     @State private var hovering = false
+    @State private var selectedOnPress = false
     @State private var shake: CGFloat = 0
 
     private var editing: Bool { browser.editingTab == tab.id }
@@ -670,41 +703,50 @@ private struct SideRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if editing {
-                TabAddressEditor(browser: browser, tab: tab)
-                    .frame(height: 16)
-            } else {
-                if prefs.glyph == .icons, !tab.isBlank {
-                    Mark(icon: tab.icon, letter: tab.monogram, size: 15)
+            HStack(spacing: 8) {
+                if editing {
+                    TabAddressEditor(browser: browser, tab: tab)
+                        .frame(height: 16)
+                } else {
+                    if prefs.glyph == .icons, !tab.isBlank {
+                        Mark(icon: tab.icon, letter: tab.monogram, size: prefs.roomyTabs ? 17 : 15)
+                    }
+                    if tab.bench {
+                        // A script's tab, not yours.
+                        Image(systemName: "flask")
+                            .font(.system(size: 9))
+                            .foregroundStyle(colour.opacity(0.7))
+                    }
+                    if tab.shy {
+                        Image(systemName: "eye.slash")
+                            .font(.system(size: 9))
+                            .foregroundStyle(colour.opacity(0.7))
+                    }
+                    if tab.recording {
+                        // An extension recording from this page (RecordingIndicator).
+                        Image(systemName: "record.circle")
+                            .font(.system(size: 10))
+                            .foregroundStyle(colour.opacity(0.8))
+                            .help(L10n.text("Side.0947"))
+                    }
+                    Text(tab.label)
+                        .font(.system(size: prefs.sideTitle))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .foregroundStyle(colour)
                 }
-                if tab.bench {
-                    // A script's tab, not yours.
-                    Image(systemName: "flask")
-                        .font(.system(size: 9))
-                        .foregroundStyle(colour.opacity(0.7))
-                }
-                if tab.shy {
-                    Image(systemName: "eye.slash")
-                        .font(.system(size: 9))
-                        .foregroundStyle(colour.opacity(0.7))
-                }
-                if tab.recording {
-                    // An extension recording from this page (RecordingIndicator).
-                    Image(systemName: "record.circle")
-                        .font(.system(size: 10))
-                        .foregroundStyle(colour.opacity(0.8))
-                        .help(L10n.text("Side.0947"))
-                }
-                Text(tab.label)
-                    .font(.system(size: 12.5))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(colour)
+                Spacer(minLength: 0)
             }
+            .padding(.leading, 10)
+            .padding(.trailing, status ? 0 : 10)
+            .frame(height: prefs.sideRow)
+            .contentShape(Rectangle())
+            .modifier(TabPress(enabled: interactive && !editing, active: live, selected: $selectedOnPress) {
+                browser.clearTabSelection()
+                browser.select(tab)
+            })
 
             if status {
-                Spacer(minLength: 2)
-
                 ZStack {
                     if tab.loading {
                         Ring().transition(.opacity)
@@ -719,9 +761,8 @@ private struct SideRow: View {
                 .padding(.trailing, hovering && speaker ? 23 : 0)
             }
         }
-        .padding(.leading, 10)
-        .padding(.trailing, status ? 7 : 10)
-        .frame(height: 28)
+        .padding(.trailing, status ? 7 : 0)
+        .frame(height: prefs.sideRow)
         .frame(maxWidth: .infinity, alignment: .leading)
         // The title keeps its length under the pointer and fades out
         // beneath the cross, rather than being cut shorter, so its end
@@ -754,7 +795,7 @@ private struct SideRow: View {
                 .frame(width: 15, height: 15)
                 .overlay {
                     Color.clear
-                        .frame(width: 30, height: 28)
+                        .frame(width: 30, height: prefs.sideRow)
                         .contentShape(Rectangle())
                         .onTapGesture { if hovering { close() } }
                 }
@@ -764,12 +805,21 @@ private struct SideRow: View {
         .animation(Motion.quick, value: tab.loading)
         .animation(Motion.quick, value: speaker)
         .background { ground }
+        .overlay {
+            if browser.selectedTabIDs.contains(tab.id) {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Palette.ink.opacity(0.35), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+        }
         .modifier(Shake(travel: shake))
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .modifier(OneClick(double: false) {
-            guard interactive else { return }
+            guard interactive, !selectedOnPress, NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty else { return }
+            browser.clearTabSelection()
             if live { browser.beginTabEdit(tab) } else { browser.select(tab) }
         })
+        .modifier(ModifiedTabClick { if interactive && !editing { browser.extendTabSelection(to: tab, modifiers: $0) } })
         .overlay { if interactive { MiddleClick(act: close) } }
         .onHover { hovering = $0 }
         .contextMenu { if interactive { TabMenu(browser: browser, tab: tab, close: close) } }
@@ -792,7 +842,7 @@ private struct SideRow: View {
     private var ground: some View {
         if live {
             ZStack(alignment: .leading) {
-                Rectangle().fill(Palette.wash)
+                Rectangle().fill(greys.wash)
                 if prefs.showsReading {
                     GeometryReader { geo in
                         ReadingFill(meter: tab.meter, width: geo.size.width)
@@ -801,9 +851,12 @@ private struct SideRow: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .matchedGeometryEffect(id: "live", in: pill)
+        } else if browser.selectedTabIDs.contains(tab.id) {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(greys.wash)
         } else if hovering {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Palette.hover)
+                .fill(greys.hover)
         }
     }
 
@@ -815,9 +868,11 @@ private struct SideRow: View {
 
 /// A row that is an action rather than a page. Quiet until the pointer is on it.
 struct Quiet: View {
+    @Environment(\.greys) private var greys
     let icon: String
     let title: String
     var height: CGFloat = 28
+    var size: CGFloat = 12.5
     let act: () -> Void
 
     @State private var hovering = false
@@ -829,7 +884,7 @@ struct Quiet: View {
                     .font(.system(size: 10, weight: .medium))
                     .frame(width: 15)
                 Text(title)
-                    .font(.system(size: 12.5))
+                    .font(.system(size: size))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(hovering ? Palette.ink.opacity(0.7) : Palette.faint)
@@ -838,7 +893,7 @@ struct Quiet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(hovering ? Palette.hover : .clear)
+                    .fill(hovering ? greys.hover : .clear)
             )
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
@@ -915,6 +970,7 @@ struct Speaker: View {
 
 /// A small square holding one symbol. Lit when what it opens is open.
 struct Door: View {
+    @Environment(\.greys) private var greys
     let icon: String
     var on = false
     var help = ""
@@ -930,7 +986,7 @@ struct Door: View {
                 .frame(width: 26, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(on ? Palette.wash : (hovering ? Palette.hover : .clear))
+                        .fill(on ? greys.wash : (hovering ? greys.hover : .clear))
                 )
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }

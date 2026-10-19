@@ -7,14 +7,17 @@ import SwiftUI
 struct ShortcutsPage: View {
     @ObservedObject var browser: Browser
     @ObservedObject var store: ShortcutStore
+    @ObservedObject var prefs: Preferences
 
     @State private var hunt = ""
     @FocusState private var hunting: Bool
 
     /// By name, or by key as the menus write it: "tab" and "⌘T" both find New Tab.
     private func shown(_ command: Command) -> Bool {
+        if command.section == .spaces, !prefs.usesSpaces { return false }
         // Split View's commands only once it is on.
         if Command.split.contains(command.id), !browser.prefs.splitView { return false }
+        if Command.dusk.contains(command.id), !browser.prefs.darkensPages { return false }
         let words = hunt.trimmingCharacters(in: .whitespaces)
         guard !words.isEmpty else { return true }
         let key = store.key(for: command.id)?.display ?? ""
@@ -22,11 +25,17 @@ struct ShortcutsPage: View {
             || key.localizedCaseInsensitiveContains(words.replacingOccurrences(of: " ", with: ""))
     }
 
+    private var showsPeek: Bool {
+        let words = hunt.trimmingCharacters(in: .whitespaces)
+        return prefs.peeksLinks && (words.isEmpty || L10n.text("links.peekShortcut").localizedCaseInsensitiveContains(words)
+            || prefs.peekClick.title.localizedCaseInsensitiveContains(words))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Hunt(text: $hunt, prompt: L10n.text("ShortcutsPage.0930"), focus: $hunting)
             let found = Command.all.filter(shown)
-            if found.isEmpty { Nothing(L10n.text("ShortcutsPage.0931")) }
+            if found.isEmpty && !showsPeek { Nothing(L10n.text("ShortcutsPage.0931")) }
             ForEach(Command.Section.allCases, id: \.self) { section in
                 let commands = found.filter { $0.section == section }
                 if !commands.isEmpty {
@@ -49,9 +58,29 @@ struct ShortcutsPage: View {
                 }
                 }
             }
+            if showsPeek {
+                Card {
+                    Line(L10n.text("links.peekShortcut")) {
+                        Picker(L10n.text("links.peekShortcut"), selection: $prefs.peekClick) {
+                            ForEach(PeekClick.allCases, id: \.self) { choice in
+                                Text(choice.title).tag(choice)
+                            }
+                        }
+                        .labelsHidden()
+                        .fixedSize()
+                    }
+                    .contextMenu {
+                        Button(L10n.text("ShortcutsPage.0933")) { prefs.peekClick = .shift }
+                            .disabled(prefs.peekClick == .shift)
+                    }
+                }
+            }
             if #available(macOS 15.4, *) { extensionCommands }
-            if store.anyChanged, hunt.isEmpty {
-                Pill(L10n.text("ShortcutsPage.0934")) { store.resetAll() }
+            if store.anyChanged || prefs.peekClick != .shift, hunt.isEmpty {
+                Pill(L10n.text("ShortcutsPage.0934")) {
+                    store.resetAll()
+                    prefs.peekClick = .shift
+                }
             }
         }
     }

@@ -148,7 +148,7 @@ struct SettingsPanel: View {
                         Card {Line(L10n.text("flowDrag.title"),""){Pill(L10n.text("Settings.0786")){page = .flowDrag}}}
                         tabs
                         if !prefs.sidebar { toolbar }
-                    case .shortcuts: ShortcutsPage(browser: browser, store: .shared)
+                    case .shortcuts: ShortcutsPage(browser: browser, store: .shared, prefs: prefs)
                     case .flowDrag:
                         Button("← "+L10n.text("Settings.0693")){page = .tabs}.buttonStyle(.plain)
                         FlowDragSettingsPage(browser:browser)
@@ -359,6 +359,13 @@ struct SettingsPanel: View {
             Line(L10n.text("Settings.0716"), L10n.text("Settings.0717")) {
                 Segmented(options: Look.allCases.map { ($0, $0.title) }, selection: $prefs.look)
             }
+            // Only where it can do something: in Light, nothing is darkened.
+            if prefs.look != .light {
+                Rule()
+                Line(L10n.text("sync.settings.dark"), L10n.text("sync.settings.dark.detail")) {
+                    Switch(on: $prefs.darkensPages)
+                }
+            }
             Rule()
             Line(L10n.text("Settings.0718"), L10n.text("Settings.0719")) {
                 // The number itself takes it back to 100%.
@@ -369,7 +376,7 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.autocorrect)
             }
             Rule()
-            Line(L10n.text("Settings.0722"), L10n.text("Settings.0723")) {
+            Line(L10n.text("sync.peek.title", prefs.peekClick.title), L10n.text("Settings.0723")) {
                 Switch(on: $prefs.peeksLinks)
             }
             Rule()
@@ -389,8 +396,8 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.autoScroll)
             }
             Rule()
-            Line(L10n.text("Settings.0732"), L10n.text("Settings.0733")) {
-                Switch(on: $prefs.fastPages)
+            Line(L10n.text("Settings.0732"), L10n.text("sync.settings.fast.detail")) {
+                Segmented(options: FastPages.allCases.map { ($0, $0.title) }, selection: $prefs.fastPages)
             }
             Rule()
             Line(L10n.text("Settings.0734"), L10n.text("Settings.0735")) {
@@ -468,6 +475,7 @@ struct SettingsPanel: View {
 
     private var tabs: some View {
         Card {
+            NewTabPageLine()
             Line(L10n.text("Settings.0754"), L10n.text("Settings.0755", String(describing: prefs.sidePosition.rawValue))) {
                 Switch(on: Binding(
                     get: { prefs.sidebar },
@@ -482,6 +490,20 @@ struct SettingsPanel: View {
                 Rule()
                 Line(L10n.text("Settings.0758"), L10n.text("Settings.0759", String(describing: prefs.sidePosition.rawValue))) {
                     Switch(on: $prefs.sideHides)
+                }
+                Rule()
+                Line(L10n.text("sync.settings.cards"), L10n.text("sync.settings.cards.detail")) {
+                    Switch(on: Binding(
+                        get: { prefs.cards },
+                        set: { on in withAnimation(Motion.glide) { prefs.cards = on } }
+                    ))
+                }
+                Rule()
+                Line(L10n.text("sync.settings.roomy"), L10n.text("sync.settings.roomy.detail")) {
+                    Switch(on: Binding(
+                        get: { prefs.roomyTabs },
+                        set: { on in withAnimation(Motion.glide) { prefs.roomyTabs = on } }
+                    ))
                 }
             }
             Rule()
@@ -511,12 +533,51 @@ struct SettingsPanel: View {
                 Switch(on: $prefs.showsReading)
             }
             Rule()
-            Line(L10n.text("Settings.0766"), L10n.text("Settings.0767")) {
+            Line(L10n.text("Settings.0766"), L10n.text("sync.settings.sleep.detail")) {
                 Switch(on: $prefs.sleepsTabs)
+            }
+            if prefs.sleepsTabs {
+                Rule()
+                Line(L10n.text("sync.settings.sleepPace"), prefs.sleepPace.detail) {
+                    Segmented(options: SleepPace.allCases.map { ($0, $0.title) }, selection: $prefs.sleepPace)
+                }
+            }
+            Rule()
+            Line(L10n.text("sync.settings.tabLife"), L10n.text("sync.settings.tabLife.detail")) {
+                Picker("", selection: $prefs.tabLife) {
+                    ForEach(TabLife.allCases) { life in
+                        Text(life.title).tag(life)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+            Rule()
+            Line(L10n.text("sync.settings.keepAwake"), L10n.text("sync.settings.keepAwake.detail")) {
+                Switch(on: $prefs.keepsSitesAwake)
+                    .accessibilityRepresentation { Toggle(L10n.text("sync.settings.keepAwake"), isOn: $prefs.keepsSitesAwake) }
+                    .focusable()
+                    .onKeyPress(.space) { prefs.keepsSitesAwake.toggle(); return .handled }
             }
             Rule()
             Line(L10n.text("Settings.0768"), L10n.text("Settings.0769")) {
                 Switch(on: $prefs.lazyTabs)
+            }
+            Rule()
+            Line(L10n.text("sync.settings.afterLast"), L10n.text("sync.settings.afterLast.detail")) {
+                Switch(on: $prefs.newTabAfterLast)
+            }
+            Rule()
+            Line(L10n.text("sync.settings.newPlace"), L10n.text("sync.settings.newPlace.detail")) {
+                Picker(L10n.text("sync.settings.newPlace"), selection: $prefs.newTabPlace) {
+                    Text(L10n.text("sync.settings.next")).tag(NewTabPlace.next)
+                    Text(prefs.sidebar ? L10n.text("sync.settings.top") : L10n.text("sync.settings.leftmost")).tag(NewTabPlace.top)
+                    Text(prefs.sidebar ? L10n.text("sync.settings.bottom") : L10n.text("sync.settings.rightmost")).tag(NewTabPlace.end)
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .fixedSize()
             }
             Rule()
             Line(L10n.text("Settings.0770"), L10n.text("Settings.0771")) {
@@ -530,6 +591,12 @@ struct SettingsPanel: View {
             Line(L10n.text("Settings.0774"), L10n.text("Settings.0775")) {
                 Switch(on: $prefs.usesSpaces)
             }
+            if prefs.usesSpaces {
+                Rule()
+                Line(L10n.text("sync.settings.sharedPins"), L10n.text("sync.settings.sharedPins.detail")) {
+                    Switch(on: $prefs.sharesPins)
+                }
+            }
             Rule()
             Line(L10n.text("Settings.0776"), L10n.text("Settings.0777")) {
                 Switch(on: $prefs.usesTabGroups)
@@ -541,8 +608,16 @@ struct SettingsPanel: View {
                 }
             }
             Rule()
+            Line(L10n.text("sync.settings.pinsHome"), L10n.text("sync.settings.pinsHome.detail")) {
+                Switch(on: $prefs.pinsGoHome)
+            }
+            Rule()
             Line(L10n.text("Settings.0780"), L10n.text("Settings.0781")) {
                 Switch(on: $prefs.splitView)
+            }
+            Rule()
+            Line(L10n.text("sync.settings.switcherKeys"), L10n.text("sync.settings.switcherKeys.detail")) {
+                Switch(on: $prefs.switcherKeys)
             }
         }
     }

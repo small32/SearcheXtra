@@ -74,6 +74,18 @@ BINARY="$(swift build "${SWIFTFLAGS[@]}" --show-bin-path)/SearcheXtra"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BINARY" "$APP/Contents/MacOS/$NAME"
+# The binary says which SDK it was built with, and AppKit draws the app the
+# way that SDK's macOS drew it: built with the macOS 27 SDK, a Mac on 27 gets
+# 27's window buttons and controls; said to be built with an older one, it
+# gets that one's. Swift Build, SwiftPM's default since Xcode 27, writes the
+# oldest macOS the app runs on in both places (minos 14.0, sdk 14.0 — the
+# native build system wrote sdk 27.0 from the same sources), and the app came
+# out in macOS 14's looks on every Mac. The SDK it really was built with is
+# put back; the oldest macOS stays as it is.
+SDK="$(xcrun --sdk macosx --show-sdk-version)"
+vtool -set-build-version macos "$MINIMUM" "$SDK" -replace \
+  -output "$APP/Contents/MacOS/$NAME.sdk" "$APP/Contents/MacOS/$NAME"
+mv "$APP/Contents/MacOS/$NAME.sdk" "$APP/Contents/MacOS/$NAME"
 # Installed apps resolve this bundle through L10n.resourceBundle. SwiftPM's
 # generated Bundle.module accessor may only know the executable and build paths.
 cp -R "$(dirname "$BINARY")/SearcheXtra_SearcheXtra.bundle" "$APP/Contents/Resources/"
@@ -168,6 +180,19 @@ cat > "$APP/Contents/Info.plist" <<PLIST
       <key>CFBundleTypeRole</key><string>Viewer</string>
       <key>LSItemContentTypes</key>
       <array><string>public.xhtml</string></array>
+    </dict>
+    <!-- What a browser shows besides pages, listed under the Finder's Open
+         With (#524): a PDF, a picture, plain text (code and logs conform to
+         it), JSON. Alternate, so Search is offered there and never becomes
+         what opens them on a double-click. Pictures by name rather than
+         public.image, which takes in SVG: an SVG can carry a script, and
+         opened from the Finder it would run with its folder to read. -->
+    <dict>
+      <key>CFBundleTypeName</key><string>Document</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array><string>com.adobe.pdf</string><string>public.png</string><string>public.jpeg</string><string>com.compuserve.gif</string><string>public.heic</string><string>org.webmproject.webp</string><string>public.tiff</string><string>public.plain-text</string><string>public.json</string></array>
     </dict>
   </array>
   <!-- A browser goes wherever it is pointed, including at http sites and at

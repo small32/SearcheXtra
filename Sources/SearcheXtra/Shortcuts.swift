@@ -34,7 +34,8 @@ struct KeyCombo: Codable, Hashable {
     init?(event: NSEvent) {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let named = KeyCombo.names[event.keyCode] ?? ContentView.digits[event.keyCode].map(String.init)
-        guard let key = named ?? event.characters(byApplyingModifiers: [])?.lowercased(), !key.isEmpty else { return nil }
+        let key = named ?? event.shortcutKey
+        guard !key.isEmpty else { return nil }
         self.init(key, command: flags.contains(.command), shift: flags.contains(.shift),
                   option: flags.contains(.option), control: flags.contains(.control))
     }
@@ -90,7 +91,7 @@ struct KeyCombo: Codable, Hashable {
     }
 
     /// macOS's own, the ones every text field relies on, and the ones Search
-    /// keeps for itself: ⌘1–⌘9 for tabs, ⌃1–⌃9 for spaces, Tab and Escape
+    /// keeps for itself: ⌘1–⌘9 for tabs, Tab and Escape
     /// with anything. Not ours to give, and so never taken from the Mac.
     static func isReserved(_ combo: KeyCombo) -> Bool {
         let system: Set<KeyCombo> = [
@@ -104,7 +105,7 @@ struct KeyCombo: Codable, Hashable {
         ]
         if system.contains(combo) || combo.key == "tab" || combo.key == "escape" { return true }
         let digit = combo.key.count == 1 && ("1"..."9").contains(combo.key)
-        return digit && !combo.option && !combo.shift && (combo.command != combo.control)
+        return digit && !combo.option && !combo.shift && combo.command && !combo.control
     }
 
     /// Keys an extension never has, wherever Search's own commands are:
@@ -119,13 +120,14 @@ struct KeyCombo: Codable, Hashable {
 /// A menu command, and the key it has unless you give it another.
 struct Command: Identifiable {
     enum Section: String, CaseIterable {
-        case app = "SearcheXtra", file = "File", edit = "Edit", view = "View", tabs = "Tabs", bookmarks = "Bookmarks", history = "History"
+        case app = "SearcheXtra", file = "File", edit = "Edit", view = "View", tabs = "Tabs", spaces = "Spaces", bookmarks = "Bookmarks", history = "History"
         var title: String {
             switch self {
             case .app: return "SearcheXtra"
             case .file: return L10n.text("section.file")
             case .edit: return L10n.text("section.edit")
             case .view: return L10n.text("section.view")
+            case .spaces: return L10n.text("section.spaces")
             case .tabs: return L10n.text("section.tabs")
             case .bookmarks: return L10n.text("section.bookmarks")
             case .history: return L10n.text("section.history")
@@ -164,6 +166,7 @@ struct Command: Identifiable {
         Command("file.closeTab", L10n.text("Shortcuts.0882"), .file, KeyCombo("w")) { $0.closeFront() },
         Command("file.import", L10n.text("Shortcuts.0883"), .file, nil) { $0.bringingIn = "" },
         Command("file.share", L10n.text("Shortcuts.0884"), .file, nil) { $0.share() },
+        Command("file.exportPDF", L10n.text("command.exportPDF"), .file, nil) { $0.exportPDF() },
         Command("file.print", L10n.text("Shortcuts.0885"), .file, KeyCombo("p")) { $0.printPage() },
 
         Command("edit.find", L10n.text("Shortcuts.0886"), .edit, KeyCombo("f")) { $0.openFind() },
@@ -176,6 +179,8 @@ struct Command: Identifiable {
         Command("view.reloadOrigin", L10n.text("Shortcuts.0892"), .view, KeyCombo("r", option: true)) { $0.reload(fromOrigin: true) },
         Command("view.reader", L10n.text("Shortcuts.0893"), .view, KeyCombo("r", shift: true)) { $0.toggleReader() },
         Command("view.float", L10n.text("Shortcuts.0894"), .view, KeyCombo("p", shift: true)) { $0.toggleFloat() },
+        Command("view.dusk", L10n.text("appearance.darkenSite"), .view, KeyCombo("d", shift: true)) { $0.toggleDusk() },
+        Command("view.duskPause", L10n.text("appearance.pauseDarkening"), .view, KeyCombo("d", shift: true, option: true)) { $0.pauseDusk() },
         Command("view.hide", L10n.text("Shortcuts.0897"), .view, KeyCombo("h", shift: true)) { $0.toggleHiding() },
         Command("view.hidden", L10n.text("Shortcuts.0898"), .view, KeyCombo("u", shift: true)) { $0.reviewing.toggle() },
         Command("view.zoomIn", L10n.text("Shortcuts.0899"), .view, KeyCombo("+")) { $0.zoom(by: 1.1) },
@@ -240,7 +245,12 @@ struct Command: Identifiable {
         Command("history.downloads", L10n.text("Shortcuts.0927"), .history, KeyCombo("j", shift: true)) { $0.hoarding.toggle() },
         Command("history.clearData", L10n.text("Shortcuts.0928"), .history, KeyCombo("delete", shift: true)) { $0.recallMode = .clearing },
         Command("history.clear", L10n.text("Shortcuts.0929"), .history, nil) { $0.clearHistory() },
-    ]
+    ] + (1...9).map { number in
+        Command("spaces.\(number)", L10n.text("shortcuts.space", String(number)), .spaces,
+                KeyCombo(String(number), command: false, control: true)) { browser in
+            browser.switchSpace(index: number - 1)
+        }
+    }
 }
 
 /// What you've changed, on top of the defaults: a new key, or none. One for
@@ -259,7 +269,7 @@ final class ShortcutStore: ObservableObject {
     /// (see `adopt`), by its id here: "ext:" + extension + ":" + command.
     private var manifest: [String: Override] = [:]
 
-    private init() {
+    init() {
         // Read with the same rules the Settings box keeps: a key that isn't
         // ours to give stays the Mac's, whatever the file says.
         let saved = Store.settings.data(forKey: "shortcuts")
@@ -285,9 +295,9 @@ final class ShortcutStore: ObservableObject {
     func isChanged(_ id: String) -> Bool { changed[id] != nil }
     var anyChanged: Bool { !changed.isEmpty }
 
-    /// A command you gave `combo`, for the key monitor to run.
-    func changedCommand(on combo: KeyCombo) -> Command? {
-        Command.all.first { changed[$0.id] != nil && key(for: $0.id) == combo }
+    /// Changed commands, and Space keys which have no menu to handle their defaults.
+    func customCommand(on combo: KeyCombo) -> Command? {
+        Command.all.first { (changed[$0.id] != nil || $0.section == .spaces) && key(for: $0.id) == combo }
     }
 
     /// A key an extension may not have: one of the Mac's, or one of
@@ -328,9 +338,8 @@ final class ShortcutStore: ObservableObject {
     func clear(_ id: String) { set(nil, for: id) }
 
     func reset(_ id: String) {
-        changed[id] = nil
-        save()
-        applyExtensions()
+        if let key = defaultKey(for: id) { assign(key, to: id) }
+        else { set(nil, for: id) }
     }
 
     func resetAll() {
@@ -441,4 +450,6 @@ extension Command {
     /// to the page.
     static let split: Set<String> = ["tabs.split", "tabs.focusLeftPane", "tabs.focusRightPane", "tabs.focusOtherPane",
                                      "tabs.swapSplit", "tabs.separateSplit"]
+    /// Dark pages': with them off, not listed, and their keys go on to the page.
+    static let dusk: Set<String> = ["view.dusk", "view.duskPause"]
 }

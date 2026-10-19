@@ -55,6 +55,21 @@ final class BookmarkBarTests: XCTestCase {
         }
     }
 
+    func testOrdinaryBookmarkDoesNotReplaceAPinnedTab() {
+        Shared.prefs.bookmarkBarOpening = .standard
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        defer { for tab in browser.tabs { tab.close() } }
+        let home = URL(string: "http://127.0.0.1:1/pin")!
+        let destination = URL(string: "http://127.0.0.1:1/bookmark")!
+        browser.visit(home)
+        let pinned = browser.active!
+        browser.pin(pinned)
+        browser.visitBookmarkBar(destination)
+        XCTAssertEqual(pinned.address, home)
+        XCTAssertNotEqual(browser.activeID, pinned.id)
+        XCTAssertEqual(browser.active?.address, destination)
+    }
+
     func testBulkOpeningPreservesBookmarkOrder() {
         Shared.prefs.lazyTabs = true
         let browser = Browser(record: WindowRecord(), opensStartPage: false)

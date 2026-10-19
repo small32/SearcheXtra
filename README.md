@@ -6,6 +6,8 @@
 
 SearcheXtra 是基于 [Search](https://github.com/driceroland/Search) 的修改版，保留原版轻量、简洁的浏览体验，增加了**简体中文支持和界面语言切换**。原项目由 [Office Commun](https://officecommun.com) 开发，本仓库维护修改版。
 
+本次 2.2.0 同时提供 macOS ARM64 与 Windows x64 安装包；本轮上游新功能主要用于 macOS，Windows 包含扩展悬浮面板改进。后续开发以 macOS 为主。
+
 支持英文和简体中文，菜单、设置项及说明、弹窗和操作提示均提供两套文案。在 **设置 → 通用 → 界面语言** 中选择“跟随系统”“English”或“简体中文”，点击“重新启动 SearcheXtra”后生效。默认跟随系统，不支持的系统语言使用英文。
 
 ![SearcheXtra 浏览器界面，标签页位于左侧，网页占据其余区域](.github/screenshot.png)
@@ -33,6 +35,9 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 - **地址与搜索合一。** 输入网址直接打开，输入文字使用搜索引擎。地址补全来自本机历史记录，按下回车前不会发送输入内容。
 - **标签页与固定标签页。** 常用页面可以固定，显示为字母或网站图标。上次会话的标签页会恢复，切换到对应标签页时才创建网页视图。`⌘K` 按名称查找已打开的标签页。
 - **分屏浏览。** 在“设置 → 标签页”中启用分屏，将标签页拖到页面边缘，或选择“标签页 → 拆分当前页面”。拖动分隔线调整宽度，带边框的页面接收操作指令。分屏组合和宽度随空间保存，重启后可以恢复。
+- **标签管理与休眠。** 可选择新标签页位置、休眠时间和闲置自动关闭时间；支持多选标签页并复制网址、跨空间共享固定页，以及让指定网站保持唤醒。自动关闭默认停用，固定页、无痕页和有未提交输入的网页会保留。
+- **网页深色与刷新率。** 可将没有深色主题的网页自动转为深色，并按网站停用；120Hz 可选择从不、接通电源时或始终启用。
+- **网页 PDF。** 从文件菜单导出当前网页的完整 PDF。
 - **阅读模式。** `⇧⌘R` 提取文章正文，减少页面干扰。
 - **超级拖拽。** 在“设置 → 标签页 → 超级拖拽”中分别配置文字、链接和图片。参考 FlowMouse 的方向序列与兜底规则，支持后台搜索、打开位置、复制、收藏、保存图片及以图搜图；可导入 FlowMouse 的拖拽规则。详见[双语说明](docs/FLOW_DRAG.md)。
 - **隐藏网页元素。** 按下 `⇧⌘H` 后点击 Cookie 提示、订阅浮层或其他元素。隐藏规则按网站保存，下次访问时在页面绘制前生效。
@@ -41,9 +46,10 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 - **密码与钥匙串。** 登录成功后提示保存密码，点击登录字段时显示已保存账号。密码保存在 macOS 钥匙串中，由系统加密；支持从 Chrome、Arc、Dia、Brave 或 Edge 导入。系统通行密钥功能需要相应的签名和授权配置。
 - **浅色、深色与跟随系统。** 浏览器界面和网页可以随外观设置切换。
 - **书签、历史记录与下载。** 各自提供独立面板，支持搜索和快捷键打开。
-- **书签管理器。** 两端设置提供独立入口，支持搜索、导入 HTML、编辑、删除和文件夹管理，并可按名称排序。两端均支持全选、批量删除、拖动调整顺序及拖入文件夹；多选拖动保留原有顺序。
+- **书签管理器。** 设置提供独立入口，支持搜索、导入 HTML、编辑、删除和文件夹管理，并可按名称排序。支持全选、批量删除、拖动调整顺序及拖入文件夹；多选拖动保留原有顺序。
 - **Chrome 扩展。** 在“设置 → 扩展”中粘贴 Chrome 网上应用店链接，或打开扩展页面后点击添加。扩展运行在 WebKit 的扩展引擎上，浏览器补充部分 Chrome API。常用扩展可以固定，也可以加载本地未打包扩展，修改后点击重新载入。此功能需要 macOS 15.4 或更新版本，兼容情况取决于扩展使用的 API。
-- **MV3 用户脚本。** 声明用户脚本权限的扩展，在“扩展管理 → 详情”中提供默认关闭的“允许用户脚本”开关。Windows 保留 WebView2，macOS 保留 WebKit，两端均提供脚本注册、独立执行环境和消息通信；授权后请刷新网页。MV2 继续使用原有扩展加载方式。支持范围见[用户脚本说明](Windows/README.md#用户脚本--user-scripts)。
+- **MV3 用户脚本。** 声明用户脚本权限的扩展，在“扩展管理 → 详情”中提供默认关闭的“允许用户脚本”开关。基于 WebKit 提供脚本注册、独立执行环境和消息通信；授权后请刷新网页。MV2 继续使用原有扩展加载方式。支持范围见[用户脚本说明](Windows/README.md#用户脚本--user-scripts)。
+- **扩展侧边栏。** 支持扩展的侧边面板，面板位于网页旁，可拖动边缘调整宽度。新标签页设置可在空白页和已安装扩展提供的页面之间选择。
 - **多窗口与空间。** 可以创建多个窗口，并使用空间管理不同的标签页集合。
 - **版本更新。** 本分支的安装包从 [GitHub Releases](https://github.com/small32/SearcheXtra/releases) 下载更新。macOS 更新检查已使用本仓库的 GitHub Release，并按版本号比较；临时签名构建通过发布页下载后替换应用。
 
@@ -106,7 +112,7 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 
 ### Windows 版本
 
-仓库的 `Windows/` 目录包含使用 C#、WinUI 3 与 WebView2 重建的 Windows x64 版本，最低支持 Windows 10 1809。功能、平台差异、构建与测试方法见 [Windows 开发说明](Windows/README.md)。
+本次 2.2.0 继续构建 Windows x64 版本，支持 Windows 10 1809 及以上。实现与功能差异见 [Windows 开发说明](Windows/README.md)。后续开发以 macOS 为主。
 
 ### 源码与上游
 
@@ -213,15 +219,15 @@ Menus, settings, descriptions, dialogs, and action messages are available in Eng
 **[Download macOS and Windows releases →](https://github.com/small32/SearcheXtra/releases/latest)**
 
 - **macOS:** macOS 14 or later; the published package supports Apple silicon (ARM64). Download the ZIP, extract it, and move `SearcheXtra.app` to Applications. Extensions require macOS 15.4 or later.
-- **Windows:** Windows 10 1809 or later, x64 only. The Windows implementation uses C#, WinUI 3, and WebView2. See [Windows development notes](Windows/README.md) for features, platform differences, builds, and tests.
+- **Windows:** This 2.2.0 rebuild also supplies Windows x64 packages for Windows 10 1809 or later, including improved extension flyouts. The new upstream features in this update primarily target macOS. See the [Windows development notes](Windows/README.md) for platform differences. Future development focuses on macOS.
 
 Release packages are built with GitHub Actions. `SHA256SUMS.txt` contains package checksums. To retain compatibility with existing macOS installations, the data directory, preferences domain, and password keychain identifiers still use Search's internal names; renaming the app does not erase this data.
 
 ### Overview and features
 
-SearcheXtra keeps the interface focused on tabs and pages. On macOS, tabs can appear across the top or in a sidebar. The address field accepts both URLs and search terms. There is no recommendation feed, browser account, or cloud sync service. The macOS browser uses the system **WebKit** engine, the same underlying technology as Safari, without bundling Chromium. Windows uses **WebView2**.
+SearcheXtra keeps the interface focused on tabs and pages. On macOS, tabs can appear across the top or in a sidebar. The address field accepts both URLs and search terms. There is no recommendation feed, browser account, or cloud sync service. The macOS browser uses the system **WebKit** engine, the same underlying technology as Safari, without bundling Chromium.
 
-The following feature descriptions and keyboard shortcuts describe the macOS implementation; see the Windows notes for its implementation and differences.
+The following features and keyboard shortcuts describe the maintained macOS application.
 
 Set **Settings → General → Start page** to choose the page for new windows. Addresses such as `example.com` work without a scheme. Choose Use blank page to restore the blank start page. Changes take effect immediately without replacing open or restored pages. New tabs default to a blank page independently of this setting, or to an enabled new-tab extension's page. Private new tabs remain blank.
 
@@ -236,9 +242,10 @@ Set **Settings → General → Start page** to choose the page for new windows. 
 - **Appearance:** Light, dark, and system appearance settings apply to the browser and webpages.
 - **Bookmarks, history, and downloads:** Dedicated panels with search and keyboard shortcuts.
 - **Super drag:** Configure text, link and image drags in Settings → Tabs → Super drag. FlowMouse-style direction sequences and fallback rules support background search, tab positions, clipboard actions, bookmarks, image saving and reverse image search. FlowMouse drag rules can be imported. See the [bilingual guide](docs/FLOW_DRAG.md).
-- **Bookmark manager:** Available from Settings on both platforms, with search, HTML import, editing, deletion, folder management, and sorting by name. Both platforms support select all, bulk deletion, drag reordering, and dropping items into folders. Multi-item dragging preserves the original order.
+- **Bookmark manager:** Available from Settings, with search, HTML import, editing, deletion, folder management, and sorting by name. Supports select all, bulk deletion, drag reordering, and dropping items into folders. Multi-item dragging preserves the original order.
 - **Chrome extensions:** Install from a Chrome Web Store URL or its listing, pin frequently used extensions, or load an unpacked local extension and reload it after editing. On macOS, extensions use WebKit's extension engine with additional Chrome API compatibility. Support depends on the APIs an extension uses.
-- **MV3 user scripts:** Extensions declaring user-script permissions have an “Allow user scripts” switch under Manage extensions → Details, off by default. Windows retains WebView2 and macOS retains WebKit; both provide script registration, separate execution worlds, and messaging. Refresh webpages after granting access. MV2 retains its existing loading path. See the [user-script support details](Windows/README.md#用户脚本--user-scripts).
+- **MV3 user scripts:** Extensions declaring user-script permissions have an “Allow user scripts” switch under Manage extensions → Details, off by default. The WebKit implementation provides script registration, separate execution worlds, and messaging. Refresh webpages after granting access. MV2 retains its existing loading path. See the [user-script support details](Windows/README.md#用户脚本--user-scripts).
+- **Extension side panels:** Supported extension panels open beside the webpage with a draggable width. New-tab settings let you choose a blank page or a page provided by an installed extension.
 - **Windows and spaces:** Open multiple windows and organize sets of tabs into spaces.
 - **Updates:** Download this fork's packages from [GitHub Releases](https://github.com/small32/SearcheXtra/releases). The macOS updater checks this repository’s GitHub releases and compares version numbers. Ad-hoc-signed builds download the update from the release page for manual application replacement.
 

@@ -65,7 +65,7 @@ enum WhatsNew {
         Toggle(title: L10n.text("WhatsNew.1211"), detail: L10n.text("WhatsNew.1212"),
                since: "1.0.2", get: { $0.floatsAway }, set: { $0.floatsAway = $1 }),
         Toggle(title: L10n.text("WhatsNew.1213"), detail: L10n.text("WhatsNew.1214"),
-               since: "1.0.2", get: { $0.fastPages }, set: { $0.fastPages = $1 }),
+               since: "1.0.2", get: { $0.fastPages != .never }, set: { $0.fastPages = $1 ? .always : .never }),
         Toggle(title: L10n.text("WhatsNew.1215"), detail: L10n.text("WhatsNew.1216"),
                since: "1.0.3", get: { $0.autoScroll }, set: { $0.autoScroll = $1 }),
     ]

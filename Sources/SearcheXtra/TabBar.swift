@@ -85,6 +85,7 @@ struct TabBar: View {
                                                 topTab(tab, index: index, count: pins.count,
                                                        group: nil, strip: geo.size.width, each: each)
                                             }
+                                            if pinLine { PinLine() }
                                             ForEach(browser.tabGroups) { group in
                                                 GroupHeading(browser: browser, group: group,
                                                              horizontal: true, dragSpace: "strip")
@@ -100,7 +101,13 @@ struct TabBar: View {
                                                        group: nil, strip: geo.size.width, each: each)
                                             }
                                         } else {
+                                            // Drawn before the first tab that isn't a pin,
+                                            // rather than by splitting the run in two: the
+                                            // index and the count each tab is given are what
+                                            // carrying one along the row works from.
+                                            let firstLoose = browser.displayedTabs.firstIndex { $0.pin == nil }
                                             ForEach(Array(browser.displayedTabs.enumerated()), id: \.element.id) { index, tab in
+                                                if pinLine, index == firstLoose { PinLine() }
                                                 topTab(tab, index: index, count: browser.displayedTabs.count,
                                                        group: nil, strip: geo.size.width, each: each)
                                             }
@@ -133,7 +140,7 @@ struct TabBar: View {
                     // The way to a new page, right after the tabs rather than
                     // at the end of their run, so it is there however far the
                     // run has scrolled. Out of sight until the pointer is up here.
-                    Button { browser.newTab() } label: {
+                    Button { browser.launch() } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(Palette.muted)
@@ -233,8 +240,13 @@ struct TabBar: View {
                 : browser.parked[space.id] ?? Parked(tabs: [], active: nil)
             let shown = rowTabs(row.tabs, splits: row.splits)
             let each = width(in: strip, tabs: shown, splits: row.splits)
+            // The neighbour draws no group headings, so its line only ever
+            // stands between its pins and its own loose tabs.
+            let line = TabBar.showsPinLine(shown)
+            let firstLoose = shown.firstIndex { $0.pin == nil }
             HStack(spacing: Metrics.tabGap) {
-                ForEach(shown) { tab in
+                ForEach(Array(shown.enumerated()), id: \.element.id) { index, tab in
+                    if line, index == firstLoose { PinLine() }
                     rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
                             width: each, room: strip - lights - 12,
                             height: Metrics.strip, interactive: false, pill: pill)
@@ -333,6 +345,20 @@ struct TabBar: View {
         min(content(in: strip), room(in: strip))
     }
 
+    /// The line stands between the pins and the tabs that come and go, and
+    /// only with something on both sides of it: at either end of the run it
+    /// would be a line around nothing. A group heading counts as something,
+    /// since it shows even when its group holds no visible tab.
+    static func showsPinLine(_ tabs: [Tab], groups: Int = 0) -> Bool {
+        tabs.contains { $0.pin != nil } && (groups > 0 || tabs.contains { $0.pin == nil })
+    }
+
+    /// Whether this window's own run carries the line.
+    private var pinLine: Bool {
+        TabBar.showsPinLine(browser.displayedTabs,
+                            groups: browser.prefs.usesTabGroups ? browser.tabGroups.count : 0)
+    }
+
     private func overflowing(in strip: CGFloat) -> Bool {
         content(in: strip) > room(in: strip) + 0.5
     }
@@ -354,6 +380,7 @@ struct TabBar: View {
         let shown = Int(pinned + loose + headers)
         var total = pinned * Metrics.pinWidth + loose * each + extra
             + headingWidth + CGFloat(max(0, shown - 1)) * Metrics.tabGap
+            + (pinLine ? PinLine.space : 0)
         if let id = browser.editingTab, let tab = browser.tabs.first(where: { $0.id == id }) {
             let splitWidth = browser.prefs.splitView ? browser.split(for: tab).map { _ in splitItemWidth(base: each) } : nil
             let oldWidth = splitWidth ?? (tab.pin != nil ? Metrics.pinWidth : each)
@@ -394,6 +421,7 @@ struct TabBar: View {
             let spent = pinnedWidth(in: strip, tabs: displayed) + extra + edit
                 + browser.tabGroups.reduce(CGFloat.zero) { $0 + GroupHeading.width(for: $1.name) }
                 + CGFloat(max(0, pins + items.count + browser.tabGroups.count - 1)) * Metrics.tabGap
+                + (pinLine ? PinLine.space : 0)
             return max(Metrics.tabMinWidth, min(Metrics.tabWidth, (room(in: strip) - spent) / CGFloat(count)))
         }
         return width(in: strip, tabs: displayed, splits: browser.splits)
@@ -407,6 +435,7 @@ struct TabBar: View {
         let extra = pairWidthExtra(in: looseTabs, base: Metrics.tabMinWidth, splits: splits)
         let spent = pinnedWidth(in: strip, tabs: tabs)
             + extra + edit + CGFloat(max(0, tabs.count - 1)) * Metrics.tabGap
+            + (TabBar.showsPinLine(tabs) ? PinLine.space : 0)
         return max(Metrics.tabMinWidth, min(Metrics.tabWidth, (room(in: strip) - spent) / loose))
     }
 
@@ -445,7 +474,25 @@ struct TabBar: View {
     }
 }
 
-/// Back, forward, reload and history. They watch the live tab: whether
+/// The line between what is kept and what comes and goes, standing up in the
+/// strip as the column's own lies across it (see KeepLine in Side.swift). The
+/// same hairline grey, as tall as a tab's mark, with the run's gap on either
+/// side of it.
+struct PinLine: View {
+    static let width: CGFloat = 1
+    /// What it takes out of the run: itself, and the gap the stack puts
+    /// before it. The widths have to count it, or every tab is laid out as
+    /// though the line weren't there and the run runs a line's width over.
+    static let space: CGFloat = PinLine.width + Metrics.tabGap
+
+    var body: some View {
+        Rectangle()
+            .fill(Palette.hairline)
+            .frame(width: PinLine.width, height: 20)
+    }
+}
+
+/// Back, forward, reload and history. They watch the live tab, not the window: whether
 /// there is anywhere to go back to is the tab's to say, and it changes with
 /// every page. Used here and, beside the traffic lights instead of at the
 /// far end of the row, in the sidebar.
@@ -496,6 +543,16 @@ struct Helm: View {
                 }
                 .disabled(tab.isBlank)
                 .opacity(tab.isBlank ? 0.3 : 1)
+                // The menu's second item is the reason for it: ⌥⌘R has no
+                // button. Nothing to offer while the door is Stop.
+                .contextMenu {
+                    if !tab.loading && !tab.isBlank {
+                        Button(L10n.text("App.0131")) { browser.reload() }
+                            .shortcut("view.reload")
+                        Button(L10n.text("App.0132")) { browser.reload(fromOrigin: true) }
+                            .shortcut("view.reloadOrigin")
+                    }
+                }
                 Door(icon: "house", help: L10n.text("navigation.home")) { browser.openHome() }
                     .accessibilityLabel(L10n.text("navigation.home"))
                 HistoryDoor(browser: browser)
@@ -601,16 +658,26 @@ private struct TabPill: View {
             }
         }
         .background { ground }
+        .overlay {
+            if browser.selectedTabIDs.contains(tab.id) {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(Palette.ink.opacity(0.35), lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
+        }
         .modifier(Shake(travel: shake))
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         // Active tabs edit immediately; other tabs switch on the first click.
         .modifier(OneClick(double: false) {
+            guard NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty else { return }
+            browser.clearTabSelection()
             if live {
                 browser.beginTabEdit(tab)
             } else {
                 browser.select(tab)
             }
         })
+        .modifier(ModifiedTabClick { if !editing { browser.extendTabSelection(to: tab, modifiers: $0) } })
         .overlay { MiddleClick(act: close) }
         .onHover { hovering = $0 }
         .contextMenu { TabMenu(browser: browser, tab: tab, close: close) }
@@ -767,13 +834,20 @@ private struct TabPill: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
             .matchedGeometryEffect(id: "live", in: pill)
+        } else if browser.selectedTabIDs.contains(tab.id) {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Palette.wash)
         } else if hovering {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(Palette.hover)
-        } else if pinned {
+        } else if pinned || compact {
             // A letter with nothing behind it reads as debris. A pinned tab
             // keeps a faint ground of its own so the block of them reads as
-            // one thing.
+            // one thing, and a tab down to its mark stands in the same place:
+            // the title that said it was a tab is gone, and the same faint
+            // grey says it for the mark. The live, selected and hovered
+            // grounds above are unchanged, so a mark wears this one only
+            // while it is none of those.
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(Palette.wash.opacity(0.55))
         }
@@ -894,8 +968,8 @@ struct TabAddressField: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(browser: browser) }
 
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
+    func makeNSView(context: Context) -> Field {
+        let field = Field()
         field.delegate = context.coordinator
         field.isBordered = false
         field.isBezeled = false
@@ -912,11 +986,17 @@ struct TabAddressField: NSViewRepresentable {
         field.lineBreakMode = .byClipping
         field.stringValue = browser.tabDraft
         context.coordinator.watch(field)
+        // Suggestions follow the embedded field. The site card still opens
+        // explicitly from the adjacent site-information button.
+        TabOffersPanel.follow(browser, anchor: field)
         return field
     }
 
-    static func dismantleNSView(_ field: NSTextField, coordinator: Coordinator) {
+    static func dismantleNSView(_ field: Field, coordinator: Coordinator) {
+        field.arrived = nil
+        field.delegate = nil
         SiteCardPanel.hide()
+        TabOffersPanel.hide(for: coordinator.browser)
         coordinator.unwatch()
     }
 
@@ -930,7 +1010,7 @@ struct TabAddressField: NSViewRepresentable {
         return CGSize(width: max(0, width), height: proposal.height ?? natural.height)
     }
 
-    func updateNSView(_ field: NSTextField, context: Context) {
+    func updateNSView(_ field: Field, context: Context) {
         let coordinator = context.coordinator
         coordinator.browser = browser
         if !coordinator.typing, field.stringValue != browser.tabDraft {
@@ -939,15 +1019,19 @@ struct TabAddressField: NSViewRepresentable {
         guard !coordinator.claimed || coordinator.focusRequest != browser.focusRequest else { return }
         coordinator.claimed = true
         coordinator.focusRequest = browser.focusRequest
-        DispatchQueue.main.async {
-            field.window?.makeFirstResponder(field)
-            guard let editor = field.currentEditor() as? NSTextView else { return }
-            editor.drawsBackground = false
-            editor.selectedTextAttributes = [
-                .backgroundColor: NSColor(Palette.ink.opacity(0.11)),
-                .foregroundColor: Palette.NS.ink,
-            ]
-            editor.selectAll(nil)
+        DispatchQueue.main.async { coordinator.focus(field) }
+    }
+
+    /// SwiftUI can update the field before attaching it to a window. Keep
+    /// the focus request until attachment, as the omnibox does.
+    final class Field: NSTextField {
+        var arrived: (() -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil, let arrived else { return }
+            self.arrived = nil
+            arrived()
         }
     }
 
@@ -956,15 +1040,53 @@ struct TabAddressField: NSViewRepresentable {
         var claimed = false
         var focusRequest = -1
         var typing = false
+        /// A key that takes letters off: the field mustn't put the same
+        /// letters straight back as a completion, or it can't be shortened.
+        private var deleting = false
 
         init(browser: Browser) { self.browser = browser }
+
+        @MainActor func focus(_ field: Field) {
+            guard browser.editingTab != nil, field.delegate === self else { return }
+            guard let window = field.window else {
+                field.arrived = { [weak self, weak field] in
+                    DispatchQueue.main.async {
+                        guard let self, let field else { return }
+                        self.focus(field)
+                    }
+                }
+                return
+            }
+            field.arrived = nil
+            guard window.makeFirstResponder(field),
+                  let editor = field.currentEditor() as? NSTextView,
+                  window.firstResponder === editor,
+                  field.window === window,
+                  field.delegate === self else { return }
+            editor.drawsBackground = false
+            editor.selectedTextAttributes = [
+                .backgroundColor: NSColor(Palette.ink.opacity(0.11)),
+                .foregroundColor: Palette.NS.ink,
+            ]
+            editor.selectAll(nil)
+            browser.fieldFocused(in: window)
+        }
 
         func controlTextDidChange(_ note: Notification) {
             guard let field = note.object as? NSTextField else { return }
             SiteCardPanel.hide()
             typing = true
+            defer { typing = false }
+            let text = field.stringValue
+            let ending = browser.tabTyped(text)
+            // The rest of a place you have been, typed in selected, as ⌘L's
+            // field does: the next key replaces it and Return takes it.
+            if !deleting, let ending, let editor = field.currentEditor() as? NSTextView {
+                field.stringValue = text + ending
+                editor.selectedRange = NSRange(location: (text as NSString).length, length: (ending as NSString).length)
+            }
+            deleting = false
             browser.tabDraft = field.stringValue
-            typing = false
         }
 
         func control(
@@ -981,6 +1103,19 @@ struct TabAddressField: NSViewRepresentable {
             case #selector(NSResponder.cancelOperation(_:)):
                 browser.cancelTabEdit()
                 return true
+            case #selector(NSResponder.moveDown(_:)) where !browser.tabOffers.isEmpty:
+                browser.walkTab(1)
+                return true
+            case #selector(NSResponder.moveUp(_:)) where !browser.tabOffers.isEmpty:
+                browser.walkTab(-1)
+                return true
+            case #selector(NSResponder.deleteBackward(_:)),
+                 #selector(NSResponder.deleteForward(_:)),
+                 #selector(NSResponder.deleteWordBackward(_:)),
+                 #selector(NSResponder.deleteWordForward(_:)),
+                 #selector(NSResponder.deleteToBeginningOfLine(_:)):
+                deleting = true
+                return false
             default:
                 return false
             }
@@ -1033,7 +1168,17 @@ struct TabMenu: View {
     let close: () -> Void
 
     var body: some View {
-        if browser.prefs.usesTabGroups && tab.pin == nil && !tab.bench {
+        singleMenu
+        if browser.selectedTabIDs.contains(tab.id) && browser.visibleSelectedTabCount > 1 {
+            Divider()
+            Button(L10n.text("tabs.copyAddresses")) { browser.copySelectedTabLinks() }
+                .disabled(browser.selectedTabLinkCount == 0)
+        }
+    }
+
+    @ViewBuilder
+    private var singleMenu: some View {
+        if browser.prefs.usesTabGroups && tab.pin == nil && !tab.shy && !tab.bench {
             Menu(L10n.text("TabBar.1092")) {
                 Button(L10n.text("TabBar.1093")) { browser.addTabGroup(containing: tab) }
                 if !browser.tabGroups.isEmpty { Divider() }
@@ -1061,18 +1206,22 @@ struct TabMenu: View {
             if rows {
                 Button(tab.listed ? L10n.text("TabBar.1097") : L10n.text("TabBar.1098")) { browser.setListed(tab, !tab.listed) }
             }
-            // A row wears its title, not its letter; and a click on it is
-            // the address, so the way home a square's double-click is
-            // (Browser.goHome) is here instead, while it has wandered.
-            if rows && tab.listed {
-                Button(L10n.text("TabBar.1099")) { browser.goHome(tab) }
-                    .disabled(tab.home.map { Browser.samePage($0, tab.address) } ?? true)
-            } else {
+            // Every active tab edits its embedded address on click. Keep
+            // returning a pin to its saved page as an explicit menu action.
+            Button(L10n.text("TabBar.1099")) { browser.goHome(tab) }
+                .disabled(tab.home.map { Browser.samePage($0, tab.address) } ?? true)
+            if !(rows && tab.listed) {
                 Button(L10n.text("TabBar.1100")) { browser.editLetter(tab) }
+            }
+            if browser.prefs.showsSharedPins {
+                Button(tab.everywhere ? L10n.text("tabs.keepHere") : L10n.text("tabs.keepEverywhere")) {
+                    if tab.everywhere { browser.keepHere(tab) } else { browser.shareEverywhere(tab) }
+                }
             }
             Button(L10n.text("TabBar.1101")) { browser.unpin(tab) }
         }
-        if browser.prefs.usesSpaces, !tab.bench,
+        // A shared pin is in every space already: nowhere to move it.
+        if browser.prefs.usesSpaces, !tab.bench, !tab.everywhere,
            tab.address.flatMap({ Browser.extensionHost(of: $0) }) == nil {
             Menu(L10n.text("TabBar.1102")) {
                 ForEach(browser.spaces.filter { $0.id != browser.spaceID }) { space in
@@ -1170,6 +1319,39 @@ struct TabMenu: View {
         // look for it: here too, where tabs are closed.
         Button(browser.reopenTitle) { browser.reopen() }
             .disabled(browser.ghosts.isEmpty)
+    }
+}
+
+/// Observe the press without recognizing a hold that would take the row's drag.
+struct TabPress: ViewModifier {
+    let enabled: Bool
+    let active: Bool
+    @Binding var selected: Bool
+    let act: () -> Void
+
+    func body(content: Content) -> some View {
+        content.onLongPressGesture(minimumDuration: .infinity, maximumDistance: .infinity, pressing: { down in
+            if !down {
+                // The row's release handler must see which press selected it.
+                DispatchQueue.main.async { selected = false }
+                return
+            }
+            guard enabled, NSEvent.modifierFlags.intersection([.command, .control, .shift]).isEmpty else { return }
+            selected = !active
+            if selected { act() }
+        }, perform: {})
+    }
+}
+
+/// A modified tap selects tabs; a drag stays with the row's drag gesture.
+struct ModifiedTabClick: ViewModifier {
+    let act: (NSEvent.ModifierFlags) -> Void
+
+    func body(content: Content) -> some View {
+        content.simultaneousGesture(TapGesture().onEnded {
+            let modifiers = NSEvent.modifierFlags
+            if !modifiers.intersection([.command, .shift]).isEmpty { act(modifiers) }
+        })
     }
 }
 
@@ -1371,8 +1553,8 @@ struct PinField: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(browser: browser, tab: tab) }
 
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
+    func makeNSView(context: Context) -> Field {
+        let field = Field()
         field.delegate = context.coordinator
         field.isBordered = false
         field.drawsBackground = false

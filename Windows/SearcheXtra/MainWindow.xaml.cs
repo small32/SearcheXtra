@@ -56,6 +56,7 @@ public sealed partial class MainWindow : Window
         {
             if (closing) return;
             args.Cancel = true; closing = true; selectionVersion++;
+            closeExtensionPopup?.Invoke();
             sleepTimer.Stop(); saveTimer.Stop();
             await SaveStateAsync();
             while (saving) await Task.Delay(20);
@@ -408,6 +409,7 @@ public sealed partial class MainWindow : Window
         closing = true; selectionVersion++;
         // Complete pending panels so their finally blocks stop timers and close WebViews.
         overlayClose?.Invoke();
+        closeExtensionPopup?.Invoke();
         sleepTimer.Stop(); saveTimer.Stop(); store.Changed -= OnStoreChanged;
         benchCancellation?.Cancel(); benchCancellation?.Dispose(); benchCancellation = null;
         foreach (var view in views.Values) view.Dispose();

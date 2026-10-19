@@ -1,13 +1,14 @@
-name: macOS startup
+name: macOS validation
 
 on:
   push:
-    branches: ['codex/**']
+    branches: [main, 'codex/**']
     paths:
       - 'Sources/SearcheXtra/**'
       - 'Tests/SearcheXtraTests/**'
       - 'Tests/ExtensionUserScriptsTests.mjs'
       - 'Tests/ExtensionUserWorldTests.mjs'
+      - 'Tests/ExtensionWorkerRecovery/**'
       - 'Tests/FlowDragTests.mjs'
       - 'Tests/run-macos-regressions.sh'
       - 'Tests/verify-macos-app-launch.sh'
@@ -22,26 +23,13 @@ permissions:
 jobs:
   startup:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       SEARCH_ARCH: arm64
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-
-      - name: Diagnose installed 2.1.0 before building
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SEARCHEXTRA_LAUNCH_LOG_DIR: build/macos-launch-smoke/baseline
-        shell: bash
-        run: |
-          baseline="$RUNNER_TEMP/searchextra-startup-baseline"
-          mkdir -p "$baseline"
-          gh release download v2.1.0 --repo "$GITHUB_REPOSITORY" --pattern SearcheXtra-2.1.0-arm64.zip --dir "$baseline"
-          ditto -x -k "$baseline/SearcheXtra-2.1.0-arm64.zip" "$baseline"
-          bash Tests/verify-macos-app-launch.sh "$baseline/SearcheXtra.app" "$baseline/no-build-resources.bundle"
 
       - name: Build macOS ARM64
         run: ./build.sh release
@@ -55,6 +43,7 @@ jobs:
         run: |
           node Tests/ExtensionUserScriptsTests.mjs
           node Tests/ExtensionUserWorldTests.mjs
+          node Tests/ExtensionWorkerRecovery/run.js
           node Tests/FlowDragTests.mjs
 
       - name: Verify original ScriptCat MV3 package

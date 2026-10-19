@@ -26,6 +26,8 @@ struct WelcomePanel: View {
     @State private var isDefault = Links.isDefault
     @State private var asked = false
 
+    private var importsPasswords: Bool { (source ?? ImportSource.installed().first)?.importsPasswords ?? false }
+
     private let pages = 4
 
     var body: some View {
@@ -83,12 +85,12 @@ struct WelcomePanel: View {
             let sources = ImportSource.installed()
             let unreadable = Chromium.unreadable()
             if sources.isEmpty {
-                Text(unreadable.isEmpty
-                     ? L10n.text("Welcome.1149")
-                     : unreadable.map { L10n.text("Welcome.1150", String(describing: $0.source.name), String(describing: $0.looked)) }.joined(separator: "\n"))
-                    .font(.system(size: 13))
-                    .foregroundStyle(Palette.faint)
-                    .fixedSize(horizontal: false, vertical: true)
+                if unreadable.isEmpty {
+                    Text(L10n.text("Welcome.1149"))
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.faint)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } else {
                 VStack(alignment: .leading, spacing: 14) {
                     if sources.count > 1 {
@@ -101,14 +103,19 @@ struct WelcomePanel: View {
                             .font(.system(size: 13))
                             .foregroundStyle(Palette.muted)
                     }
-                    Choice(L10n.text("Welcome.1152"), L10n.text("Welcome.1153"), on: $wantsPasswords)
+                    if importsPasswords {
+                        Choice(L10n.text("Welcome.1152"), L10n.text("Welcome.1153"), on: $wantsPasswords)
+                    } else {
+                        Text(L10n.text("import.passwordsUnsupported", (source ?? sources[0]).name))
+                            .font(.system(size: 13)).foregroundStyle(Palette.muted)
+                    }
                     Choice(L10n.text("Welcome.1154"), L10n.text("Welcome.1155"), on: $wantsBookmarks)
                     Choice(L10n.text("Welcome.1156"), L10n.text("Welcome.1157"), on: $wantsHistory)
                 }
 
                 HStack(spacing: 12) {
                     Big(bringing ? L10n.text("Welcome.1158") : L10n.text("Welcome.1159"), filled: true) { bringAll() }
-                        .disabled(bringing || brought != nil || !(wantsPasswords || wantsHistory || wantsBookmarks))
+                        .disabled(bringing || brought != nil || !((importsPasswords && wantsPasswords) || wantsHistory || wantsBookmarks))
                     if bringing { Ring(size: 10) }
                     if let brought {
                         Text(brought)
@@ -118,6 +125,13 @@ struct WelcomePanel: View {
                     }
                 }
                 .animation(Motion.settle, value: brought)
+            }
+
+            if !unreadable.isEmpty {
+                Text(unreadable.map(\.message).joined(separator: "\n"))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.faint)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             // Safari, a browser on another Mac, one Search can't read: what
@@ -231,7 +245,7 @@ struct WelcomePanel: View {
         bringing = true
         var lines: [String] = []
         let group = DispatchGroup()
-        if wantsPasswords {
+        if wantsPasswords && source.importsPasswords {
             group.enter()
             DispatchQueue.global(qos: .userInitiated).async {
                 let outcome = Result { try source.read(profile: profile) }
