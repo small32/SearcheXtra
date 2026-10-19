@@ -4289,6 +4289,14 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // The next document gets this site's stylesheet of hidden things,
         // decided here because here is the last moment before it loads.
         if action.targetFrame?.isMainFrame ?? true, let tab = tab(for: webView) {
+            if action.navigationType == .reload, action.request.httpMethod == "GET", tab.needsExtensionReload {
+                decisionHandler(.cancel)
+                DispatchQueue.main.async { [weak tab, weak webView] in
+                    guard let tab, let webView, tab.built === webView else { return }
+                    tab.reload()
+                }
+                return
+            }
             let host = curtain.host(of: url)
             tab.arm(hiding: curtain.css(on: host))
             // And the blocker, on or off for where it is going.

@@ -490,6 +490,15 @@ final class Tab: ObservableObject, Identifiable {
     let flowDrag=FlowDragRelay()
     func refreshFlowDrag() {guard let web=built else{return};flowDrag.configure(web);arm(hiding:veils)}
     func refreshUserScripts() { arm(hiding: veils) }
+    private(set) var needsExtensionReload = false
+    /// Native extension worlds can retain storage listeners from an unloaded
+    /// runtime. Retire the view on the user's next refresh, leaving the
+    /// current document and any unfinished input alone until then.
+    func extensionRuntimeChanged() {
+        if built != nil, carriesExtensions, let address, Browser.extensionHost(of: address) == nil {
+            needsExtensionReload = true
+        }
+    }
     var onFlowDrag:((Tab,FlowDragRequest)->Void)?
     private let shop = StoreRelay()
     private let iconChanges = IconRelay()
@@ -1184,7 +1193,7 @@ final class Tab: ObservableObject, Identifiable {
     /// take — no error, no navigation, just a view that goes on sitting on
     /// about:blank with nothing left to say so. Still there, or still
     /// answering for a process that's already gone, is asked once more.
-    private func loadAndVerify(_ url: URL, state: Any? = nil, tries: Int = 0, check: Int? = nil) {
+    private func loadAndVerify(_ url: URL, state: Any? = nil, fromOrigin: Bool = false, tries: Int = 0, check: Int? = nil) {
         if check == nil { loadCheck &+= 1 }
         let check = check ?? loadCheck
         guard check == loadCheck, address == url, pending == nil else { return }
@@ -1201,7 +1210,7 @@ final class Tab: ObservableObject, Identifiable {
         let view = web
         if view.window == nil, tries < 50 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { [weak self] in
-                self?.loadAndVerify(url, state: state, tries: tries + 1, check: check)
+                self?.loadAndVerify(url, state: state, fromOrigin: fromOrigin, tries: tries + 1, check: check)
             }
             return
         }
@@ -1214,6 +1223,7 @@ final class Tab: ObservableObject, Identifiable {
         } else {
             view.open(url)
         }
+        if fromOrigin { view.reloadFromOrigin() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak view] in
             guard let self, let view, built === view, check == loadCheck,
                   address == url, pending == nil else { return }
@@ -1270,7 +1280,7 @@ final class Tab: ObservableObject, Identifiable {
     /// quiet a different way, and firing it too here raced this very load
     /// with a second one of its own for the same address.
     @discardableResult
-    func wake() -> Bool {
+    func wake(fromOrigin: Bool = false) -> Bool {
         guard let url = pending else { return false }
         pending = nil
         failure = nil
@@ -1286,7 +1296,7 @@ final class Tab: ObservableObject, Identifiable {
             uncover(after: 4)
         }
         picture = nil
-        loadAndVerify(url, state: state)
+        loadAndVerify(url, state: state, fromOrigin: fromOrigin)
         return true
     }
 
@@ -1348,6 +1358,17 @@ final class Tab: ObservableObject, Identifiable {
     /// there is nothing else for it to reload.
     func reload(fromOrigin: Bool = false) {
         loadCheck &+= 1
+        if needsExtensionReload, let built, let address {
+            memory = built.isLoading ? nil : built.interactionState
+            pending = address
+            picture = nil
+            cover = nil
+            discard()
+            configuration.userContentController = WKUserContentController()
+            _ = wake(fromOrigin: fromOrigin)
+            objectWillChange.send()
+            return
+        }
         // A pin put down with ⌘W has no view left to reload; waking it is
         // the reload.
         guard !wake() else { return }
@@ -1387,6 +1408,7 @@ final class Tab: ObservableObject, Identifiable {
     /// next time anyone asks for it.
     private func discard() {
         loadCheck &+= 1
+        needsExtensionReload = false
         watch = []
         ears.stop()
         guard let web = built else { return }

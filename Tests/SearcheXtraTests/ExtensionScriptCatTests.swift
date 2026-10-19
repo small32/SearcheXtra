@@ -165,18 +165,21 @@ final class ExtensionScriptCatTests: XCTestCase {
                 return scripts.contains { $0["id"] as? String == scriptID }
             }
             show(website)
-            try await reload(website.web)
+            try await reload(website, in: window)
             func state() async throws -> [String: Any] {
                 try await self.evaluate(website.web, "return { started: document.documentElement.getAttribute('data-sx-scriptcat-started'), read: document.documentElement.getAttribute('data-sx-scriptcat-read'), writing: document.documentElement.getAttribute('data-sx-scriptcat-writing'), wrote: document.documentElement.getAttribute('data-sx-scriptcat-wrote'), count: document.documentElement.getAttribute('data-sx-scriptcat-count'), xhr: document.documentElement.getAttribute('data-sx-scriptcat-xhr'), error: document.documentElement.getAttribute('data-sx-scriptcat-error') };") as? [String: Any] ?? [:]
             }
             func permissionCycle(_ label: String, mv2: Bool) async throws {
                 permissionPhase = label
                 let previousCount = Int((try await state())["count"] as? String ?? "0") ?? 0
+                let previousView = website.web
                 trace("permission cycle starting: \(label), previous count \(previousCount)")
                 let disable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, false))
                 let disabled = await disable.value
                 XCTAssertTrue(disabled)
-                try await reload(website.web)
+                XCTAssertTrue(website.built === previousView, "Changing permission leaves the current document untouched")
+                try await reload(website, in: window)
+                XCTAssertFalse(website.built === previousView, "A native refresh replaces the unloaded extension worlds")
                 let revoked = try await evaluate(website.web, "return document.documentElement.getAttribute('data-sx-scriptcat-started') === null && (!mv2 || document.documentElement.getAttribute('data-sx-mv2') === 'native');", arguments: ["mv2": mv2])
                 XCTAssertEqual(revoked as? Bool, true)
                 let reenable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, true))
@@ -210,7 +213,7 @@ final class ExtensionScriptCatTests: XCTestCase {
                 context = restoredContext
                 options = restoredOptions
                 show(website)
-                try await reload(website.web)
+                try await reload(website, in: window)
                 trace("permission cycle actual native page relay: \(label) \(try await nativeRelayState(restoredOptions) ?? "unavailable")")
                 try await until("GM storage and XHR recover: \(label)") {
                     let value = try await state()
@@ -228,7 +231,7 @@ final class ExtensionScriptCatTests: XCTestCase {
             let firstCount = Int(try XCTUnwrap(firstState["count"] as? String)) ?? 0
             XCTAssertGreaterThan(firstCount, 0)
             XCTAssertGreaterThan(xhrServer.count("/page"), 0)
-            try await reload(website.web)
+            try await reload(website, in: window)
             try await until("GM value persists across navigation") {
                 let current = try await state()
                 return (Int(current["count"] as? String ?? "0") ?? 0) > firstCount
@@ -306,7 +309,7 @@ final class ExtensionScriptCatTests: XCTestCase {
                 return scripts.contains { $0["id"] as? String == "scriptcat-content" } && scripts.contains { $0["id"] as? String == scriptID }
             }
             show(website)
-            try await reload(website.web)
+            try await reload(website, in: window)
             try await until("GM storage and XHR after native chrome.runtime.reload") {
                 let value = try await state()
                 return (Int(value["count"] as? String ?? "0") ?? 0) > countBeforeExtensionReload && value["xhr"] as? String == "200:true"
@@ -320,7 +323,7 @@ final class ExtensionScriptCatTests: XCTestCase {
             let mv2Install = try XCTUnwrap(Extensions.shared.installFolder(at: mv2, confirm: false))
             await mv2Install.value
             show(website)
-            try await reload(website.web)
+            try await reload(website, in: window)
             try await until("MV2 and real ScriptCat MV3 run together") {
                 try await self.evaluate(website.web, "return document.documentElement.getAttribute('data-sx-mv2') === 'native' && document.documentElement.getAttribute('data-sx-scriptcat-started') === 'true';") as? Bool == true
             }
@@ -395,13 +398,20 @@ final class ExtensionScriptCatTests: XCTestCase {
                                          arguments: arguments, in: nil, contentWorld: .page)
     }
 
-    private func reload(_ web: WKWebView) async throws {
+    private func reload(_ tab: Tab, in window: NSWindow) async throws {
+        let web = tab.web
+        let expected = try XCTUnwrap(web.url).absoluteString
         let marker = UUID().uuidString
         _ = try await evaluate(web, "document.documentElement.setAttribute('data-sx-before-reload', marker); return true;", arguments: ["marker": marker])
         web.reload()
         try await until("a new document completes navigation") {
+            let web = tab.web
+            if window.contentView !== web {
+                web.frame = NSRect(x: 0, y: 0, width: 900, height: 650)
+                window.contentView = web
+            }
             guard !web.isLoading else { return false }
-            return (try await self.evaluate(web, "return document.readyState === 'complete' && document.documentElement.getAttribute('data-sx-before-reload') !== marker;", arguments: ["marker": marker])) as? Bool == true
+            return (try await self.evaluate(web, "return location.href === expected && document.readyState === 'complete' && document.documentElement.getAttribute('data-sx-before-reload') !== marker;", arguments: ["marker": marker, "expected": expected])) as? Bool == true
         }
     }
 

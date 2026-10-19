@@ -90,6 +90,10 @@ enum ExtensionUserScripts {
         refresh()
     }
 
+    static func contextWillReload() {
+        for page in pages.values { page.tab?.extensionRuntimeChanged() }
+    }
+
     /// Native resource-folder reloads start a new installation of user
     /// scripts and worlds. Extension storage, including GM values, is kept.
     static func reset(_ id: String) throws {
