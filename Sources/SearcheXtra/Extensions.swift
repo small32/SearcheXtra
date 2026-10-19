@@ -514,20 +514,25 @@ final class Extensions: NSObject, ObservableObject {
             }
             Extensions.fence(context)
             Extensions.watchTouches()
-            try controller.load(context)
-            watch(context)
-            if contexts[item.id] == nil, loadsThisRun.contains(item.id) { loadedBefore.insert(item.id) }
-            loadsThisRun.insert(item.id)
-            contexts[item.id] = context
-            ExtensionUserScripts.loaded(context)
-            // Keys you gave its commands in Settings › Shortcuts (#189).
-            ShortcutStore.shared.adopt(context, id: item.id)
-            actionsChanged += 1
+            try admit(context)
             return true
         } catch {
             NSLog("Extensions: couldn't load %@: %@", item.id, error.localizedDescription)
             return false
         }
+    }
+
+    private func admit(_ context: WKWebExtensionContext) throws {
+        let id = context.uniqueIdentifier
+        try controller.load(context)
+        watch(context)
+        if contexts[id] == nil, loadsThisRun.contains(id) { loadedBefore.insert(id) }
+        loadsThisRun.insert(id)
+        contexts[id] = context
+        ExtensionUserScripts.loaded(context)
+        // Keys you gave its commands in Settings › Shortcuts (#189).
+        ShortcutStore.shared.adopt(context, id: id)
+        actionsChanged += 1
     }
 
     private func unload(_ id: String) {
@@ -1016,9 +1021,21 @@ final class Extensions: NSObject, ObservableObject {
               Extensions.userScriptsAllowed(id) != on else { return nil }
         Store.settings.set(on, forKey: "extensions.userscripts.\(id)")
         objectWillChange.send()
+        let context = contexts[id]
         unload(id)
         guard item.enabled else { return nil }
-        return Task { await load(item) }
+        return Task {
+            guard Extensions.userScriptsAllowed(id) == on,
+                  installed.contains(where: { $0.id == id && $0.enabled && $0.version == item.version }) else { return false }
+            guard let context else { return await load(item) }
+            // WebKit reloads by unloading and loading the same context. A
+            // permission change keeps its package and native storage runtime;
+            // browser-owned worlds/handlers were retired by unload above.
+            context.setPermissionStatus(on ? .grantedExplicitly : .deniedExplicitly,
+                                        for: WKWebExtension.Permission(rawValue: "userScripts"))
+            do { try admit(context); return true }
+            catch { noteError(error.localizedDescription, for: id); return false }
+        }
     }
 
     func openOptions(_ id: String) {

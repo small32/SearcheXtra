@@ -112,15 +112,20 @@ final class ExtensionLifecycleTests: XCTestCase {
         XCTAssertTrue(enabled)
         XCTAssertTrue(Extensions.userScriptsAllowed(id))
         let second = try XCTUnwrap(Extensions.shared.contexts[id])
-        XCTAssertFalse(first === second)
+        XCTAssertTrue(first === second, "A permission reload retains WebKit's native context")
+        XCTAssertEqual(second.permissionStatus(for: WKWebExtension.Permission(rawValue: "userScripts")), .grantedExplicitly)
         let disable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, false))
         let disabled = await disable.value
         XCTAssertTrue(disabled)
         XCTAssertFalse(Extensions.userScriptsAllowed(id))
+        XCTAssertTrue(Extensions.shared.contexts[id] === second)
+        XCTAssertEqual(second.permissionStatus(for: WKWebExtension.Permission(rawValue: "userScripts")), .deniedExplicitly)
         XCTAssertEqual(try Data(contentsOf: saved), scripts)
         let enabledAgain = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, true))
         let restored = await enabledAgain.value
         XCTAssertTrue(restored)
+        XCTAssertTrue(Extensions.shared.contexts[id] === second)
+        XCTAssertEqual(second.permissionStatus(for: WKWebExtension.Permission(rawValue: "userScripts")), .grantedExplicitly)
         XCTAssertEqual(try Data(contentsOf: saved), scripts)
         Extensions.shared.remove(id)
         XCTAssertNil(Store.settings.object(forKey: "extensions.userscripts.\(id!)"))
@@ -187,6 +192,7 @@ final class ExtensionLifecycleTests: XCTestCase {
                                    "js": [["code": "globalThis.nativePermissionLifecycleProbe = true;"]]]
         _ = try await ExtensionUserScripts.call("userScripts.register", args: [[script]], context: context)
         XCTAssertTrue(hasProbe())
+        let previousBridge = try XCTUnwrap(controller.userScripts.first { $0.source.contains("__searchUserWorldReady") }).source
         let disable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, false))
         let disabled = await disable.value
         XCTAssertTrue(disabled)
@@ -196,6 +202,8 @@ final class ExtensionLifecycleTests: XCTestCase {
         let restored = await restore.value
         XCTAssertTrue(restored)
         XCTAssertTrue(hasProbe(), "Reauthorization restores the saved script in the existing tab")
+        let restoredBridge = try XCTUnwrap(controller.userScripts.first { $0.source.contains("__searchUserWorldReady") }).source
+        XCTAssertNotEqual(previousBridge, restoredBridge, "Reauthorization creates a fresh user-script transport")
         XCTAssertEqual(controller.userScripts.filter { $0.source.contains("__searchDiscoverFrame") }.count, 1)
     }
 

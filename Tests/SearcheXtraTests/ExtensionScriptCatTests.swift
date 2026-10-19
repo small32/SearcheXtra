@@ -341,6 +341,19 @@ final class ExtensionScriptCatTests: XCTestCase {
             if let diagnosticOptions {
                 let nativeState = try? await nativeRelayState(diagnosticOptions)
                 print("ScriptCat last native scripting state: \(nativeState ?? "unavailable")")
+                let services = try? await evaluate(diagnosticOptions.web, #"""
+                const probe = async (name, action) => {
+                  try { return [name, await Promise.race([action(), new Promise((_, reject) => setTimeout(() => reject(new Error('probe timed out')), 2500))])]; }
+                  catch (error) { return [name, { error: String(error) }]; }
+                };
+                return Object.fromEntries(await Promise.all([
+                  probe('earlyEnvironment', () => chrome.runtime.sendMessage({ action: 'serviceWorker/getExtensionEnv', data: { requireUAD: false } })),
+                  probe('platform', () => chrome.runtime.getPlatformInfo()),
+                  probe('storageKeys', async () => Object.keys(await chrome.storage.local.get(null))),
+                  probe('earlyConnections', () => chrome.runtime.sendMessage({ type: 'userScripts.LISTEN_CONNECTIONS' }))
+                ]));
+                """#)
+                print("ScriptCat worker service diagnostics: \(services ?? "unavailable")")
             }
             if permissionPhase != "not started" {
                 // Keep the failing document for diagnosis, and check a new

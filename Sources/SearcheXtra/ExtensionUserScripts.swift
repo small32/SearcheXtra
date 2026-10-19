@@ -139,7 +139,7 @@ enum ExtensionUserScripts {
                 retained.insert(handlerKey)
                 let channel = page.handlers[handlerKey]?.0 ?? ("userScripts_" + UUID().uuidString.replacingOccurrences(of: "-", with: ""))
                 if page.handlers[handlerKey] == nil {
-                    controller.addScriptMessageHandler(FrameBridge(context: registration.context, worldID: worldID, world: world, tab: tab), contentWorld: world, name: channel)
+                    controller.addScriptMessageHandler(FrameBridge(context: registration.context, generation: registration.generation, worldID: worldID, world: world, tab: tab), contentWorld: world, name: channel)
                     page.handlers[handlerKey] = (channel, world)
                 }
                 let properties = registration.worlds.first { ($0["worldId"] as? String ?? "") == worldID } ?? [:]
@@ -272,7 +272,8 @@ enum ExtensionUserScripts {
         for selected in targets {
             var result: [String: Any] = ["frameId": selected.frameID, "documentId": selected.documentID]
             do {
-                guard tab.built === view, registrations[id]?.context === context, Extensions.userScriptsAllowed(id),
+                guard tab.built === view, registrations[id]?.context === context,
+                      registrations[id]?.generation == registration.generation, Extensions.userScriptsAllowed(id),
                       !tab.shy || context.hasAccessToPrivateData,
                       let permitted = permissionURL(selected.url, frame: selected.frame.info),
                       context.hasAccess(to: permitted, in: Extensions.shared.adapter(for: tab)) else { throw invalid("User-script frame access was revoked") }
@@ -287,7 +288,8 @@ enum ExtensionUserScripts {
                     value = try await view.evaluateJavaScript(guardDocument + source, in: selected.frame.info, contentWorld: world)
                 } else {
                     let identity = try await view.callAsyncJavaScript(guardDocument + prefix + "\nreturn globalThis.__searchUserWorldDocument;", in: selected.frame.info, contentWorld: world)
-                    guard let document = identity as? String else { throw invalid("The user-script document was replaced") }
+                    guard let document = identity as? String,
+                          registrations[id]?.generation == registration.generation else { throw invalid("The user-script document was replaced") }
                     // Eval is explicitly available in the USER_SCRIPT
                     // policies accepted above. Its completion value and a
                     // returned promise become the API's injection result.
@@ -529,12 +531,13 @@ enum ExtensionUserScripts {
     private final class FrameBridge: NSObject, WKScriptMessageHandlerWithReply {
         let id: String
         let context: WKWebExtensionContext
+        let generation: String
         let worldID: String
         let world: WKContentWorld
         weak var tab: Tab?
         private var documents = Set<String>()
-        init(context: WKWebExtensionContext, worldID: String, world: WKContentWorld, tab: Tab) {
-            self.context = context; self.id = context.uniqueIdentifier; self.worldID = worldID; self.world = world; self.tab = tab
+        init(context: WKWebExtensionContext, generation: String, worldID: String, world: WKContentWorld, tab: Tab) {
+            self.context = context; self.generation = generation; self.id = context.uniqueIdentifier; self.worldID = worldID; self.world = world; self.tab = tab
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage,
@@ -542,7 +545,8 @@ enum ExtensionUserScripts {
             guard let tab, tab.built === message.webView, let body = message.body as? [String: Any],
                   let document = body["documentId"] as? String, document.count <= 128,
                   let operation = body["operation"] as? String, let url = message.frameInfo.request.url,
-                  let registration = registrations[id], registration.context === context, Extensions.userScriptsAllowed(id),
+                  let registration = registrations[id], registration.context === context,
+                  registration.generation == generation, Extensions.userScriptsAllowed(id),
                   (!tab.shy || registration.context.hasAccessToPrivateData),
                   let permitted = permissionURL(url, frame: message.frameInfo),
                   registration.context.hasAccess(to: permitted, in: Extensions.shared.adapter(for: tab)) else {
@@ -565,7 +569,7 @@ enum ExtensionUserScripts {
                                 document: document, worldID: worldID, url: url)
             Task { @MainActor in
                 do {
-                    guard registrations[id]?.context === context else { throw invalid("Extension context was replaced") }
+                    guard registrations[id]?.context === context, registrations[id]?.generation == generation else { throw invalid("Extension context was replaced") }
                     let host = try ExtensionUserScripts.host(for: id)
                     let value = try await host.call(operation, body: body, source: source)
                     replyHandler(["value": value ?? NSNull()], nil)
@@ -598,7 +602,7 @@ enum ExtensionUserScripts {
     private static func host(for id: String) throws -> Host {
         guard var registration = registrations[id] else { throw invalid("Extension was unloaded") }
         if let host = registration.host, !host.closed { return host }
-        let host = try Host(context: registration.context)
+        let host = try Host(context: registration.context, generation: registration.generation)
         registration.host = host
         registrations[id] = registration
         return host
@@ -608,6 +612,7 @@ enum ExtensionUserScripts {
     /// handler is never installed in a website or a user-script world.
     private final class Host: NSObject, WKNavigationDelegate, WKScriptMessageHandler, WKWebExtensionTab {
         let context: WKWebExtensionContext
+        let generation: String
         let web: WKWebView
         private var ready = false
         fileprivate var closed = false
@@ -615,9 +620,10 @@ enum ExtensionUserScripts {
         private var ports: [String: Source] = [:]
         private var deadline: Task<Void, Never>?
 
-        init(context: WKWebExtensionContext) throws {
+        init(context: WKWebExtensionContext, generation: String) throws {
             guard let configuration = context.webViewConfiguration else { throw invalid("No extension configuration") }
             self.context = context
+            self.generation = generation
             // A copied WKWebViewConfiguration shares its user-content
             // controller. The private transport handler belongs to this
             // one hidden page, never every extension page or another host.
@@ -664,8 +670,14 @@ enum ExtensionUserScripts {
             }
         }
 
+        private var current: Bool {
+            !closed && registrations[context.uniqueIdentifier]?.context === context
+                && registrations[context.uniqueIdentifier]?.generation == generation
+                && Extensions.userScriptsAllowed(context.uniqueIdentifier)
+        }
+
         private func authorized(_ source: Source) -> Bool {
-            guard !closed, registrations[context.uniqueIdentifier]?.context === context, Extensions.userScriptsAllowed(context.uniqueIdentifier),
+            guard current,
                   let tab = source.tab, let view = source.web, tab.built === view,
                   !tab.shy || context.hasAccessToPrivateData else { return false }
             return permissionURL(source.url, frame: source.frame).map { context.hasAccess(to: $0, in: Extensions.shared.adapter(for: tab)) } ?? false
@@ -681,7 +693,7 @@ enum ExtensionUserScripts {
 
         func targets(_ target: [String: Any], tab: Tab) async throws -> [TargetFrame] {
             try await loaded()
-            guard !closed, registrations[context.uniqueIdentifier]?.context === context, Extensions.userScriptsAllowed(context.uniqueIdentifier),
+            guard current,
                   let view = tab.built, !tab.shy || context.hasAccessToPrivateData,
                   let page = pages[ObjectIdentifier(view.configuration.userContentController)] else { throw invalid("The user-script tab is no longer available") }
             // A view handed over by an opener can already have a document
@@ -709,6 +721,7 @@ enum ExtensionUserScripts {
                 }
                 var lookup = try selector(for: tab)
                 lookup["marker"] = marker
+                guard current else { throw invalid("User-script context was revoked") }
                 let value = try await web.callAsyncJavaScript("return await globalThis.__searchUserScriptHost('targets', { target }, selector, {});",
                                                               arguments: ["target": target, "selector": lookup], in: nil, contentWorld: .page)
                 guard let rows = value as? [[String: Any]], !rows.isEmpty else { throw invalid("No matching user-script frames") }
@@ -721,8 +734,7 @@ enum ExtensionUserScripts {
                           let href = row["url"] as? String, href == native.url.absoluteString else { throw invalid("The user-script document changed during frame lookup") }
                     selected.append(TargetFrame(frame: native.frame, frameID: frameID, documentID: documentID, url: native.url, marker: marker))
                 }
-                guard tab.built === view, registrations[context.uniqueIdentifier]?.context === context,
-                      Extensions.userScriptsAllowed(context.uniqueIdentifier), !tab.shy || context.hasAccessToPrivateData else { throw invalid("User-script context was revoked") }
+                guard current, tab.built === view, !tab.shy || context.hasAccessToPrivateData else { throw invalid("User-script context was revoked") }
                 clearTargets(marked.values.filter { !used.contains($0.frame.document) }, in: view)
                 return selected.sorted { $0.frameID == 0 ? $1.frameID != 0 : ($1.frameID != 0 && $0.frameID < $1.frameID) }
             } catch {
@@ -766,6 +778,7 @@ enum ExtensionUserScripts {
                 selector["marker"] = marker
                 selector["token"] = source.document
             }
+            guard authorized(source) else { throw invalid("User-script context was revoked") }
             let origin = source.frame.securityOrigin
             let sender: [String: Any] = ["id": context.uniqueIdentifier, "url": sourceURL.absoluteString,
                                        "origin": Browser.origin(origin.protocol, origin.host, origin.port),
