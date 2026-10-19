@@ -9,14 +9,30 @@ final class SidebarPressTests: XCTestCase {
     private var windows: [NSWindow] = []
     private var restorePreferences: (() -> Void)?
     private var activationPolicy: NSApplication.ActivationPolicy?
+    private var previousPins: [UUID: [PinDef]] = [:]
+
+    override func setUp() async throws {
+        try await super.setUp()
+        Pins.load()
+        previousPins = Pins.bySpace
+    }
 
     override func tearDown() async throws {
         for window in windows { window.contentView = nil; window.close() }
         for browser in browsers { browser.cancelTabEdit(); browser.closeAll() }
-        restorePreferences?()
-        if let activationPolicy { NSApp.setActivationPolicy(activationPolicy) }
+        if let browser = browsers.first {
+            for space in Set(Pins.bySpace.keys).union(previousPins.keys) {
+                Pins.set(space, previousPins[space] ?? [], from: browser)
+            }
+        }
         windows.removeAll()
+        // Delayed session writes keep only a weak owner. Release the owners
+        // before restoring preferences, which can otherwise write them again.
         browsers.removeAll()
+        restorePreferences?()
+        restorePreferences = nil
+        if let activationPolicy { NSApp.setActivationPolicy(activationPolicy) }
+        Disk.drain()
         try await settle()
         try await super.tearDown()
     }
@@ -247,21 +263,30 @@ final class SidebarPressTests: XCTestCase {
         activationPolicy = NSApp.activationPolicy()
         NSApp.setActivationPolicy(.prohibited)
         let prefs = Shared.prefs
-        let previous = (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs)
+        let previous = (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs, prefs.usesSpaces)
         restorePreferences = {
-            (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs) = previous
+            (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs, prefs.usesSpaces) = previous
         }
-        let browser = Browser(record: WindowRecord())
+        prefs.sidebar = true
+        prefs.usesTabGroups = false
+        prefs.splitView = false
+        prefs.listsPins = false
+        prefs.roomyTabs = false
+        prefs.usesSpaces = false
+        // Even an empty WindowRecord restores the space's shared pins.
+        // A pin created by one test must not turn the next test's row into
+        // a pinned square, which has a different position and drag axis.
+        for space in Array(Pins.bySpace.keys) { Pins.forget(space) }
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
         browsers.append(browser)
-        browser.prefs.sidebar = true
-        browser.prefs.usesTabGroups = false
-        browser.prefs.splitView = false
-        browser.prefs.listsPins = false
-        browser.prefs.roomyTabs = false
+        XCTAssertEqual(browser.tabs.count, 1, "The fixture must start with only its blank tab")
+        XCTAssertEqual(browser.pinnedCount, 0, "Pins from another test must not change the row under the pointer")
         for word in ["one", "two", "three"] {
             if browser.tabs.last?.isBlank == false { browser.newTab() }
             browser.tabs.last?.restore(url: URL(string: "about:blank#\(word)")!, title: word)
         }
+        XCTAssertEqual(browser.tabs.count, 3)
+        XCTAssertEqual(browser.pinnedCount, 0)
         return browser
     }
 
