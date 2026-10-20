@@ -33,7 +33,9 @@ private struct SiteInfoButton: NSViewRepresentable {
         var browser: Browser
         var tab: Tab
         init(browser: Browser, tab: Tab) { self.browser = browser; self.tab = tab }
-        @MainActor @objc func open() { SiteCardPanel.show(for: tab, in: browser) }
+        @MainActor @objc func open(_ sender: NSButton) {
+            SiteCardPanel.show(for: tab, in: browser, under: sender)
+        }
     }
 }
 

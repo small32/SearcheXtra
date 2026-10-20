@@ -63,6 +63,9 @@
                                        test run: the tab groups; a tab into a new group, into one by name,
                                        or out of its group; a group folded or opened, or closed with its tabs
     ./bench tospace ID N               test run: Move to Space, the tab to the Nth space
+    ./bench popups ID [open N|allow]   the windows a tab's page was refused and its site; test run: open the
+                                       Nth newest as the sign would, or Always Allow its site
+    ./bench popups sites | remove SITE the sites allowed to open pop-ups; test run: remove one
     ./bench field TEXT [type] [go]     test run: TEXT pasted into the address field (type: a key at a time),
                                        each timed until the window has caught up; go: then Return, timed
                                        until the page is loading
@@ -104,6 +107,7 @@
     ./bench pages on|off               test run: let a hidden probe's pages be painted, off every screen (for picture)
     ./bench picture PATH               test run: the whole window, pages included, drawn to a PNG (start the probe hidden)
     ./bench film peek|unpeek|fold PATH [N] [SECS]  the window drawn N times while it animates → PATH-00.png… — --test runs only
+    ./bench film select ID PATH [N] [SECS]        the same, while selecting a tab
     ./bench film float|land PATH [SECS]  the tab in front's video out into its floating window, or back: every
                                        frame the page draws for SECS (1), its size, the video's box and how much
                                        of the view it fills → PATH.json; from a probe started hidden, both
@@ -371,6 +375,16 @@ def main(argv):
         elif len(args) >= 2 and args[1] == "new": request["id"], request["new"], request["name"] = args[0], True, " ".join(args[2:])
         elif len(args) >= 2: request["id"], request["name"] = args[0], " ".join(args[1:])
         elif args: sys.exit("usage: bench group [ID new [NAME] | ID NAME | ID none | fold NAME | close NAME]")
+    elif verb == "popups":
+        if not args: sys.exit("usage: bench popups ID [open N|allow] | sites | remove SITE")
+        if args[0] == "sites": request["action"] = "sites"
+        elif args[0] == "remove" and len(args) == 2: request["action"], request["site"] = "remove", args[1]
+        else:
+            request["id"] = args[0]
+            if len(args) >= 2 and args[1] == "open": request["action"], request["index"] = "open", int(args[2]) if len(args) > 2 else 0
+            elif len(args) == 2 and args[1] == "allow": request["action"] = "allow"
+            elif len(args) == 1: request["action"] = "state"
+            else: sys.exit("usage: bench popups ID [open N|allow] | sites | remove SITE")
     elif verb == "tospace":
         if len(args) != 2: sys.exit("usage: bench tospace ID N")
         request["id"], request["index"] = args[0], int(args[1])
@@ -466,7 +480,10 @@ def main(argv):
             try: request["args"] = [float(a) for a in args[1:]]
             except ValueError: sys.exit(usage)
     elif verb == "film":
-        if len(args) not in (2, 3, 4) or args[0] not in ("peek", "unpeek", "fold", "none", "float", "land"):
+        if args[:1] == ["select"]:
+            if len(args) < 3: sys.exit("usage: bench film select ID PATH [FRAMES] [EVERY]")
+            request["id"] = args.pop(1)
+        if len(args) not in (2, 3, 4) or args[0] not in ("peek", "unpeek", "fold", "none", "float", "land", "select"):
             sys.exit("usage: bench film peek|unpeek|fold|none|float|land PATH [FRAMES] [EVERY]")
         request["action"], request["path"] = args[0], os.path.abspath(args[1])
         if args[0] in ("float", "land"):

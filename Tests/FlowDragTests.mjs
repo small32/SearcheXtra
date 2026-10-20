@@ -36,13 +36,13 @@ const link={tagName:'A',href:'https://target.example/',textContent:'A link',getA
 const text={tagName:'SPAN',textContent:'selected text',getAttribute:()=>null,closest:()=>null};
 const img={tagName:'IMG',src:'https://example.com/img.png',alt:'Example image',complete:true,naturalWidth:480,naturalHeight:240,getAttribute:()=>null,closest:()=>null};
 const blank={closest:()=>null};
-function event(target,x,y,extra={}) {return {target,isTrusted:true,button:0,buttons:1,clientX:x,clientY:y,composedPath:()=>[target],defaultPrevented:false,preventDefault(){this.defaultPrevented=true},stopImmediatePropagation(){},dataTransfer:{getData:()=>''},...extra};}
-function drag(target,points,extra={}) {
+function event(target,x,y,extra={}) {return {target,isTrusted:true,button:0,buttons:1,clientX:x,clientY:y,composedPath:()=>[target],defaultPrevented:false,preventDefault(){this.defaultPrevented=true},stopImmediatePropagation(){this.immediatePropagationStopped=true},...extra};}
+function drag(target,points,extra={},releaseTarget=blank) {
  messages.length=0;handlers.get('mousedown')(event(target,100,100,extra));
- handlers.get('dragstart')(event(target,100,100,extra));
- for(const [x,y] of points)handlers.get('dragover')(event(blank,x,y,extra));
- const [x,y]=points.at(-1);const drop=event(blank,x,y,extra);handlers.get('drop')(drop);handlers.get('dragend')();
- return {drop,done:messages.filter(m=>m.phase==='perform')};
+ const start=event(target,100,100,extra);handlers.get('dragstart')(start);
+ for(const [x,y] of points)handlers.get('mousemove')(event(blank,x,y,extra));
+ const [x,y]=points.at(-1);const release=event(releaseTarget,x,y,{buttons:0,...extra});handlers.get('mouseup')(release);
+ return {start,release,done:messages.filter(m=>m.phase==='perform')};
 }
 assert.equal(drag(link,[[150,100]]).done[0].object,'link');
 assert.equal(drag(img,[[150,100]]).done[0].object,'image');
@@ -64,35 +64,29 @@ ctx.location.hostname='sub.example.com';assert.equal(drag(text,[[150,100]]).done
 ctx.location.hostname='example.com.evil';assert.equal(drag(text,[[150,100]]).done.length,1);
 ctx.location.hostname='example.com';config.excludedSites=[];config.enableText=false;assert.equal(drag(text,[[150,100]]).done.length,0);config.enableText=true;
 for(let i=0;i<100;i++)assert.equal(drag(text,[[150,100]]).done.length,1);
-messages.length=0;handlers.get('mousedown')(event(text,100,100));handlers.get('dragstart')(event(text,100,100));handlers.get('keydown')({key:'Escape'});handlers.get('drop')(event(blank,150,100));assert.equal(messages.filter(m=>m.phase==='perform').length,0);
-console.log('PASS: drag classification, selected link words, direction sequences, wildcard precedence, editable fields, exclusions, Escape and 100 repeated drags');
+console.log('PASS: mouse drag classification, selected link words, direction sequences, wildcard precedence, editable fields, exclusions and 100 repeated drags');
 
-ctx.window.__sxFlowDrag.configure({config,labels:{},pointerDrag:true});
-function pointerDrag(target,points,extra={},releaseTarget=blank) {
- messages.length=0;handlers.get('mousedown')(event(target,100,100,extra));
- const start=event(target,100,100,extra);handlers.get('dragstart')(start);
- // The WinUI host may end an HTML drag immediately, without dragover or drop.
- handlers.get('dragend')();
- for(const [x,y] of points)handlers.get('mousemove')(event(blank,x,y,extra));
- const [x,y]=points.at(-1);handlers.get('mouseup')(event(releaseTarget,x,y,{buttons:0,...extra}));
- return {start,done:messages.filter(m=>m.phase==='perform')};
-}
-assert.equal(pointerDrag(text,[[150,100]]).done[0].text,'selected text','Mouse release searches text without a native drop event');
-assert.equal(pointerDrag(text,[[100,60],[160,60]]).done[0].pattern,'↑→');
-assert.equal(pointerDrag(text,[[110,100]]).done.length,0,'Pointer clicks and small movements do not run actions');
-assert.equal(pointerDrag(text,[[150,100]],{isTrusted:false}).done.length,0);
-assert.equal(pointerDrag(text,[[150,100]],{}, {closest:()=>({})}).done.length,0,'Dropping into editable fields does not run a gesture');
-assert.equal(pointerDrag(text,[[950,100]]).done.length,0,'Release outside the page does not run an action');
-assert.equal(pointerDrag(text,[[150,100]]).start.defaultPrevented,true,'Owned drags bypass the broken WinUI native drag loop');
+assert.equal(drag(text,[[150,100]],{}, {closest:()=>({})}).done.length,0,'Releasing into editable fields does not run a gesture');
+assert.equal(drag(text,[[950,100]]).done.length,0,'Release outside the page does not run an action');
+const owned=drag(text,[[150,100]]);
+assert.equal(owned.start.defaultPrevented,true,'Owned gestures prevent native HTML dragging so mouse events keep flowing');
+assert.equal(owned.start.immediatePropagationStopped,true);
+assert.equal(owned.release.defaultPrevented,true,'A performed gesture consumes its mouse release');
 const click=event(blank,150,100);handlers.get('click')(click);assert.equal(click.defaultPrevented,true,'Drag release cannot navigate the underlying link');
 selection.toString=()=>'';selection.rangeCount=0;
-assert.equal(pointerDrag(link,[[150,100]]).done[0].object,'link');
-assert.equal(pointerDrag(img,[[150,100]]).done[0].object,'image');
 const normalClick=event(link,100,100);handlers.get('mousedown')(normalClick);handlers.get('mouseup')(normalClick);handlers.get('click')(normalClick);assert.equal(normalClick.defaultPrevented,false,'Ordinary link clicks retain their native behavior');
-config.enabled=false;assert.equal(pointerDrag(link,[[150,100]]).start.defaultPrevented,false);config.enabled=true;
+config.enabled=false;assert.equal(drag(link,[[150,100]]).start.defaultPrevented,false);config.enabled=true;
 messages.length=0;handlers.get('mousedown')(event(link,100,100));handlers.get('mousemove')(event(blank,150,100));handlers.get('keydown')({key:'Escape'});handlers.get('mouseup')(event(blank,150,100));assert.equal(messages.filter(m=>m.phase==='perform').length,0);
 const canceled=messages.find(m=>m.phase==='cancel');assert.ok(canceled);for(const key of ['phase','id','object','pattern','text','linkUrl','imageUrl','linkText','pageUrl'])assert.equal(typeof canceled[key],'string','Cancellation includes every native Codable request field');
-console.log('PASS: WinUI mouse-release text/link/image actions, native drag cancellation, direction sequences, native clicks, threshold, editable drops and Escape');
+assert.equal(drag(link,[[150,100]],{button:2}).done.length,0,'Only the left mouse button starts gestures');
+messages.length=0;handlers.get('mousedown')(event(link,100,100));handlers.get('mousemove')(event(blank,150,100,{isTrusted:false}));handlers.get('mouseup')(event(blank,150,100,{buttons:0}));
+assert.equal(messages.length,0,'Untrusted motion cannot start a gesture');
+handlers.get('mousedown')(event(link,100,100));handlers.get('mousemove')(event(blank,150,100));handlers.get('mouseup')(event(blank,150,100,{isTrusted:false,buttons:0}));
+assert.equal(ctx.window.__sxFlowDrag.isDragging(),true,'Untrusted mouse release cannot perform or terminate a real gesture');
+handlers.get('mousemove')(event(blank,160,100,{buttons:0}));
+assert.equal(ctx.window.__sxFlowDrag.isDragging(),false,'Losing the held mouse button cancels the gesture');
+assert.equal(messages.filter(m=>m.phase==='perform').length,0);
+console.log('PASS: mouse-release actions, native drag and click suppression, trusted mouse input, editable targets, outside releases and cancellation');
 
 function selectWords(words) {
  selection.toString=()=>words;selection.rangeCount=words?1:0;
@@ -100,7 +94,7 @@ function selectWords(words) {
 }
 function hold(target,x=150,y=100,moveTarget=blank) {
  messages.length=0;handlers.get('mousedown')(event(target,100,100));
- handlers.get('dragstart')(event(target,100,100));handlers.get('dragend')();
+ handlers.get('dragstart')(event(target,100,100));
  handlers.get('mousemove')(event(moveTarget,x,y));
 }
 function release(target=blank,x=150,y=100) {
@@ -177,17 +171,29 @@ assert.equal(previews().length,0,'Escape removes the content preview');release()
 selectWords('blur cleanup');hold(text);preview();handlers.get('blur')({target:ctx.window});
 assert.equal(previews().length,0,'Window blur removes the content preview');release();
 selectWords('settings cleanup');hold(text);preview();config.enabled=false;
-ctx.window.__sxFlowDrag.configure({config,labels:{},pointerDrag:true});
+ctx.window.__sxFlowDrag.configure({config,labels:{}});
 assert.equal(previews().length,0,'Disabling super drag removes the content preview immediately');release();config.enabled=true;
 
-ctx.window.__sxFlowDrag.configure({config,labels:{}});selectWords('native preview');
-handlers.get('mousedown')(event(text,100,100));const nativeStart=event(text,100,100);handlers.get('dragstart')(nativeStart);
-handlers.get('dragover')(event(blank,150,100));
-assert.equal(previews().length,0,'Native fallback drags retain the system preview without a duplicate overlay');
-assert.equal(nativeStart.defaultPrevented,false,'Native drag preview is not canceled');handlers.get('dragend')();
-console.log('PASS: pointer content previews for text, selected links, link URLs and image thumbnails, independent hint settings, positioning, no-action directions and cleanup; native preview retained');
+console.log('PASS: content previews for text, selected links, link URLs and image thumbnails, independent hint settings, positioning, no-action directions and cleanup');
 
-ctx.window.__sxFlowDrag.configure({config,labels:{},pointerDrag:true});
+const revised={...config,showHints:true,showTrail:true,rules:config.rules.map(rule=>rule.object==='text'&&rule.pattern==='→'?{...rule,action:'copy'}:rule)};
+const mouseMove=handlers.get('mousemove');
+ctx.sxInstallFlowDrag({config:revised,labels:{copy:'Copy text'}},()=>assert.fail('Reconfiguration keeps the installed message bridge'));
+assert.equal(handlers.get('mousemove'),mouseMove,'Reconfiguration updates the existing document without adding handlers');
+selectWords('live settings');hold(text);
+const feedback=()=>descendants(document.documentElement).find(node=>node.getAttribute('data-searchextra-flow-drag')!==null);
+let overlay=feedback();assert.ok(overlay,'Enabled gesture hints appear during mouse movement');
+assert.ok(descendants(overlay).some(node=>node.textContent==='→ · Copy text'),'Hint labels reflect the refreshed rules and localization');
+assert.equal(descendants(overlay).find(node=>node.tagName==='POLYLINE')?.getAttribute('points'),'100,100 150,100','Trail retains the press origin and current mouse position');
+handlers.get('mousemove')(event(editableTarget,160,100));
+assert.equal(feedback(),undefined,'Entering an editable target hides gesture hints and trail');
+assert.equal(previews().length,1,'Editable targets preserve the content preview');
+release(editableTarget,160,100);assert.equal(messages.filter(message=>message.phase==='perform').length,0);
+hold(text);release();assert.equal(feedback(),undefined,'Mouse release removes gesture hints and trail');
+assert.equal(messages.filter(message=>message.phase==='perform').length,1,'Refreshed rules keep mouse-release actions working');
+console.log('PASS: live configuration refresh, localized hints, drag trails and editable target feedback');
+
+ctx.window.__sxFlowDrag.configure({config,labels:{}});
 selectWords('navigating frame');hold(text);preview();
 handlers.get('pagehide')({persisted:true});
 assert.equal(previews().length,0,'Leaving a frame removes drag DOM before entering the back-forward cache');
@@ -199,3 +205,26 @@ handlers.get('pageshow')({persisted:true});
 assert.equal(messages.find(message=>message.phase==='ready')?.id,gone.id,'Restored frames register again using the same document identity');
 assert.equal(ctx.window.__sxFlowDrag.isDragging(),false,'A cached document cannot resume a canceled gesture');
 console.log('PASS: detached frame cleanup and back-forward cache restoration');
+
+// A super drag hides the original selection's fill without losing its text.
+const selectionStyles=()=>descendants(document.documentElement).filter(node=>node.tagName==='STYLE');
+selectWords('selection remains available');
+handlers.get('mousedown')(event(text,100,100));
+handlers.get('mousemove')(event(blank,110,100));
+assert.equal(selectionStyles().length,0,'Normal selection and motion below the threshold keep their original highlight');
+release(blank,110,100);
+for(const end of ['release','escape','blur','pagehide','disabled','lost-button']) {
+ hold(text);
+ assert.equal(selectionStyles().length,1,'A real super drag temporarily hides the selection background');
+ assert.match(selectionStyles()[0].textContent,/::selection.*background-color:\s*transparent/);
+ assert.equal(selection.toString(),'selection remains available','Hiding the fill does not clear the selected text');
+ if(end==='release')release();
+ if(end==='escape')handlers.get('keydown')({key:'Escape'});
+ if(end==='blur')handlers.get('blur')({target:ctx.window});
+ if(end==='pagehide')handlers.get('pagehide')({persisted:false});
+ if(end==='disabled'){config.enabled=false;ctx.window.__sxFlowDrag.configure({config,labels:{}});config.enabled=true;}
+ if(end==='lost-button')handlers.get('mousemove')(event(blank,160,100,{buttons:0}));
+ assert.equal(selectionStyles().length,0,`Ending by ${end} restores normal selection painting`);
+ assert.equal(selection.toString(),'selection remains available');
+}
+console.log('PASS: selection background hidden only during super drags and restored on release or cancellation');

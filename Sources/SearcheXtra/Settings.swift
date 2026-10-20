@@ -738,6 +738,7 @@ struct SettingsPanel: View {
                     Switch(on: $prefs.siteNotifications)
                 }
                 NotificationSites()
+                PopupSiteList(prefs: prefs)
             }
             Card {
                 Line(L10n.text("Settings.0819"), L10n.text("Settings.0820")) {

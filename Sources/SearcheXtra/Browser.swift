@@ -1494,6 +1494,9 @@ final class Browser: NSObject, ObservableObject {
     /// nothing again, and a field left empty is let go.
     func finishTabEdit() {
         guard let id = editingTab, let tab = tabs.first(where: { $0.id == id }) else { return }
+        // Focus can end before the site button opens its panel; the queued
+        // callback must not collapse the address while that panel is open.
+        guard !SiteCardPanel.keepsAddressOpen(in: self, tab: id) else { return }
         if renamingTab {
             commitTabEdit()
             return
@@ -4651,12 +4654,6 @@ final class Browser: NSObject, ObservableObject {
         return true
     }
 
-    /// Tab, or the right arrow at the end of the line: take what is offered.
-    func acceptEnding() {
-        guard let ending, !ending.isEmpty else { return }
-        typed += ending
-    }
-
     /// The arrow keys walk the list, and walking off the top lets go of it.
     func walk(_ step: Int) {
         guard !offers.isEmpty else { return }
@@ -4903,7 +4900,8 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             }
             if policy == .allow, action.targetFrame?.isMainFrame ?? true, let url = action.request.url {
                 let shy = self?.tab(for: webView)?.shy == true || !webView.configuration.websiteDataStore.isPersistent
-                Autoplay.apply(to: preferences, for: url, shy: shy)
+                Autoplay.apply(to: preferences, for: url, shy: shy,
+                               made: webView.configuration.mediaTypesRequiringUserActionForPlayback)
             }
             decisionHandler(policy, preferences)
         }
@@ -5133,8 +5131,20 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         for action: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        guard let opener = popupTab(for: webView),
-              opener.popupGesture.take(origin: PopupGesture.origin(action.sourceFrame), mainFrame: action.sourceFrame.isMainFrame) else { return nil }
+        guard let opener = popupTab(for: webView) else { return nil }
+        let clicked = opener.popupGesture.take(origin: PopupGesture.origin(action.sourceFrame), mainFrame: action.sourceFrame.isMainFrame)
+        if !clicked {
+            // A second window for a click that already had its one: the
+            // duplicate one click must not make, said nowhere.
+            if opener.popupGesture.spent() { return nil }
+            // No click just before: refused, and the tab says so (see
+            // BlockedPopups.swift), unless you allowed pop-ups from this site
+            // and it is the site's own page or frame asking.
+            guard popupsAllowed(opener, from: action.sourceFrame, top: opener.committed ?? webView.url) else {
+                opener.noteBlocked(action.request.url)
+                return nil
+            }
+        }
         let from = opener.id
         // WebKit's copy of the opener's configuration still holds the
         // opener's user content controller — its scripts and its message
@@ -5143,11 +5153,14 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // right-click on a picture on X, after following a link out of it,
         // did nothing at all. Each tab gets a controller of its own.
         configuration.userContentController = WKUserContentController()
+        // The opener's copy is what its view was made with, maybe before
+        // Settings › Videos wait for a click last moved.
+        configuration.mediaTypesRequiringUserActionForPlayback = Web.playback
         let tab = Tab(shy: opener.shy, configuration: configuration)
         tab.popup = windowFeatures.width != nil || windowFeatures.height != nil
             || windowFeatures.toolbarsVisibility?.boolValue == false
         tab.opener = from
-        opener.popupGesture.opened(tab.id)
+        if clicked { opener.popupGesture.opened(tab.id) }
         // The link menu's Open Link in New Tab: behind this tab, where a
         // ⌘-click's goes (see open(_:foreground:)).
         prepare(tab)

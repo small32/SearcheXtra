@@ -93,6 +93,25 @@ final class SidebarPressTests: XCTestCase {
         XCTAssertEqual(selected, 0)
     }
 
+    func testPopupSignDoesNotSelectOrEditItsRow() async throws {
+        let browser = makeBrowser()
+        let page = browser.tabs[0], active = browser.activeID
+        let oldGlyph = browser.prefs.glyph
+        browser.prefs.glyph = .letters
+        defer { browser.prefs.glyph = oldGlyph }
+        page.noteBlocked(URL(string: "https://example.test/popup"))
+        let window = makeWindow(browser)
+        try await settle()
+        // No website icon: the popup button is the first mark, at the leading
+        // edge. Its real click must not become the row's edit gesture.
+        let point = NSPoint(x: 18, y: rowPoint(0, in: window).y)
+        try await send(.leftMouseDown, at: point, in: window)
+        try await send(.leftMouseUp, at: point, in: window)
+        XCTAssertEqual(browser.activeID, active)
+        XCTAssertNil(browser.editingTab)
+        XCTAssertEqual(page.blockedPopups.count, 1)
+    }
+
     func testPinSelectsOnPressAndNextClickEditsItsAddress() async throws {
         let browser = makeBrowser()
         let first = browser.tabs[0]

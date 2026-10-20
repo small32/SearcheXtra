@@ -12,8 +12,21 @@ import SwiftUI
 enum SiteCardPanel {
     private static var panel: Panel?
     private static var resign: Any?
+    private static weak var owner: Browser?
+    private static var editingTab: Tab.ID?
 
     static var isShown: Bool { panel != nil }
+
+    static func keepsAddressOpen(in browser: Browser, tab: Tab.ID) -> Bool {
+        isShown && owner === browser && editingTab == tab
+    }
+
+    static func dismiss() {
+        let browser = owner
+        let tab = editingTab
+        hide()
+        if let browser, let tab, browser.editingTab == tab { browser.cancelTabEdit() }
+    }
 
     // MARK: - when
 
@@ -39,12 +52,12 @@ enum SiteCardPanel {
         }
     }
 
-    /// Under `field`, the tab's address, in `browser`'s window.
-    private static func show(for tab: Tab, in browser: Browser, under field: NSView) {
+    /// Under the address field or its site information button.
+    static func show(for tab: Tab, in browser: Browser, under field: NSView) {
         guard let window = field.window else { return }
+        hide()
         let card = SiteCard(browser: browser, tab: tab) {
-            SiteCardPanel.hide()
-            browser.cancelTabEdit()
+            SiteCardPanel.dismiss()
         }
         let host = FirstClick(rootView: AnyView(card.fixedSize()))
         let size = host.fittingSize
@@ -99,8 +112,10 @@ enum SiteCardPanel {
             panel.setFrame(frame, display: true)
         }
         self.panel = panel
+        owner = browser
+        editingTab = tab.id
         resign = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { SiteCardPanel.hide() }
+            MainActor.assumeIsolated { SiteCardPanel.dismiss() }
         }
     }
 
@@ -119,6 +134,8 @@ enum SiteCardPanel {
 
     static func hide() {
         original = nil
+        owner = nil
+        editingTab = nil
         if let resign { NotificationCenter.default.removeObserver(resign) }
         resign = nil
         guard let panel else { return }
@@ -130,6 +147,7 @@ enum SiteCardPanel {
     private final class Panel: NSPanel {
         override var canBecomeKey: Bool { true }
         override var canBecomeMain: Bool { false }
+        override func cancelOperation(_ sender: Any?) { SiteCardPanel.dismiss() }
     }
 
     /// Takes the first click even though its window never becomes key, and

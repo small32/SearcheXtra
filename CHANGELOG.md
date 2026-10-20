@@ -1,5 +1,18 @@
 # SearcheXtra 更新日志
 
+## 2.2.2 — 2026-10-21
+
+- 分别发布 macOS ARM64 和 Intel x86_64 安装包，不构建 Universal 版本。
+- Publish separate macOS ARM64 and Intel x86_64 packages, without a Universal build.
+
+- 移植上游 `6294b6a..b2048a0` 的 6 项更新：自动播放设置、弹窗拦截提示与站点允许、扩展弹窗宽度、浮动视频画面与 Twitch 聊天恢复，以及侧栏高亮动画；保留本地标签内地址编辑和中英双语。
+- 超级拖拽期间隐藏原文选择底色，松开或取消后恢复，保留选中文字。
+- Port six upstream updates through `b2048a0`: autoplay settings, blocked-popup controls, extension popup sizing, floating-video framing and Twitch chat restoration, and sidebar highlight motion; retain embedded address editing and both interface languages.
+- Hide the original selection background during super drag and restore it on release or cancellation without clearing the selected text.
+
+- 移除 Windows 应用、安装器和专用测试，构建与持续集成仅保留 macOS；精简平台适配代码与文档。
+- Remove the Windows application, installer, and dedicated tests. Builds and CI now target macOS, with platform adapters and documentation simplified.
+
 ## 2.2.0 — 覆盖更新 / Rebuild — 2026-10-19
 
 ### 简体中文

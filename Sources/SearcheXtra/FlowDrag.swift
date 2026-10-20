@@ -99,7 +99,7 @@ enum FlowDrag {
     static let source:String = L10n.resourceBundle.url(forResource:"FlowDrag",withExtension:"js").flatMap{try? String(contentsOf:$0,encoding:.utf8)} ?? ""
     static var options:String {
         let labels=Dictionary(uniqueKeysWithValues:FlowDrag.objects.flatMap(FlowDrag.actions).reduce(into:Set<String>()){$0.insert($1)}.map{($0,L10n.text("flowDrag.action."+$0))})
-        guard let data=try? JSONSerialization.data(withJSONObject:["config":JSONSerialization.jsonObject(with:JSONEncoder().encode(shared.config)),"labels":labels,"pointerDrag":true]),let text=String(data:data,encoding:.utf8) else{return "{}"}
+        guard let data=try? JSONSerialization.data(withJSONObject:["config":JSONSerialization.jsonObject(with:JSONEncoder().encode(shared.config)),"labels":labels]),let text=String(data:data,encoding:.utf8) else{return "{}"}
         return text
     }
     static var script:String {"(function(){"+source+";sxInstallFlowDrag("+options+",p=>webkit.messageHandlers.officeFlowDrag.postMessage(p));})();"}

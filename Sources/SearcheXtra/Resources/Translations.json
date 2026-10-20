@@ -1,4 +1,13 @@
 {
+  "popups.blocked": {"en":"Pop-up blocked","zh-Hans":"已拦截弹出窗口"},
+  "popups.blockedCount": {"en":"{0} pop-ups blocked","zh-Hans":"已拦截 {0} 个弹出窗口"},
+  "popups.open": {"en":"Open {0}","zh-Hans":"打开 {0}"},
+  "popups.allowTab": {"en":"Allow Pop-ups from {0} in This Tab","zh-Hans":"在此标签页中允许 {0} 的弹出窗口"},
+  "popups.allowSite": {"en":"Always Allow Pop-ups from {0}","zh-Hans":"始终允许 {0} 的弹出窗口"},
+  "popups.privateHelp": {"en":"Only until this private tab closes","zh-Hans":"仅在此无痕标签页关闭前有效"},
+  "popups.savedHelp": {"en":"Settings › Privacy lists the sites you allow","zh-Hans":"可在“设置 → 隐私”中管理已允许的网站"},
+  "popups.allowedHelp": {"en":"Can open pop-ups without a click","zh-Hans":"无需点击即可打开弹出窗口"},
+  "popups.remove": {"en":"Remove","zh-Hans":"移除"},
   "sync.peek.title": {"en":"Peek at a link with {0}","zh-Hans":"使用 {0} 预览链接"},
   "sync.peek.shift": {"en":"Shift-click","zh-Hans":"Shift 点按"},
   "sync.peek.optionShift": {"en":"Option-Shift-click","zh-Hans":"Option-Shift 点按"},
@@ -2840,8 +2849,8 @@
     "zh-Hans": "点击后才播放视频"
   },
   "Settings.0739": {
-    "en": "Videos don't start by themselves, even without sound; they play when you press play. Tabs already open follow once closed and opened again, or after they've slept",
-    "zh-Hans": "视频不会自动播放，即使已静音。点击播放才开始。已打开的标签页关闭重开或休眠后生效"
+    "en": "Videos don't start by themselves, even without sound; they play when you press play. Tabs already open follow from their next page, or once reloaded",
+    "zh-Hans": "视频不会自动播放，即使已静音。点击播放才开始。已打开的标签页在下次导航或刷新后生效"
   },
   "Settings.0740": {
     "en": "Float the video when you switch tabs",

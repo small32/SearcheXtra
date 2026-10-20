@@ -18,14 +18,16 @@ final class FlowDragTests:XCTestCase {
         var other=request;other.pattern="↑→";XCTAssertEqual(FlowDrag.resolve(config,other)?.action,"copy")
         config.excludedSites=["example.com"];XCTAssertNil(FlowDrag.resolve(config,other))
     }
-    @MainActor func testSharedScriptCancellationPayloadDecodes() throws {
+    @MainActor func testMouseDragCancellationPayloadDecodes() throws {
         let js=try XCTUnwrap(JSContext())
         js.evaluateScript(#"""
         const window={},location={href:'https://example.com/page',hostname:'example.com',protocol:'https:'};
         const handlers={},messages=[];
         const addEventListener=(name,handler)=>handlers[name]=handler;
-        const getSelection=()=>({toString:()=>'',rangeCount:0});
+        const getSelection=()=>({toString:()=> 'words',rangeCount:1,
+          getRangeAt:()=>({getClientRects:()=>[{left:90,right:170,top:90,bottom:120}]})});
         const crypto={getRandomValues:values=>values.fill(12)};
+        const document={createElement:()=>({setAttribute(){},style:{},remove(){}}),documentElement:{append(){}}};
         """#)
         js.evaluateScript(FlowDragSettings.source)
         js.evaluateScript(#"""
@@ -33,9 +35,10 @@ final class FlowDragTests:XCTestCase {
           showHints:false,showTrail:false,ignoreEditable:true,distanceThreshold:20,excludedSites:[],
           rules:[{object:'text',pattern:'→',action:'search'}]},labels:{}},message=>messages.push(message));
         const target={tagName:'SPAN',getAttribute:()=>null,closest:()=>null};
-        const event={target,isTrusted:true,button:0,clientX:100,clientY:100,defaultPrevented:false,
-          composedPath:()=>[target],dataTransfer:{getData:()=> 'words'}};
-        handlers.mousedown(event);handlers.dragstart(event);handlers.keydown({key:'Escape'});
+        const event={target,isTrusted:true,button:0,buttons:1,clientX:100,clientY:100,defaultPrevented:false,
+          composedPath:()=>[target],preventDefault(){this.defaultPrevented=true},stopImmediatePropagation(){}};
+        handlers.mousedown(event);handlers.dragstart(event);
+        handlers.mousemove({...event,clientX:150});handlers.keydown({key:'Escape'});
         """#)
         XCTAssertNil(js.exception?.toString())
         let value=try XCTUnwrap(js.evaluateScript("JSON.stringify(messages.find(message=>message.phase==='cancel'))")?.toString())
@@ -58,7 +61,7 @@ final class FlowDragTests:XCTestCase {
         XCTAssertFalse(saved.enabled)
         XCTAssertEqual(saved.rules[0].action,"copy")
         let options=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(FlowDragSettings.options.utf8)) as? [String:Any])
-        XCTAssertEqual(options["pointerDrag"] as? Bool,true)
+        XCTAssertEqual(Set(options.keys),Set(["config","labels"]))
         let injected=try JSONDecoder().decode(FlowDragConfig.self,from:JSONSerialization.data(withJSONObject:XCTUnwrap(options["config"])))
         XCTAssertEqual(injected,saved)
     }

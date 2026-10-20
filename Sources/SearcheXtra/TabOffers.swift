@@ -15,7 +15,6 @@ import SwiftUI
 @MainActor
 enum TabOffersPanel {
     private static var panel: Panel?
-    private static var host: Host?
     private static var anchors: [ObjectIdentifier: WeakView] = [:]
     private static weak var owner: Browser?
     private static var watching: [ObjectIdentifier: AnyCancellable] = [:]
@@ -129,7 +128,6 @@ enum TabOffersPanel {
         }
         present(panel, window)
         self.panel = panel
-        self.host = host
         self.owner = browser
     }
 
@@ -138,7 +136,6 @@ enum TabOffersPanel {
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil)
         self.panel = nil
-        host = nil
         owner = nil
     }
 

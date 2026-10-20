@@ -550,8 +550,8 @@ private struct SideFoot: View {
     var body: some View {
         HStack(spacing: 2) {
             if prefs.usesSpaces { SpaceDot(browser: browser) }
-            ExtensionSlot(edge: .trailing, room: room)
             BookmarkDoor(browser: browser, arrowEdge: .trailing)
+            ExtensionSlot(edge: .trailing, room: room)
             // Only while a download is running, and a moment after.
             FetchDoor(browser: browser, fetches: fetches)
             Spacer(minLength: 0)
@@ -635,18 +635,21 @@ private struct PinSquare: View {
         .frame(width: scale * 16 / 34, height: scale * 16 / 34)
         .frame(width: width, height: height)
         .background {
-            if live {
-                // Darker than the resting squares' grey by as much as a live
-                // row is darker than the white it sits on (Drice: the live
-                // pin barely showed among the others).
-                RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
-                    .fill(greys.pinLive)
-                    .matchedGeometryEffect(id: "live", in: pill)
-            } else {
-                RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
-                    .fill(browser.selectedTabIDs.contains(tab.id) ? greys.wash :
-                          hovering ? greys.hover : greys.tile)
+            Group {
+                if live {
+                    // Darker than the resting squares' grey by as much as a live
+                    // row is darker than the white it sits on (Drice: the live
+                    // pin barely showed among the others).
+                    RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
+                        .fill(greys.pinLive)
+                        .matchedGeometryEffect(id: "live", in: pill)
+                } else {
+                    RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
+                        .fill(browser.selectedTabIDs.contains(tab.id) ? greys.wash :
+                              hovering ? greys.hover : greys.tile)
+                }
             }
+            .animation(Motion.quick, value: live)
         }
         .overlay {
             if browser.selectedTabIDs.contains(tab.id) {
@@ -729,6 +732,8 @@ private struct SideRow: View {
                             .foregroundStyle(colour.opacity(0.8))
                             .help(L10n.text("Side.0947"))
                     }
+                    // A window the page asked for was refused (BlockedPopups).
+                    PopupSign(browser: browser, tab: tab, colour: colour)
                     Text(tab.label)
                         .font(.system(size: prefs.sideTitle))
                         .lineLimit(1)
@@ -804,7 +809,8 @@ private struct SideRow: View {
         }
         .animation(Motion.quick, value: tab.loading)
         .animation(Motion.quick, value: speaker)
-        .background { ground }
+        .animation(Motion.quick, value: tab.blockedPopups.isEmpty)
+        .background { ground.animation(Motion.quick, value: live) }
         .overlay {
             if browser.selectedTabIDs.contains(tab.id) {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -814,7 +820,7 @@ private struct SideRow: View {
         }
         .modifier(Shake(travel: shake))
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .modifier(OneClick(double: false) {
+        .modifier(OneClick(double: false, enabled: !editing) {
             guard interactive, !editing, !selectedOnPress, NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty else { return }
             browser.clearTabSelection()
             if live { browser.beginTabEdit(tab) } else { browser.select(tab) }

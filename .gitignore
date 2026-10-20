@@ -7,10 +7,6 @@ build/
 
 # Python's bytecode cache, left in Tests/ by the probe scripts.
 __pycache__/
-Windows/**/bin/
-Windows/**/obj/
-Windows/artifacts/
-.vs/
 
 # Signing material that's tied to one Apple Developer account and should
 # never be committed, even though the scripts happily run without it.

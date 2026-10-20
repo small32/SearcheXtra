@@ -22,7 +22,7 @@ struct TabBar: View {
     @State private var nearby = false
     @State private var plussed = false
     /// The helm's width when it stands before the tabs rather than after them.
-    private var leading: CGFloat { browser.prefs.navigationLeft ? Metrics.helm - 8 + 26 + 2 * Metrics.tabGap : 0 }
+    private var leading: CGFloat { browser.prefs.navigationLeft ? Metrics.helm - 8 + Metrics.tabGap : 0 }
     /// How wide the doors at the far end are, extension buttons included.
     @State private var doors: CGFloat = 0
 
@@ -45,10 +45,7 @@ struct TabBar: View {
                 HStack(spacing: Metrics.tabGap) {
                     // Back, forward and reload by the lights, when asked.
                     if browser.prefs.navigationLeft {
-                        HStack(spacing: Metrics.tabGap) {
-                            Helm(browser: browser)
-                            BookmarkDoor(browser: browser, arrowEdge: .bottom)
-                        }
+                        Helm(browser: browser)
                     }
                     // The space on screen, first, when there are spaces.
                     // Above the tabs, for the name it shows over them a moment
@@ -162,16 +159,15 @@ struct TabBar: View {
 
                     Spacer(minLength: 0)
 
-                    // Back, forward, reload, and the bookmarks, at the far end
-                    // of the row. The dropdown hangs from the last one.
+                    // The bookmarks stay before the extension buttons.
                     HStack(spacing: Metrics.tabGap) {
                         // Only while a download is running, and a moment after.
                         FetchDoor(browser: browser, fetches: browser.fetches)
-                        ExtensionSlot()
                         if !browser.prefs.navigationLeft {
                             Helm(browser: browser)
-                            BookmarkDoor(browser: browser, arrowEdge: .bottom)
                         }
+                        BookmarkDoor(browser: browser, arrowEdge: .bottom)
+                        ExtensionSlot()
                     }
                     .background {
                         GeometryReader { box in
@@ -392,10 +388,9 @@ struct TabBar: View {
 
     /// The strip, less the lights, the helm when it leads, the plus, the
     /// doors at the far end and the air around them. The doors are measured;
-    /// until they have been, the helm and the bookmarks stand in for them —
-    /// unless the helm leads, when nothing at the far end may be a real zero.
+    /// until they have been, reserve the bookmarks and any trailing helm.
     private func room(in strip: CGFloat) -> CGFloat {
-        let far = doors > 0 || browser.prefs.navigationLeft ? doors : Metrics.helm + 26
+        let far = doors > 0 ? doors : 26 + (browser.prefs.navigationLeft ? 0 : Metrics.helm)
         return max(0, strip - lights - dot - leading - 12 - Metrics.plusWidth - far - 3 * Metrics.tabGap)
     }
 
@@ -668,7 +663,7 @@ private struct TabPill: View {
         .modifier(Shake(travel: shake))
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         // Active tabs edit immediately; other tabs switch on the first click.
-        .modifier(OneClick(double: false) {
+        .modifier(OneClick(double: false, enabled: !editing) {
             guard !editing, NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty else { return }
             browser.clearTabSelection()
             if live {
@@ -754,6 +749,8 @@ private struct TabPill: View {
                         .foregroundStyle(colour.opacity(0.8))
                         .help(L10n.text("TabBar.1091"))
                 }
+                // A window the page asked for was refused (BlockedPopups).
+                PopupSign(browser: browser, tab: tab, colour: colour)
                 Text(tab.label)
                     .font(.system(size: 12.5))
                     .lineLimit(1)
@@ -812,6 +809,7 @@ private struct TabPill: View {
         .padding(.vertical, 6)
         .frame(width: span, alignment: .leading)
         .animation(Motion.quick, value: speaker)
+        .animation(Motion.quick, value: tab.blockedPopups.isEmpty)
     }
 
     @ViewBuilder
@@ -1152,6 +1150,10 @@ struct TabAddressField: NSViewRepresentable {
                     }
                 }
                 let browser = self.browser
+                if let tab = browser.editingTab, SiteCardPanel.keepsAddressOpen(in: browser, tab: tab) {
+                    SiteCardPanel.dismiss()
+                    return event
+                }
                 DispatchQueue.main.async { browser.finishTabEdit() }
                 return event
             }
@@ -1361,14 +1363,14 @@ struct ModifiedTabClick: ViewModifier {
 /// One gesture or the other, never the two together.
 struct OneClick: ViewModifier {
     let double: Bool
+    var enabled = true
     let act: () -> Void
 
     func body(content: Content) -> some View {
-        if double {
-            content.onTapGesture(count: 2, perform: act)
-        } else {
-            content.onTapGesture(perform: act)
-        }
+        content.gesture(
+            TapGesture(count: double ? 2 : 1).onEnded { act() },
+            including: enabled ? .all : .subviews
+        )
     }
 }
 

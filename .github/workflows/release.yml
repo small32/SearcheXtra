@@ -9,7 +9,7 @@ on:
       tag:
         description: Release tag to build
         required: true
-        default: v2.2.0
+        default: v2.2.2
         type: string
 
 permissions:
@@ -21,12 +21,23 @@ concurrency:
 
 jobs:
   macos:
-    name: Build macOS ARM64
+    name: Build macOS ${{ matrix.arch }}
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-    runs-on: macos-15
-    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            output: build
+          - arch: x86_64
+            runner: macos-15-intel
+            output: build/intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     env:
-      SEARCH_ARCH: arm64
+      SEARCH_ARCH: ${{ matrix.arch }}
+      OUTPUT_DIR: ${{ matrix.output }}
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Check out tagged source
@@ -42,15 +53,16 @@ jobs:
           version="$(tr -d '[:space:]' < VERSION)"
           test "$RELEASE_TAG" = "v$version"
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
-          echo "RELEASE_ARCHIVE=SearcheXtra-$version-arm64.zip" >> "$GITHUB_ENV"
+          echo "RELEASE_ARCHIVE=SearcheXtra-$version-$SEARCH_ARCH.zip" >> "$GITHUB_ENV"
+          test "$(uname -m)" = "$SEARCH_ARCH"
           xcodebuild -version
           swift --version
 
-      - name: Build Release for ARM64
+      - name: Build architecture-specific Release
         run: ./build.sh release
 
       - name: Launch packaged app without build resources
-        run: bash Tests/verify-macos-app-launch.sh build/SearcheXtra.app "$(swift build -c release --arch arm64 -Xswiftc -Osize --show-bin-path)/SearcheXtra_SearcheXtra.bundle"
+        run: bash Tests/verify-macos-app-launch.sh "$OUTPUT_DIR/SearcheXtra.app" "$(swift build -c release --arch "$SEARCH_ARCH" -Xswiftc -Osize --show-bin-path)/SearcheXtra_SearcheXtra.bundle"
 
       - name: Test user-script permission bridge
         run: |
@@ -71,36 +83,31 @@ jobs:
           echo "SEARCHEXTRA_TEST_MV3_FOLDER=$package" >> "$GITHUB_ENV"
 
       - name: Test original ScriptCat with MV2 coexistence
-        run: SEARCH_PROBE=interface-tests swift test -c release --arch arm64 -Xswiftc -Osize --filter ExtensionScriptCatTests
+        run: SEARCH_PROBE=interface-tests swift test -c release --arch "$SEARCH_ARCH" -Xswiftc -Osize --filter ExtensionScriptCatTests
 
       - name: Verify and package application
         shell: bash
         run: |
           set -euo pipefail
-          app="build/SearcheXtra.app"
-          test "$(lipo -archs "$app/Contents/MacOS/SearcheXtra")" = arm64
+          app="$OUTPUT_DIR/SearcheXtra.app"
+          test "$(lipo -archs "$app/Contents/MacOS/SearcheXtra")" = "$SEARCH_ARCH"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$RELEASE_VERSION"
           plutil -lint "$app/Contents/Info.plist"
           codesign --verify --deep --strict "$app"
-          ditto -c -k --keepParent "$app" "build/$RELEASE_ARCHIVE"
-          (cd build && shasum -a 256 "$RELEASE_ARCHIVE" > SHA256SUMS.txt)
+          ditto -c -k --keepParent "$app" "$OUTPUT_DIR/$RELEASE_ARCHIVE"
+          (cd "$OUTPUT_DIR" && shasum -a 256 "$RELEASE_ARCHIVE" > SHA256SUMS.txt)
 
       - uses: actions/upload-artifact@v4
         with:
-          name: SearcheXtra-arm64
+          name: SearcheXtra-macos-${{ matrix.arch }}
           path: |
-            build/SearcheXtra-*-arm64.zip
-            build/SHA256SUMS.txt
+            ${{ matrix.output }}/SearcheXtra-*-${{ matrix.arch }}.zip
+            ${{ matrix.output }}/SHA256SUMS.txt
           if-no-files-found: error
-
-  windows:
-    uses: ./.github/workflows/windows.yml
-    with:
-      ref: ${{ inputs.tag || github.ref }}
 
   publish:
     name: Publish release assets
-    needs: [macos, windows]
+    needs: macos
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -115,26 +122,23 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: SearcheXtra-arm64
-          path: release/macos
-      - uses: actions/download-artifact@v4
-        with:
-          name: SearcheXtra-win-x64
-          path: release/windows
+          pattern: SearcheXtra-macos-*
+          path: release
       - name: Publish GitHub Release
         shell: bash
         run: |
           set -euo pipefail
           version="$(tr -d '[:space:]' < VERSION)"
           test "$RELEASE_TAG" = "v$version"
-          cat release/macos/SHA256SUMS.txt release/windows/SHA256SUMS.txt > release/SHA256SUMS.txt
-          cp release/macos/*.zip release/windows/*.zip release/windows/*-setup.exe release/
+          cat release/SearcheXtra-macos-arm64/SHA256SUMS.txt release/SearcheXtra-macos-x86_64/SHA256SUMS.txt > release/SHA256SUMS.txt
+          cp release/SearcheXtra-macos-arm64/*.zip release/SearcheXtra-macos-x86_64/*.zip release/
+          (cd release && shasum -a 256 --check SHA256SUMS.txt)
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" release/*.zip release/*-setup.exe release/SHA256SUMS.txt --clobber
+            gh release upload "$RELEASE_TAG" release/*.zip release/SHA256SUMS.txt --clobber
           else
             gh release create "$RELEASE_TAG" --verify-tag --draft \
               --title "SearcheXtra $version" --notes-file docs/RELEASE_NOTES.md \
-              release/*.zip release/*-setup.exe release/SHA256SUMS.txt
+              release/*.zip release/SHA256SUMS.txt
           fi
           gh release edit "$RELEASE_TAG" --draft=false --latest \
             --title "SearcheXtra $version" --notes-file docs/RELEASE_NOTES.md

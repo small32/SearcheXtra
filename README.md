@@ -6,13 +6,13 @@
 
 SearcheXtra 是基于 [Search](https://github.com/driceroland/Search) 的修改版，保留原版轻量、简洁的浏览体验，增加了**简体中文支持和界面语言切换**。原项目由 [Office Commun](https://officecommun.com) 开发，本仓库维护修改版。
 
-本次 2.2.0 同时提供 macOS ARM64 与 Windows x64 安装包；本轮上游新功能主要用于 macOS，Windows 包含扩展悬浮面板改进。后续开发以 macOS 为主。
+本仓库仅维护 macOS 版本，分别发布 Apple 芯片 ARM64 和 Intel x86_64 安装包，不构建 Universal 版本。
 
 支持英文和简体中文，菜单、设置项及说明、弹窗和操作提示均提供两套文案。在 **设置 → 通用 → 界面语言** 中选择“跟随系统”“English”或“简体中文”，点击“重新启动 SearcheXtra”后生效。默认跟随系统，不支持的系统语言使用英文。
 
 ![SearcheXtra 浏览器界面，标签页位于左侧，网页占据其余区域](.github/screenshot.png)
 
-**[下载 macOS 版本 →](https://github.com/small32/SearcheXtra/releases/latest)** · macOS 14 或更新版本 · 当前提供 ARM64 安装包，适用于 Apple 芯片 Mac
+**[下载 macOS 版本 →](https://github.com/small32/SearcheXtra/releases/latest)** · macOS 14 或更新版本 · 分别提供 ARM64（Apple 芯片）和 x86_64（Intel）安装包
 
 安装包由 GitHub Actions 构建。下载 Release 中的 ZIP，解压后将 `SearcheXtra.app` 放入“应用程序”文件夹；`SHA256SUMS.txt` 提供安装包的 SHA-256 校验值。应用、安装包和界面均使用 SearcheXtra 名称。
 
@@ -48,7 +48,7 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 - **书签、历史记录与下载。** 各自提供独立面板，支持搜索和快捷键打开。
 - **书签管理器。** 设置提供独立入口，支持搜索、导入 HTML、编辑、删除和文件夹管理，并可按名称排序。支持全选、批量删除、拖动调整顺序及拖入文件夹；多选拖动保留原有顺序。
 - **Chrome 扩展。** 在“设置 → 扩展”中粘贴 Chrome 网上应用店链接，或打开扩展页面后点击添加。扩展运行在 WebKit 的扩展引擎上，浏览器补充部分 Chrome API。常用扩展可以固定，也可以加载本地未打包扩展，修改后点击重新载入。此功能需要 macOS 15.4 或更新版本，兼容情况取决于扩展使用的 API。
-- **MV3 用户脚本。** 声明用户脚本权限的扩展，在“扩展管理 → 详情”中提供默认关闭的“允许用户脚本”开关。基于 WebKit 提供脚本注册、独立执行环境和消息通信；授权后请刷新网页。MV2 继续使用原有扩展加载方式。支持范围见[用户脚本说明](Windows/README.md#用户脚本--user-scripts)。
+- **MV3 用户脚本。** 声明用户脚本权限的扩展，在“扩展管理 → 详情”中提供默认关闭的“允许用户脚本”开关。基于 WebKit 提供脚本注册、独立执行环境和消息通信；授权后请刷新网页。MV2 继续使用原有扩展加载方式。支持范围见[用户脚本说明](docs/USER_SCRIPTS.md)。
 - **扩展侧边栏。** 支持扩展的侧边面板，面板位于网页旁，可拖动边缘调整宽度。新标签页设置可在空白页和已安装扩展提供的页面之间选择。
 - **多窗口与空间。** 可以创建多个窗口，并使用空间管理不同的标签页集合。
 - **版本更新。** 本分支的安装包从 [GitHub Releases](https://github.com/small32/SearcheXtra/releases) 下载更新。macOS 更新检查已使用本仓库的 GitHub Release，并按版本号比较；临时签名构建通过发布页下载后替换应用。
@@ -110,10 +110,6 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 
 ## 开发说明
 
-### Windows 版本
-
-本次 2.2.0 继续构建 Windows x64 版本，支持 Windows 10 1809 及以上。实现与功能差异见 [Windows 开发说明](Windows/README.md)。后续开发以 macOS 为主。
-
 ### 源码与上游
 
 上游项目为 [driceroland/Search](https://github.com/driceroland/Search)。本仓库在其基础上维护中文支持、语言切换及 GitHub Actions 发布流程。
@@ -149,7 +145,7 @@ SEARCH_ARCH=arm64 ./build.sh release
 
 将版本写入 `VERSION`，提交后推送对应的 `v版本号` 标签，即可触发 `Release` 工作流。也可以在 Actions 页面手动指定标签构建。
 
-工作流检查标签与版本是否一致，构建 macOS ARM64 和 Windows x64 安装包，验证构建结果，然后发布安装包与 `SHA256SUMS.txt`。
+工作流检查标签与版本是否一致，分别构建 macOS ARM64 和 Intel x86_64 安装包，验证构建结果，然后发布安装包与 `SHA256SUMS.txt`。
 
 [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md) 为同一版本同时提供中文和英文更新说明，发布工作流直接使用该文件作为 Release 正文。
 
@@ -216,18 +212,15 @@ Menus, settings, descriptions, dialogs, and action messages are available in Eng
 
 ![SearcheXtra browser with tabs in the sidebar](.github/screenshot.png)
 
-**[Download macOS and Windows releases →](https://github.com/small32/SearcheXtra/releases/latest)**
+**[Download the macOS release →](https://github.com/small32/SearcheXtra/releases/latest)** · macOS 14 or later · Apple silicon (ARM64) and Intel (x86_64)
 
-- **macOS:** macOS 14 or later; the published package supports Apple silicon (ARM64). Download the ZIP, extract it, and move `SearcheXtra.app` to Applications. Extensions require macOS 15.4 or later.
-- **Windows:** This 2.2.0 rebuild also supplies Windows x64 packages for Windows 10 1809 or later, including improved extension flyouts. The new upstream features in this update primarily target macOS. See the [Windows development notes](Windows/README.md) for platform differences. Future development focuses on macOS.
+This repository maintains the macOS application. Download the ZIP, extract it, and move `SearcheXtra.app` to Applications. Extensions require macOS 15.4 or later.
 
 Release packages are built with GitHub Actions. `SHA256SUMS.txt` contains package checksums. To retain compatibility with existing macOS installations, the data directory, preferences domain, and password keychain identifiers still use Search's internal names; renaming the app does not erase this data.
 
 ### Overview and features
 
-SearcheXtra keeps the interface focused on tabs and pages. On macOS, tabs can appear across the top or in a sidebar. The address field accepts both URLs and search terms. There is no recommendation feed, browser account, or cloud sync service. The macOS browser uses the system **WebKit** engine, the same underlying technology as Safari, without bundling Chromium.
-
-The following features and keyboard shortcuts describe the maintained macOS application.
+SearcheXtra keeps the interface focused on tabs and pages. Tabs can appear across the top or in a sidebar. The address field accepts both URLs and search terms. There is no recommendation feed, browser account, or cloud sync service. The browser uses the system **WebKit** engine, the same underlying technology as Safari, without bundling Chromium.
 
 Set **Settings → General → Start page** to choose the page for new windows. Addresses such as `example.com` work without a scheme. Choose Use blank page to restore the blank start page. Changes take effect immediately without replacing open or restored pages. New tabs default to a blank page independently of this setting, or to an enabled new-tab extension's page. Private new tabs remain blank.
 
@@ -244,7 +237,7 @@ Set **Settings → General → Start page** to choose the page for new windows. 
 - **Super drag:** Configure text, link and image drags in Settings → Tabs → Super drag. FlowMouse-style direction sequences and fallback rules support background search, tab positions, clipboard actions, bookmarks, image saving and reverse image search. FlowMouse drag rules can be imported. See the [bilingual guide](docs/FLOW_DRAG.md).
 - **Bookmark manager:** Available from Settings, with search, HTML import, editing, deletion, folder management, and sorting by name. Supports select all, bulk deletion, drag reordering, and dropping items into folders. Multi-item dragging preserves the original order.
 - **Chrome extensions:** Install from a Chrome Web Store URL or its listing, pin frequently used extensions, or load an unpacked local extension and reload it after editing. On macOS, extensions use WebKit's extension engine with additional Chrome API compatibility. Support depends on the APIs an extension uses.
-- **MV3 user scripts:** Extensions declaring user-script permissions have an “Allow user scripts” switch under Manage extensions → Details, off by default. The WebKit implementation provides script registration, separate execution worlds, and messaging. Refresh webpages after granting access. MV2 retains its existing loading path. See the [user-script support details](Windows/README.md#用户脚本--user-scripts).
+- **MV3 user scripts:** Extensions declaring user-script permissions have an “Allow user scripts” switch under Manage extensions → Details, off by default. The WebKit implementation provides script registration, separate execution worlds, and messaging. Refresh webpages after granting access. MV2 retains its existing loading path. See the [user-script support details](docs/USER_SCRIPTS.md).
 - **Extension side panels:** Supported extension panels open beside the webpage with a draggable width. New-tab settings let you choose a blank page or a page provided by an installed extension.
 - **Windows and spaces:** Open multiple windows and organize sets of tabs into spaces.
 - **Updates:** Download this fork's packages from [GitHub Releases](https://github.com/small32/SearcheXtra/releases). The macOS updater checks this repository’s GitHub releases and compares version numbers. Ad-hoc-signed builds download the update from the release page for manual application replacement.
@@ -294,7 +287,7 @@ With split view enabled, `⌥⌘N` splits the current page and `⌃⌘←` / `�
 
 ### Development
 
-The upstream repository is [driceroland/Search](https://github.com/driceroland/Search). This fork maintains Chinese support, language selection, and GitHub Actions releases. The macOS interface is written in Swift and mainly uses system frameworks. The source is available for inspection, local builds, and contributions.
+The upstream repository is [driceroland/Search](https://github.com/driceroland/Search). This fork maintains Chinese support, language selection, and GitHub Actions releases. The interface is written in Swift and mainly uses system frameworks. The source is available for inspection, local builds, and contributions.
 
 #### Build macOS locally
 
@@ -314,7 +307,7 @@ The app is written to `build/SearcheXtra.app`. Without a Developer ID certificat
 
 #### GitHub Actions releases
 
-Set `VERSION`, commit it, and push the matching `v<version>` tag to trigger the **Release** workflow. It can also be started manually for a specified tag. The workflow checks the version and tag, builds macOS ARM64 and Windows x64 packages, validates the results, and publishes packages with `SHA256SUMS.txt`.
+Set `VERSION`, commit it, and push the matching `v<version>` tag to trigger the **Release** workflow. It can also be started manually for a specified tag. The workflow checks the version and tag, builds separate macOS ARM64 and Intel x86_64 packages, validates the results, and publishes packages with `SHA256SUMS.txt`.
 
 Release notes in [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md) provide Chinese and English text for the same release. The **Bilingual interface checks** workflow checks language selection, English fallback, dynamic formatting, packaged translations, and the ARM64 build.
 
