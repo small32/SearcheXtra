@@ -99,9 +99,13 @@ final class SidebarPressTests: XCTestCase {
         let oldGlyph = browser.prefs.glyph
         browser.prefs.glyph = .letters
         defer { browser.prefs.glyph = oldGlyph }
-        page.noteBlocked(URL(string: "https://example.test/popup"))
         let window = makeWindow(browser)
         try await settle()
+        browser.cancelTabEdit()
+        page.noteBlocked(URL(string: "https://example.test/popup"))
+        try await settle()
+        XCTAssertNil(browser.editingTab)
+        XCTAssertEqual(page.blockedPopups.count, 1)
         // No website icon: the popup button is the first mark, at the leading
         // edge. Its real click must not become the row's edit gesture.
         // The sidebar has a 10-point margin and the sign has 10 points of
@@ -124,9 +128,13 @@ final class SidebarPressTests: XCTestCase {
         let oldGlyph = browser.prefs.glyph
         browser.prefs.glyph = .letters
         defer { browser.prefs.glyph = oldGlyph }
-        tabs[0].noteBlocked(URL(string: "https://example.test/popup"))
         let window = makeWindow(browser)
         try await settle()
+        browser.cancelTabEdit()
+        tabs[0].noteBlocked(URL(string: "https://example.test/popup"))
+        try await settle()
+        XCTAssertNil(browser.editingTab)
+        XCTAssertEqual(tabs[0].blockedPopups.count, 1)
         // The sidebar has a 10-point margin and the sign has 10 points of
         // leading padding. Aim at its centre, not the selectable row padding.
         let point = NSPoint(x: 28, y: rowPoint(0, in: window).y)
