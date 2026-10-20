@@ -195,10 +195,16 @@ private struct SplitTabHalf: View {
         }
     }
 
+    private var showsPopup: Bool { !editing && !narrow && !tab.blockedPopups.isEmpty }
+
     private var row: some View {
         HStack(spacing: stacked ? 8 : 5) {
+            if showsPopup {
+                PopupSign(browser: browser, tab: tab)
+                    .padding(.leading, stacked ? 10 : 0)
+            }
             titleContent
-                .padding(.leading, stacked ? 10 : 0)
+                .padding(.leading, stacked && !showsPopup ? 10 : 0)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: stacked ? height : 16)
                 .contentShape(Rectangle())
@@ -230,9 +236,6 @@ private struct SplitTabHalf: View {
                     Image(systemName: "eye.slash")
                         .font(.system(size: 9))
                         .foregroundStyle(Palette.muted)
-                }
-                if !narrow {
-                    PopupSign(browser: browser, tab: tab)
                 }
                 // The page is asking something, over its half of the stage.
                 if browser.paneQuestions.contains(where: { $0.tab == tab.id }) {

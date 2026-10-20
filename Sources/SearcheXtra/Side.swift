@@ -703,9 +703,16 @@ private struct SideRow: View {
     /// The speaker, which can be pressed, and so steps in beside the cross
     /// under the pointer rather than hiding beneath it as the ring does.
     private var speaker: Bool { !tab.loading && (tab.noisy || tab.muted) }
+    private var showsPopup: Bool { !editing && !tab.blockedPopups.isEmpty }
 
     var body: some View {
         HStack(spacing: 8) {
+            // A control is a sibling of the press-to-select area, so opening
+            // its menu cannot select the row beneath it.
+            if showsPopup {
+                PopupSign(browser: browser, tab: tab, colour: colour)
+                    .padding(.leading, 10)
+            }
             HStack(spacing: 8) {
                 if editing {
                     TabAddressEditor(browser: browser, tab: tab)
@@ -732,8 +739,6 @@ private struct SideRow: View {
                             .foregroundStyle(colour.opacity(0.8))
                             .help(L10n.text("Side.0947"))
                     }
-                    // A window the page asked for was refused (BlockedPopups).
-                    PopupSign(browser: browser, tab: tab, colour: colour)
                     Text(tab.label)
                         .font(.system(size: prefs.sideTitle))
                         .lineLimit(1)
@@ -742,7 +747,7 @@ private struct SideRow: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 10)
+            .padding(.leading, showsPopup ? 0 : 10)
             .padding(.trailing, status ? 0 : 10)
             .frame(height: prefs.sideRow)
             .contentShape(Rectangle())
