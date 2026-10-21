@@ -101,6 +101,7 @@ final class SidebarPressTests: XCTestCase {
         defer { browser.prefs.glyph = oldGlyph }
         let window = makeWindow(browser)
         try await settle()
+        try await loadPopupPage(page)
         browser.cancelTabEdit()
         page.noteBlocked(URL(string: "https://example.test/popup"))
         try await settle()
@@ -130,6 +131,8 @@ final class SidebarPressTests: XCTestCase {
         defer { browser.prefs.glyph = oldGlyph }
         let window = makeWindow(browser)
         try await settle()
+        try await loadPopupPage(tabs[0])
+        try await loadPopupPage(tabs[1])
         browser.cancelTabEdit()
         tabs[0].noteBlocked(URL(string: "https://example.test/popup"))
         try await settle()
@@ -363,6 +366,25 @@ final class SidebarPressTests: XCTestCase {
     private func addressField(in view: NSView) -> TabAddressField.Field? {
         if let field = view as? TabAddressField.Field { return field }
         return view.subviews.lazy.compactMap { self.addressField(in: $0) }.first
+    }
+
+    private func loadPopupPage(_ tab: SearcheXtra.Tab) async throws {
+        // Cancel delayed session restoration before loading a local, known
+        // document. A later commit must not erase the fixture's blocked popup.
+        tab.stop()
+        let web = tab.web
+        web.loadHTMLString("<html data-popup-fixture><body>Popup fixture</body></html>",
+                           baseURL: URL(string: "https://popup-fixture.test/"))
+        for _ in 0..<300 {
+            if !web.isLoading,
+               let ready = try? await web.evaluateJavaScript(
+                   "document.readyState === 'complete' && document.documentElement.hasAttribute('data-popup-fixture')"
+               ) as? Bool,
+               ready, !web.isLoading { return }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        throw NSError(domain: "SidebarPressTests.PopupPage", code: 1,
+                      userInfo: [NSLocalizedDescriptionKey: "Local popup fixture did not finish loading"])
     }
 
     private func settle() async throws {
