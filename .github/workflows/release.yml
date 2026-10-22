@@ -83,7 +83,31 @@ jobs:
           echo "SEARCHEXTRA_TEST_MV3_FOLDER=$package" >> "$GITHUB_ENV"
 
       - name: Test original ScriptCat with MV2 coexistence
-        run: SEARCH_PROBE=interface-tests swift test -c release --arch "$SEARCH_ARCH" -Xswiftc -Osize --filter ExtensionScriptCatTests
+        id: scriptcat
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/test-diagnostics"
+          SEARCH_PROBE=interface-tests swift test -c release --arch "$SEARCH_ARCH" -Xswiftc -Osize --filter ExtensionScriptCatTests 2>&1 | tee "$RUNNER_TEMP/test-diagnostics/scriptcat.log"
+
+      - name: Capture failed ScriptCat native backtrace
+        if: ${{ failure() && steps.scriptcat.outcome == 'failure' }}
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          if ! grep -Eiq 'unexpected signal|signal code' "$RUNNER_TEMP/test-diagnostics/scriptcat.log"; then exit 0; fi
+          bundle="$(swift build -c release --arch "$SEARCH_ARCH" -Xswiftc -Osize --show-bin-path)/SearcheXtraPackageTests.xctest"
+          platform="$(xcrun --sdk macosx --show-sdk-platform-path)"
+          # A diagnostic rerun never replaces the failed normal test result.
+          # Supply the same XCTest framework paths that SwiftPM injects.
+          xcrun lldb --batch --no-lldbinit \
+            -o 'settings set target.disable-aslr false' \
+            -o "settings set target.env-vars 'SEARCH_PROBE=scriptcat-lldb-$SEARCH_ARCH' 'SWIFT_TESTING_ENABLED=0' 'SEARCHEXTRA_TEST_MV3_FOLDER=$SEARCHEXTRA_TEST_MV3_FOLDER' 'DYLD_FRAMEWORK_PATH=$platform/Developer/Library/Frameworks:$platform/Developer/Library/PrivateFrameworks' 'DYLD_LIBRARY_PATH=$platform/Developer/usr/lib'" \
+            -o 'run' -o 'thread backtrace all' -o 'image list -o -f' \
+            -k 'thread backtrace all' -k 'image list -o -f' -k 'quit 99' \
+            -- "$(xcrun -f xctest)" -XCTest \
+            SearcheXtraTests.ExtensionScriptCatTests/testOriginalMV3RunsGMStorageXHRFramesAlongsideMV2 \
+            "$bundle" > "$RUNNER_TEMP/test-diagnostics/scriptcat-backtrace.log" 2>&1 || true
+          cat "$RUNNER_TEMP/test-diagnostics/scriptcat-backtrace.log"
 
       - name: Verify and package application
         shell: bash
@@ -110,11 +134,20 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/test-diagnostics"
-          reports="$HOME/Library/Logs/DiagnosticReports"
-          if [ -d "$reports" ]; then
-            find "$reports" -maxdepth 1 -type f \( -name '*SearcheXtra*' -o -name '*xctest*' \) \
-              -exec cp {} "$RUNNER_TEMP/test-diagnostics/" \;
-          fi
+          # CrashReporter writes asynchronously after xctest has exited.
+          for report_attempt in {1..15}; do
+            for reports in "$HOME/Library/Logs/DiagnosticReports" /Library/Logs/DiagnosticReports; do
+              if [ -d "$reports" ]; then
+                find "$reports" -maxdepth 2 -type f \( -name '*SearcheXtra*' -o -name '*xctest*' -o -name '*XCTest*' \) \
+                  -exec cp {} "$RUNNER_TEMP/test-diagnostics/" \;
+              fi
+            done
+            if compgen -G "$RUNNER_TEMP/test-diagnostics/*.ips" > /dev/null \
+              || compgen -G "$RUNNER_TEMP/test-diagnostics/*.crash" > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
 
       - name: Upload native test crash reports
         if: failure()

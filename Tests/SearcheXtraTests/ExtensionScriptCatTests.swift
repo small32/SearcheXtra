@@ -110,14 +110,33 @@ final class ExtensionScriptCatTests: XCTestCase {
             }
             let denied = try await evaluate(firstOptions.web, "try { await chrome.userScripts.getScripts(); return false; } catch { return true; }")
             XCTAssertEqual(denied as? Bool, true)
+            // API availability does not establish background readiness. This
+            // service waits for ScriptCat's initReady even while user scripts
+            // are denied; no matching script is a valid { ok: false } reply.
+            trace("waiting for initial ScriptCat background readiness")
+            let initialService = try await evaluate(firstOptions.web, #"""
+            return await chrome.runtime.sendMessage({ action: 'serviceWorker/runtime/pageLoad', data: {} });
+            """#) as? [String: Any]
+            guard initialService?["code"] as? Int == 0,
+                  (initialService?["data"] as? [String: Any])?["ok"] is Bool else {
+                throw FixtureFailure("Initial ScriptCat runtime was not initialized: \(initialService ?? [:])")
+            }
+            trace("initial ScriptCat background ready")
             trace("enabling user-script permission")
             let enable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, true))
+            trace("user-script permission setter returned")
             let enabled = await enable.value
+            trace("user-script permission reload completed: \(enabled)")
             XCTAssertTrue(enabled)
             var context = try XCTUnwrap(Extensions.shared.contexts[identifier])
+            trace("closing initial ScriptCat options")
             browser.close(firstOptions)
+            trace("initial ScriptCat options closed")
+            trace("opening reloaded ScriptCat options")
             var options = browser.open(try XCTUnwrap(context.optionsPageURL), foreground: true)
+            trace("reloaded ScriptCat options opened")
             show(options)
+            trace("reloaded ScriptCat options attached")
             try await until("ScriptCat native user-world registration") {
                 let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: context) as? [[String: Any]] ?? []
                 return scripts.contains { $0["id"] as? String == "scriptcat-content" }
