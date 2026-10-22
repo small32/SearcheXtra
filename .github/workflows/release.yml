@@ -9,7 +9,7 @@ on:
       tag:
         description: Release tag to build
         required: true
-        default: v2.2.2
+        default: v2.2.3
         type: string
 
 permissions:
@@ -104,6 +104,25 @@ jobs:
             ${{ matrix.output }}/SearcheXtra-*-${{ matrix.arch }}.zip
             ${{ matrix.output }}/SHA256SUMS.txt
           if-no-files-found: error
+
+      - name: Collect native test crash reports
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/test-diagnostics"
+          reports="$HOME/Library/Logs/DiagnosticReports"
+          if [ -d "$reports" ]; then
+            find "$reports" -maxdepth 1 -type f \( -name '*SearcheXtra*' -o -name '*xctest*' \) \
+              -exec cp {} "$RUNNER_TEMP/test-diagnostics/" \;
+          fi
+
+      - name: Upload native test crash reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SearcheXtra-diagnostics-${{ matrix.arch }}
+          path: ${{ runner.temp }}/test-diagnostics
+          if-no-files-found: ignore
 
   publish:
     name: Publish release assets

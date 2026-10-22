@@ -421,6 +421,27 @@ final class Bench {
                 }
             }
 
+        case "nowplaying":
+            // Whether this app is the Mac's Now Playing app, the one the media
+            // keys and AirPods taps go to, as WebKit has it for the tab's
+            // page (#512). WebKit's own tests ask the same way; a test run
+            // only, since it is WebKit's private side.
+            guard Store.testing else { answer(["error": "nowplaying only works on a --test run"]); return }
+            guard let tab = find(request, in: browser) else { answer(missing(request)); return }
+            let ask = NSSelectorFromString("_requestActiveNowPlayingSessionInfo:")
+            guard tab.web.responds(to: ask), let imp = tab.web.method(for: ask) else {
+                answer(["error": "this WebKit has no Now Playing info"]); return
+            }
+            typealias Reply = @convention(block) (ObjCBool, ObjCBool, NSString?, Double, Double, Int) -> Void
+            typealias Ask = @convention(c) (AnyObject, Selector, Reply) -> Void
+            let reply: Reply = { active, registered, title, _, _, _ in
+                MainActor.assumeIsolated {
+                    answer(["active": active.boolValue, "registered": registered.boolValue, "title": (title as String?) ?? "",
+                            "hushing": tab.hushing])
+                }
+            }
+            unsafeBitCast(imp, to: Ask.self)(tab.web, ask, reply)
+
         case "eval":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             guard let js = request["js"] as? String else { answer(["error": "eval needs js"]); return }
@@ -744,6 +765,7 @@ final class Bench {
             }
             // The column folded away, out for a look, and the lights with it (see Fold.swift).
             out["peek"] = browser.peekTab?.address?.absoluteString ?? ""
+            out["peekFrom"] = browser.peekFrom?.uuidString ?? ""
             out["fetching"] = ["showing": browser.fetches.showing, "fraction": browser.fetches.fraction ?? -1, "done": browser.fetches.done]
             // Where the peek's page sits in the window, from its top-left corner, in points.
             if let web = browser.peekTab?.built, let window = web.window {
@@ -962,15 +984,28 @@ final class Bench {
             guard Store.testing else { answer(["error": "field only works on a --test run — it would type into your browser"]); return }
             guard let text = request["text"] as? String, !text.isEmpty else { answer(["error": "field needs some text"]); return }
             let pieces = request["type"] as? Bool == true ? text.map(String.init) : [text]
-            if browser.fieldShowing { browser.askFocus() } else { browser.edit() }
+            if browser.fieldShowing || browser.editingTab != nil { browser.askFocus() } else { browser.edit() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 guard let field = Bench.addressField(in: (browser.window ?? Links.window)?.contentView),
                       let editor = field.currentEditor() as? NSTextView
-                else { answer(["error": "the address field has no editor"]); return }
+                else {
+                    let window = browser.window ?? Links.window
+                    let field = Bench.addressField(in: window?.contentView)
+                    answer(["error": "the address field has no editor",
+                            "editingTab": browser.editingTab?.uuidString ?? "",
+                            "focusRequest": browser.focusRequest,
+                            "responder": window?.firstResponder.map { String(describing: type(of: $0)) } ?? "none",
+                            "field": field.map { String(describing: type(of: $0)) } ?? "none",
+                            "delegate": field?.delegate.map { String(describing: type(of: $0)) } ?? "none"])
+                    return
+                }
                 var times: [[Double]] = []
                 @MainActor func next(_ index: Int) {
                     guard index < pieces.count else {
-                        var out: [String: Any] = ["field": field.stringValue, "typed": browser.typed, "offers": browser.offers.map(\.key), "ms": times]
+                        let embedded = browser.editingTab != nil
+                        var out: [String: Any] = ["field": field.stringValue,
+                            "typed": embedded ? browser.tabDraft : browser.typed,
+                            "offers": (embedded ? browser.tabOffers : browser.offers).map(\.key), "ms": times]
                         guard request["go"] as? Bool == true, let tab = browser.active else { answer(out); return }
                         // Then Return, as the field's own delegate takes it:
                         // how long until WebKit is loading the page.
@@ -978,7 +1013,7 @@ final class Bench {
                         let start = CACurrentMediaTime()
                         var loading: Double?
                         let watch = tab.$loading.first(where: { $0 }).sink { _ in loading = (CACurrentMediaTime() - start) * 1000 }
-                        browser.submit()
+                        if embedded { browser.commitTabEdit() } else { browser.submit() }
                         out["returned"] = (CACurrentMediaTime() - start) * 1000
                         Bench.whenResting(since: start) { rested in
                             out["rested"] = rested
@@ -1071,6 +1106,66 @@ final class Bench {
                       let data = rep.representation(using: .png, properties: [:]) else { answer(["error": "no picture"]); return }
                 try? data.write(to: URL(fileURLWithPath: path))
                 answer(state(["saved": path]))
+            default: answer(state())
+            }
+
+        case "suggest":
+            // The engine's suggestions under the field (EngineSuggest.swift):
+            // the rows, how many questions went out, were let go of or were
+            // too slow, and a row taken as a click takes it. Only on a
+            // SEARCH_PROBE run.
+            guard Store.testing else { answer(["error": "suggest only works on a --test run"]); return }
+            func kind(_ offer: Suggestion) -> String {
+                switch offer.kind {
+                case .suggested: "suggested"
+                case .search: "search"
+                case .open: "open"
+                case .visited: "visited"
+                case .known: "known"
+                case .command: "command"
+                }
+            }
+            func state(_ extra: [String: Any] = [:]) -> [String: Any] {
+                var out: [String: Any] = [
+                    "typed": browser.editingTab != nil ? browser.tabDraft : browser.typed,
+                    "editing": browser.editingTab != nil || browser.editing,
+                    "offers": (browser.editingTab != nil ? browser.tabOffers : browser.offers).map { [$0.key, kind($0), $0.url.absoluteString] },
+                    "asked": browser.suggester.asked + browser.tabSuggester.asked,
+                    "cancelled": browser.suggester.cancelled + browser.tabSuggester.cancelled,
+                    "tooSlow": browser.suggester.tooSlow + browser.tabSuggester.tooSlow,
+                    "on": browser.prefs.engineSuggests, "shy": browser.active?.shy ?? false,
+                    "address": browser.active?.address?.absoluteString ?? "",
+                    "pending": browser.active?.pending?.absoluteString ?? "",
+                ]
+                out.merge(extra) { _, new in new }
+                return out
+            }
+            if let on = request["on"] as? Bool { browser.prefs.engineSuggests = on }
+            switch request["action"] as? String ?? "state" {
+            case "take":
+                let index = request["index"] as? Int ?? 0
+                let embedded = browser.editingTab != nil
+                let offers = embedded ? browser.tabOffers : browser.offers
+                guard offers.indices.contains(index) else { answer(state(["error": "no row \(index)"])); return }
+                if embedded { browser.takeTabOffer(offers[index]) } else { browser.take(offers[index]) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { answer(state()) }
+            case "walk":
+                if browser.editingTab != nil {
+                    browser.walkTab(request["step"] as? Int ?? 1)
+                    let completed = browser.tabPicked.flatMap { browser.tabOffers.indices.contains($0) ? browser.tabOffers[$0].key : nil } ?? browser.tabDraft
+                    answer(state(["picked": browser.tabPicked ?? -1, "completed": completed]))
+                } else {
+                    browser.walk(request["step"] as? Int ?? 1)
+                    answer(state(["picked": browser.picked ?? -1, "completed": browser.completed]))
+                }
+            case "go":
+                if browser.editingTab != nil { browser.commitTabEdit() } else { browser.submit() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { answer(state()) }
+            case "esc":
+                if browser.editingTab != nil { browser.cancelTabEdit() } else { browser.dismiss() }
+                answer(state())
+            case "sendable":
+                answer(["sendable": EngineSuggest.sendable(request["text"] as? String ?? "")])
             default: answer(state())
             }
 
@@ -2838,7 +2933,7 @@ final class Bench {
                 answer(["error": "popups state|open|allow|remove|sites"])
             }
 
-        case "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload", "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable", "capture", "capture-stop":
+        case "extensions", "ext-add", "ext-folder", "ext-press", "ext-remove", "ext-reload", "ext-page", "ext-popup", "ext-menu", "ext-pin", "ext-shot", "ext-answer", "ext-enable", "ext-private", "capture", "capture-stop":
             guard #available(macOS 15.4, *) else {
                 answer(["error": "extensions need macOS 15.4"])
                 return
@@ -2847,7 +2942,7 @@ final class Bench {
 
         default:
             answer(["error": "unknown command “\(verb)”", "commands": [
-                "tabs", "open", "go", "openmark", "close", "wait", "sleep", "select", "text", "eval", "click", "type", "submit", "shot", "probe", "key", "textcheck", "resize", "hit", "film", "float", "window", "pages", "picture", "pdf", "place", "group", "tospace", "field", "bookmark", "marks", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "magnify", "wheel", "space", "split", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "import-file-start", "import-file-status", "import-file-cancel", "remove-folder", "passwords", "accounts", "find", "answer", "visible", "notifications", "popups",
+                "tabs", "open", "go", "openmark", "close", "wait", "sleep", "select", "text", "nowplaying", "eval", "click", "type", "submit", "shot", "probe", "key", "textcheck", "resize", "hit", "film", "float", "window", "pages", "picture", "pdf", "place", "group", "tospace", "field", "bookmark", "marks", "menu", "keyeq", "fill", "pin", "middle", "windows", "quit", "towindow", "news", "pull", "magnify", "wheel", "space", "split", "strip", "column", "fold", "consent", "update", "site", "little", "ui", "import", "import-preview", "import-file", "import-file-start", "import-file-status", "import-file-cancel", "remove-folder", "passwords", "accounts", "find", "answer", "visible", "notifications", "popups", "suggest",
             ]])
         }
     }
@@ -3269,10 +3364,10 @@ final class Bench {
         case "extensions":
             answer(["started": extensions.started, "busy": extensions.busy ?? "", "extensions": extensions.installed.map { item -> [String: Any] in
                 let context = extensions.contexts[item.id]
-                let action = context?.action(for: extensions.activeAdapter)
+                let action = context.flatMap { $0.action(for: extensions.activeAdapter(for: $0)) }
                 return [
                     "id": item.id, "name": item.name, "version": item.version, "enabled": item.enabled,
-                    "loaded": context != nil,
+                    "loaded": context != nil, "private": context?.hasAccessToPrivateData ?? false,
                     "base": context?.baseURL.absoluteString ?? "",
                     "errors": (context?.errors ?? []).map { error in
                         let e = error as NSError
@@ -3301,6 +3396,13 @@ final class Bench {
             guard let id = request["id"] as? String else { answer(["error": "ext-enable needs an id"]); return }
             extensions.setEnabled(id, request["on"] as? Bool ?? true)
             answer(["enabled": request["on"] as? Bool ?? true])
+        case "ext-private":
+            guard Store.testing else { answer(["error": "only in a test run"]); return }
+            guard let id = request["id"] as? String, let context = extensions.contexts[id] else {
+                answer(["error": "ext-private needs a loaded extension's id"]); return
+            }
+            extensions.setPrivate(id, request["on"] as? Bool ?? true)
+            answer(["private": context.hasAccessToPrivateData])
         case "capture":
             // Extensions' screen recording: ids given, what is recording, who
             // may, and the last request with its answer.
@@ -3424,9 +3526,18 @@ final class Bench {
     /// The address field, wherever it is in the window.
     static func addressField(in view: NSView?) -> NSTextField? {
         guard let view else { return nil }
-        if let field = view as? NSTextField, field.delegate is AddressField.Coordinator { return field }
-        for sub in view.subviews { if let found = addressField(in: sub) { return found } }
-        return nil
+        func fields(in view: NSView) -> [NSTextField] {
+            var found: [NSTextField] = []
+            if let field = view as? NSTextField,
+               field.delegate is AddressField.Coordinator || field.delegate is TabAddressField.Coordinator {
+                found.append(field)
+            }
+            return found + view.subviews.flatMap { fields(in: $0) }
+        }
+        let candidates = fields(in: view)
+        return candidates.first(where: { $0.currentEditor() != nil })
+            ?? candidates.first(where: { ($0.delegate as? TabAddressField.Coordinator)?.browser.editingTab != nil })
+            ?? candidates.first
     }
 
     /// Milliseconds from `start` to the run loop's next rest — after every

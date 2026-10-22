@@ -1014,8 +1014,17 @@ struct TabAddressField: NSViewRepresentable {
     func updateNSView(_ field: Field, context: Context) {
         let coordinator = context.coordinator
         coordinator.browser = browser
-        if !coordinator.typing, field.stringValue != browser.tabDraft {
-            field.stringValue = browser.tabDraft
+        // Keep the draft intact while the arrow keys preview a row. A later
+        // engine response can redraw the list without changing the caret.
+        let picked = browser.tabPicked.flatMap { browser.tabOffers.indices.contains($0) ? browser.tabOffers[$0] : nil }
+        let want = picked?.key ?? browser.tabDraft
+        if !coordinator.typing, want != coordinator.synced {
+            coordinator.synced = want
+            field.stringValue = want
+            if let editor = field.currentEditor() as? NSTextView {
+                let start = picked != nil && want.hasPrefix(browser.tabDraft) ? (browser.tabDraft as NSString).length : (want as NSString).length
+                editor.selectedRange = NSRange(location: start, length: (want as NSString).length - start)
+            }
         }
         guard !coordinator.claimed || coordinator.focusRequest != browser.focusRequest else { return }
         coordinator.claimed = true
@@ -1040,7 +1049,12 @@ struct TabAddressField: NSViewRepresentable {
         var browser: Browser
         var claimed = false
         var focusRequest = -1
+        /// The request that actually acquired the editor, not one merely
+        /// scheduled by a SwiftUI update while the old editor is ending.
+        var focusedRequest = -1
         var typing = false
+        /// The last programmatic text, including any row preview.
+        var synced = ""
         /// A key that takes letters off: the field mustn't put the same
         /// letters straight back as a completion, or it can't be shortened.
         private var deleting = false
@@ -1064,6 +1078,7 @@ struct TabAddressField: NSViewRepresentable {
                   window.firstResponder === editor,
                   field.window === window,
                   field.delegate === self else { return }
+            focusedRequest = browser.focusRequest
             editor.drawsBackground = false
             editor.selectedTextAttributes = [
                 .backgroundColor: NSColor(Palette.ink.opacity(0.11)),
@@ -1088,6 +1103,7 @@ struct TabAddressField: NSViewRepresentable {
             }
             deleting = false
             browser.tabDraft = field.stringValue
+            synced = field.stringValue
         }
 
         func control(
@@ -1125,8 +1141,27 @@ struct TabAddressField: NSViewRepresentable {
         /// Clicking anywhere else keeps what was typed, as Return does.
         func controlTextDidEndEditing(_ note: Notification) {
             guard !SiteCardPanel.isShown else { return }
+            finishEditingLater(checkFocus: true)
+        }
+
+        @MainActor private func finishEditingLater(checkFocus: Bool = false) {
             let browser = browser
-            DispatchQueue.main.async { browser.finishTabEdit() }
+            guard let tab = browser.editingTab else { return }
+            // Removing the old field can report focus loss after a new edit
+            // of the same tab has begun. Only finish this field's request.
+            let request = focusedRequest
+            DispatchQueue.main.async {
+                guard browser.editingTab == tab, browser.focusRequest == request else { return }
+                // SwiftUI can reuse the same coordinator for the replacement
+                // field. A delayed notification from its previous editor
+                // must not dismiss the address that has the caret now.
+                if checkFocus, let editor = browser.window?.firstResponder as? NSTextView,
+                   let field = editor.delegate as? NSTextField,
+                   let owner = field.delegate as? Coordinator, owner.browser === browser {
+                    return
+                }
+                browser.finishTabEdit()
+            }
         }
 
         /// A press on something that takes no focus — the strip's empty
@@ -1154,7 +1189,7 @@ struct TabAddressField: NSViewRepresentable {
                     SiteCardPanel.dismiss()
                     return event
                 }
-                DispatchQueue.main.async { browser.finishTabEdit() }
+                self.finishEditingLater()
                 return event
             }
         }

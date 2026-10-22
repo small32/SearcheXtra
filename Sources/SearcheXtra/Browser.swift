@@ -664,7 +664,8 @@ final class Browser: NSObject, ObservableObject {
     struct Suggesting: Equatable {
         let tab: Tab.ID
         var spot: CGRect
-        let logins: [Login]
+        /// Without secrets: one is read only for the account picked.
+        let logins: [Kept]
         /// The Mac's passkeys for a page waiting for one under its field.
         var passkeys: [Passkeys.Offered] = []
         /// The page the list was made for: its site, and whether it came in
@@ -762,7 +763,7 @@ final class Browser: NSObject, ObservableObject {
         // Passwords only for a box that goes with one: a box for passkeys
         // alone has no password to put anywhere.
         var kept = prefs.fillsPasswords && passwords
-            ? Vault.logins(matching: host).filter { !inTheClear || $0.clear } : []
+            ? Vault.kept(matching: host).filter { !inTheClear || $0.clear } : []
         // The account whose name the step before was sent with comes first:
         // the password page of a sign-in that asks for the name first.
         if let given = tab.givenName(),
@@ -784,7 +785,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     /// One of the accounts in the list, picked by name.
-    func choose(_ login: Login) {
+    func choose(_ login: Kept) {
         lowering?.cancel()
         guard let list = suggesting, let tab = tabs.first(where: { $0.id == list.tab }) else { return }
         guard Date().timeIntervalSince(list.shown) > 0.5 else { return }
@@ -801,6 +802,11 @@ final class Browser: NSObject, ObservableObject {
             tab.fillName(login.user) { [weak self] worked in
                 if !worked { self?.announce(L10n.text("Browser.0291")) }
             }
+            return
+        }
+        // Its secret is read now, once it is picked: see `Vault.kept(for:)`.
+        guard let login = Vault.login(login) else {
+            announce(L10n.text("upstream.keychainRefused"))
             return
         }
         tab.fill(user: login.user, password: login.password) { [weak self] worked in
@@ -1393,9 +1399,50 @@ final class Browser: NSObject, ObservableObject {
     @Published private(set) var tabPicked: Int?
     /// The address the edit began with: nothing is offered for that.
     private var tabOriginal = ""
+    let tabSuggester = EngineSuggester()
+    private var tabEngineWords: (asked: String, words: [String]) = ("", [])
+
+    private func stopTabSuggestions() {
+        tabSuggester.stop()
+        tabEngineWords = ("", [])
+    }
+
+    func tabEngineQuestion(for text: String) -> URL? {
+        guard prefs.engineSuggests, !renamingTab, !summoning,
+              let id = editingTab, let tab = tabs.first(where: { $0.id == id }), !tab.shy,
+              EngineSuggest.sendable(text), Keyword.match(text, in: prefs.keywords) == nil else { return nil }
+        return EngineSuggest.url(for: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                                 engine: prefs.engine, test: EngineSuggest.testEndpoint)
+    }
+
+    private func askTabEngine(for text: String) {
+        guard let question = tabEngineQuestion(for: text), let id = editingTab else {
+            stopTabSuggestions()
+            return
+        }
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = words.lowercased()
+        let places = Set(tabOffers.map { $0.key.lowercased() })
+        let still = tabEngineWords.words.filter {
+            $0.lowercased().hasPrefix(lower) && $0.lowercased() != lower && !places.contains($0.lowercased())
+        }
+        tabOffers += engineOffers(still)
+        tabSuggester.ask(question, words: words) { [weak self] answer in
+            guard let self, self.editingTab == id, !self.renamingTab,
+                  self.tabDraft.trimmingCharacters(in: .whitespacesAndNewlines) == words,
+                  self.tabEngineQuestion(for: self.tabDraft) == question else { return }
+            let local = self.tabOffers.filter { $0.kind != .suggested }
+            if let picked = self.tabPicked, picked >= local.count { return }
+            self.tabEngineWords = (words, answer)
+            let places = Set(local.map { $0.key.lowercased() })
+            self.tabOffers = local + self.engineOffers(answer.filter { !places.contains($0.lowercased()) })
+        }
+    }
 
     func beginTabEdit(_ tab: Tab) {
         SiteCardPanel.hide()
+        suggester.stop()
+        stopTabSuggestions()
         summoning = false
         editing = false
         renamingTab = false
@@ -1414,10 +1461,12 @@ final class Browser: NSObject, ObservableObject {
         let words = text.trimmingCharacters(in: .whitespaces)
         guard editingTab != nil, !renamingTab, !words.isEmpty, text != tabOriginal else {
             tabOffers = []
+            stopTabSuggestions()
             return nil
         }
         let (offers, ending) = placeOffers(for: text)
         tabOffers = offers
+        askTabEngine(for: text)
         return ending
     }
 
@@ -1449,6 +1498,10 @@ final class Browser: NSObject, ObservableObject {
     /// replaces it; emptying the field gives the page its own title back.
     func beginTabRename(_ tab: Tab) {
         SiteCardPanel.hide()
+        suggester.stop()
+        stopTabSuggestions()
+        tabOffers = []
+        tabPicked = nil
         renamingTab = true
         tabDraft = tab.label
         editingTab = tab.id
@@ -1472,15 +1525,13 @@ final class Browser: NSObject, ObservableObject {
             refusals += 1
             return
         }
-        SiteCardPanel.hide()
-        editingTab = nil
-        tabOffers = []
-        tabPicked = nil
+        cancelTabEdit()
         tab.go(to: url)
     }
 
     func cancelTabEdit() {
         SiteCardPanel.hide()
+        stopTabSuggestions()
         editingTab = nil
         renamingTab = false
         tabDraft = ""
@@ -1641,6 +1692,9 @@ final class Browser: NSObject, ObservableObject {
     var afterSpaceCreated: ((Space) -> Void)?
     /// A link's page, peeked at over this one (see Peek.swift).
     @Published var peekTab: Tab?
+    /// The tab the peek was opened from: a pin wears the peek's icon while
+    /// it is up (see PeekBadge).
+    @Published var peekFrom: UUID?
     /// Which way the last change of space went: 1 to the next, -1 back.
     @Published var spaceStep = 1
 
@@ -1946,19 +2000,16 @@ final class Browser: NSObject, ObservableObject {
             }
             .store(in: &bag)
 
-        prefs.$extensionsInPrivate
-            .dropFirst()
-            .removeDuplicates()
+        prefs.$engineSuggests.dropFirst().removeDuplicates()
             .sink { [weak self] on in
-                guard let self, #available(macOS 15.4, *) else { return }
-                Extensions.shared.privateAccessChanged(on)
-                let pages = tabs + parkedTabs + [peekTab].compactMap({ $0 })
-                if let id = floating, let tab = pages.first(where: { $0.id == id }),
-                   tab.shy, tab.carriesExtensions != on { land() }
-                for tab in pages {
-                    tab.privateExtensionsChanged(on)
-                }
-                Extensions.shared.privateTabsChanged(in: self)
+                guard let self, !on else { return }
+                suggester.stop()
+                engineWords = ("", [])
+                stopTabSuggestions()
+                offers.removeAll { $0.kind == .suggested }
+                tabOffers.removeAll { $0.kind == .suggested }
+                picked = nil
+                tabPicked = nil
             }
             .store(in: &bag)
 
@@ -2516,6 +2567,8 @@ final class Browser: NSObject, ObservableObject {
 
     /// Its window closed for good, with others open: every page let go.
     func closeAll() {
+        cancelTabEdit()
+        suggester.stop()
         SidePanelPages.shared.forget(in: self)
         sidePanelShown = false
         sidePanel = nil
@@ -2961,6 +3014,11 @@ final class Browser: NSObject, ObservableObject {
         else if let tab = active { close(tab) }
     }
 
+    /// ⇧⌘W: the whole window, its tabs with it, as the red button closes it.
+    func closeWindow() {
+        window?.performClose(nil)
+    }
+
     /// The panel over the page put away, if one is up — for ⌘W and Escape
     /// both. Whether there was one.
     func closePanel() -> Bool {
@@ -2996,7 +3054,10 @@ final class Browser: NSObject, ObservableObject {
         // its place, the page is let go, and you land on whatever you were
         // looking at before. Only Unpin takes it out of the row.
         if tab.pin != nil {
-            tab.rest(at: prefs.pinsGoHome ? tab.home : nil)
+            // Put down is also gone home with Settings › Tabs › Pins stay on
+            // their site, as Arc's pins are: the pin wakes on the page it was
+            // pinned at, not wherever its links had taken it.
+            tab.rest(at: prefs.pinsGoHome || prefs.pinsPeek ? tab.home : nil)
             // Ordinary tabs first. Falling back to the most recent tab of any
             // kind meant closing one pin landed you on another pin, and ⌘W
             // bounced between the two instead of getting you out of them.
@@ -3868,9 +3929,10 @@ final class Browser: NSObject, ObservableObject {
         guard #available(macOS 15.4, *) else { return nil }
         let url = Extensions.current(url)
         guard url.scheme == Extensions.scheme else { return nil }
-        guard let configuration = Extensions.shared.controller.extensionContext(for: url)?.webViewConfiguration else { return nil }
+        guard let context = Extensions.shared.controller.extensionContext(for: url),
+              let configuration = context.webViewConfiguration else { return nil }
         if let privateStore {
-            guard Shared.prefs.extensionsInPrivate else { return nil }
+            guard context.hasAccessToPrivateData else { return nil }
             configuration.websiteDataStore = privateStore.isPersistent ? .nonPersistent() : privateStore
             // Extension configurations normally share the controller for
             // their own pages. Private pages need a separate one as well as
@@ -4396,6 +4458,9 @@ final class Browser: NSObject, ObservableObject {
         // From a private tab, the new one is private too, as for ⌘-click.
         tab.onMiddleClick = { [weak self] tab, url in self?.openClicked(url, foreground: false, from: tab, view: tab.built) }
         tab.onCross = { [weak self] tab, url in self?.replace(tab, going: url) }
+        tab.onFileLink = { [weak self] tab, url, blank in
+            if blank { self?.open(url, foreground: true, from: tab) } else { tab.go(to: url) }
+        }
 
         // The caret in a sign-in box: the accounts kept for this site hang
         // from the box, and go when the caret does. Nothing is filled on
@@ -4412,9 +4477,10 @@ final class Browser: NSObject, ObservableObject {
             // A password manager extension that asked Chrome's way to do the
             // saving itself.
             if #available(macOS 15.4, *), Extensions.shared.passwordSavingTakenBy != nil { return }
-            let known = Vault.logins(for: host)
-            // Nothing to ask about one that is already known.
-            if var same = known.first(where: { $0.user == user && $0.password == password }) {
+            let known = Vault.kept(for: host)
+            // Nothing to ask about one that is already known. Only that
+            // account's secret is read, not every one kept for the site.
+            if var same = known.first(where: { $0.user == user }).flatMap(Vault.login), same.password == password {
                 // Where it was last used is where it is offered from now on.
                 same.clear = clear
                 Vault.touch(same)
@@ -4525,6 +4591,11 @@ final class Browser: NSObject, ObservableObject {
     }
 
     private func guess() {
+        // Only a plain field asks the engine (see askEngine, at the end).
+        if summoning || siteChip != nil || typed.trimmingCharacters(in: .whitespaces).isEmpty {
+            suggester.stop()
+            engineWords = ("", [])
+        }
         guard !summoning else {
             offers = openPages(matching: typed)
             ending = nil
@@ -4561,6 +4632,66 @@ final class Browser: NSObject, ObservableObject {
         // A row that was picked stops being the right row the moment the
         // question changes.
         picked = nil
+        askEngine()
+    }
+
+    // MARK: - the engine's suggestions
+
+    /// Asks the engine for the words it would suggest, when Settings ›
+    /// General › Suggestions from your search engine is on and these words
+    /// may leave the Mac (EngineSuggest.sendable). What it said for the
+    /// words before stays, those that still fit, until it answers these:
+    /// rows that came and went with every key would be a list nobody could
+    /// read.
+    let suggester = EngineSuggester()
+    /// The engine's last words, and what they answered.
+    private var engineWords: (asked: String, words: [String]) = ("", [])
+
+    /// The question this field may ask the engine, or nil when it may not:
+    /// the switch off, a private tab, ⌘K, a site or a shortcut in charge,
+    /// or words that look like anything but a search.
+    func engineQuestion(for typed: String) -> URL? {
+        guard prefs.engineSuggests, !summoning, siteChip == nil, active?.shy != true,
+              EngineSuggest.sendable(typed),
+              Keyword.match(typed, in: prefs.keywords) == nil
+        else { return nil }
+        let words = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        return EngineSuggest.url(for: words, engine: prefs.engine, test: EngineSuggest.testEndpoint)
+    }
+
+    private func askEngine() {
+        guard let question = engineQuestion(for: typed) else {
+            suggester.stop()
+            engineWords = ("", [])
+            return
+        }
+        let words = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Until the answer: last time's words that still begin with these.
+        let lower = words.lowercased()
+        let places = Set(offers.map { $0.key.lowercased() })
+        let still = engineWords.words.filter {
+            $0.lowercased().hasPrefix(lower) && $0.lowercased() != lower && !places.contains($0.lowercased())
+        }
+        if !still.isEmpty { offers += engineOffers(still) }
+        suggester.ask(question, words: words) { [weak self] answer in
+            guard let self else { return }
+            // Typed on since, or the field gone: nothing to answer.
+            guard self.typed.trimmingCharacters(in: .whitespacesAndNewlines) == words,
+                  self.fieldShowing, self.engineQuestion(for: self.typed) == question
+            else { return }
+            let mine = self.offers.filter { $0.kind != .suggested }
+            // A row of the engine's that the arrow keys are on stays put.
+            if let picked = self.picked, picked >= mine.count { return }
+            self.engineWords = (words, answer)
+            let places = Set(mine.map { $0.key.lowercased() })
+            self.offers = mine + self.engineOffers(answer.filter { !places.contains($0.lowercased()) })
+        }
+    }
+
+    private func engineOffers(_ words: [String]) -> [Suggestion] {
+        words.prefix(EngineSuggest.most).compactMap { word in
+            searchURL(for: word).map { Suggestion(key: word, title: "", url: $0, kind: .suggested) }
+        }
     }
 
     /// What an address field offers for what is typed in it, and the rest of
@@ -4993,6 +5124,25 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             DispatchQueue.main.async { [weak self] in self?.peek(url, from: from) }
             return
         }
+        // A plain click in a pin, on a link to another site: a peek too, when
+        // Settings says so (see peeksFromPin). Links into the page's frames
+        // are the page's own business. A link the site sends out by way of
+        // itself, as Google's results go by google.com/goto, is asked about
+        // again at the redirect, still as a click — by then webView.url is
+        // already where it is going, so the page it was on is the one in the
+        // history.
+        if action.navigationType == .linkActivated, action.targetFrame?.isMainFrame == true,
+           action.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty,
+           let from = tab(for: webView), peeksFromPin(url, in: from, on: webView.backForwardList.currentItem?.url) {
+            decisionHandler(.cancel)
+            DispatchQueue.main.async { [weak self] in self?.peek(url, from: from) }
+            return
+        }
+        if action.navigationType == .other, action.targetFrame?.isMainFrame == true,
+           let from = tab(for: webView), followsPeek(url, in: from) {
+            decisionHandler(.cancel)
+            return
+        }
         if action.navigationType == .linkActivated,
            ["http", "https"].contains(scheme),
            action.modifierFlags.contains(.command) {
@@ -5019,6 +5169,8 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             // The frames that were told about the last page's darkening go
             // with it.
             tab.duskFrames.removeAll()
+            // And the frames that played, and the count to the media keys.
+            tab.leaving()
         }
 
         // chrome-extension: an extension's own pages — options, a side
@@ -5146,6 +5298,11 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             }
         }
         let from = opener.id
+        // The link menu's Open Link in New Tab, asked for in the last second.
+        // Read once: reading it takes it.
+        let behind = (webView as? PageView)?.takeBehind() == true
+        let popup = windowFeatures.width != nil || windowFeatures.height != nil
+            || windowFeatures.toolbarsVisibility?.boolValue == false
         // WebKit's copy of the opener's configuration still holds the
         // opener's user content controller — its scripts and its message
         // handlers. Shared, the new tab claimed the opener's handlers as its
@@ -5156,15 +5313,30 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // The opener's copy is what its view was made with, maybe before
         // Settings › Videos wait for a click last moved.
         configuration.mediaTypesRequiringUserActionForPlayback = Web.playback
+        // A new window a pin's page asked for on a click — a target="_blank"
+        // link, or window.open from the click, as Gmail's links and many
+        // sites' do, often by way of a redirect on their own site — opens in
+        // the peek rather than the row (see peekWindow). Only on a click:
+        // a window the page opens by itself, even from a site allowed
+        // pop-ups, takes the tab path as before. A window sized by the page,
+        // "Sign in with…", is left alone, as is a modified click, and so is
+        // anything that isn't a web page (about:blank, data:, blob:).
+        if clicked, !behind, !popup, prefs.pinsPeek, peekTab == nil, opener.pin != nil,
+           [.linkActivated, .other].contains(action.navigationType),
+           action.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty,
+           let url = action.request.url, Browser.peekable(url) {
+            let page = peekWindow(configuration, from: opener, going: url)
+            opener.popupGesture.opened(page.id)
+            return page.web
+        }
         let tab = Tab(shy: opener.shy, configuration: configuration)
-        tab.popup = windowFeatures.width != nil || windowFeatures.height != nil
-            || windowFeatures.toolbarsVisibility?.boolValue == false
+        tab.popup = popup
         tab.opener = from
         if clicked { opener.popupGesture.opened(tab.id) }
         // The link menu's Open Link in New Tab: behind this tab, where a
         // ⌘-click's goes (see open(_:foreground:)).
         prepare(tab)
-        if (webView as? PageView)?.takeBehind() == true, let source = self.tab(for: webView) {
+        if behind, let source = self.tab(for: webView) {
             if prefs.usesTabGroups, tab.shy == source.shy, !tab.bench { tab.groupID = source.groupID }
             tabs.insert(tab, at: placeForNew())
         } else {

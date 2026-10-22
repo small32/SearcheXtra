@@ -76,19 +76,14 @@ struct ExtensionsPage: View {
                 }
 
                 Card {
-                    Line(L10n.text("ExtensionsUI.0488"), L10n.text("ExtensionsUI.0489")) {
-                        Switch(on: Binding(
-                            get: { browser.prefs.extensionsInPrivate },
-                            set: { browser.prefs.extensionsInPrivate = $0 }
-                        ))
-                    }
-                }
-
-                Card {
                     Line(L10n.text("extensions.manage")) {
                         Pill(L10n.text("extensions.openManager")) { ExtensionManagerWindow.shared.show() }
                     }
                 }
+                Text(L10n.text("extensions.private.detail"))
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Card {
                     Line(L10n.text("ExtensionsUI.0491"), L10n.text("ExtensionsUI.0492")) {

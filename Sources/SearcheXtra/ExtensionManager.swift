@@ -98,7 +98,9 @@ private struct ExtensionManagerCard: View {
                 Switch(on: Binding(get: { item.enabled }, set: { extensions.setEnabled(item.id, $0) }))
                     .accessibilityLabel(L10n.text("extensions.enable", item.name))
             }
-            Text(L10n.text(item.enabled ? "extensions.enabled" : "extensions.disabled"))
+            Text([L10n.text(item.enabled ? "extensions.enabled" : "extensions.disabled"),
+                  context?.hasAccessToPrivateData == true ? L10n.text("extensions.private.allowed") : nil]
+                .compactMap { $0 }.joined(separator: " · "))
                 .font(.system(size: 12)).foregroundStyle(Palette.muted)
             if expanded {
                 Rule()
@@ -106,6 +108,22 @@ private struct ExtensionManagerCard: View {
                     get: { item.pinned == true }, set: { extensions.setPinned(item.id, $0) }
                 ))
                 .toggleStyle(.checkbox)
+                if let context {
+                    if (context.webExtension.manifest["incognito"] as? String) == "not_allowed" {
+                        Text(L10n.text("extensions.private.unsupported"))
+                            .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    } else {
+                        Toggle(L10n.text("extensions.private.allow"), isOn: Binding(
+                            get: { context.hasAccessToPrivateData },
+                            set: { extensions.setPrivate(item.id, $0) }
+                        ))
+                        .toggleStyle(.checkbox)
+                        .accessibilityLabel(L10n.text("extensions.private.accessibility", item.name))
+                        .help(L10n.text("extensions.private.help"))
+                        Text(L10n.text("extensions.private.help"))
+                            .font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    }
+                }
                 if extensions.supportsUserScripts(item.id) {
                     Toggle(L10n.text("extensions.userScripts.label"), isOn: Binding(
                         get: { Extensions.userScriptsAllowed(item.id) },

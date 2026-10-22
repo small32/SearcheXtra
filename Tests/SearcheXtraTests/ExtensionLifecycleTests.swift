@@ -64,11 +64,9 @@ final class ExtensionLifecycleTests: XCTestCase {
     func testRemovalBeforeQueuedEnableCannotReloadOrUseAStaleIndex() async throws {
         let install = try XCTUnwrap(Extensions.shared.installFolder(at: folder, confirm: false))
         await install.value
-        let previousPrivate = Shared.prefs.extensionsInPrivate
-        defer { Shared.prefs.extensionsInPrivate = previousPrivate }
         let browser = Browser(record: WindowRecord(), opensStartPage: false)
         defer { for tab in browser.tabs { tab.close() } }
-        Shared.prefs.extensionsInPrivate = true
+        Extensions.shared.setPrivate(id, true)
         XCTAssertEqual(Extensions.shared.contexts[id]?.hasAccessToPrivateData, true)
         browser.newShyTab()
         let source = browser.active!
@@ -77,9 +75,10 @@ final class ExtensionLifecycleTests: XCTestCase {
         XCTAssertEqual(opened.first?.shy, true)
         XCTAssertTrue(opened.first?.store === source.store)
         XCTAssertFalse(opened.first!.store.isPersistent)
-        Shared.prefs.extensionsInPrivate = false
+        Extensions.shared.setPrivate(id, false)
         XCTAssertEqual(context.hasAccessToPrivateData, false)
-        XCTAssertTrue(opened.first!.isBlank)
+        XCTAssertFalse(Extensions.shared.seen(opened[0], for: context))
+        XCTAssertNil(Browser.extensionConfiguration(for: context.baseURL.appendingPathComponent("page.html"), privateStore: source.store))
         Extensions.shared.setEnabled(id, false)
         let enable = try XCTUnwrap(Extensions.shared.setEnabled(id, true))
         Extensions.shared.remove(id)
@@ -87,6 +86,42 @@ final class ExtensionLifecycleTests: XCTestCase {
         XCTAssertFalse(loaded)
         XCTAssertFalse(Extensions.shared.installed.contains { $0.id == id })
         XCTAssertNil(Extensions.shared.contexts[id])
+    }
+
+    func testPrivateConsentRefreshesRegisteredUserScriptsAndKeepsOldTabsExcluded() async throws {
+        let manifest: [String: Any] = ["manifest_version": 3, "name": "Private user-script fixture", "version": "1.0",
+                                       "permissions": ["userScripts"], "host_permissions": ["https://example.com/*"]]
+        try JSONSerialization.data(withJSONObject: manifest).write(to: folder.appendingPathComponent("manifest.json"))
+        let install = try XCTUnwrap(Extensions.shared.installFolder(at: folder, confirm: false))
+        await install.value
+        let enable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(id, true))
+        let enabled = await enable.value
+        XCTAssertTrue(enabled)
+        let context = try XCTUnwrap(Extensions.shared.contexts[id])
+        let marker = "privateUserScriptFixture"
+        _ = try await ExtensionUserScripts.call("userScripts.register", args: [[[
+            "id": "private-fixture", "matches": ["https://example.com/*"],
+            "js": [["code": "globalThis.\(marker) = true;"]], "world": "USER_SCRIPT"
+        ]]], context: context)
+        let old = SearcheXtra.Tab(shy: true)
+        let oldView = old.web
+        defer { old.close() }
+        XCTAssertFalse(old.carriesExtensions)
+        XCTAssertFalse(oldView.configuration.userContentController.userScripts.contains { $0.source.contains(marker) })
+
+        Extensions.shared.setPrivate(id, true)
+        XCTAssertTrue(context.hasAccessToPrivateData)
+        XCTAssertFalse(old.carriesExtensions)
+        XCTAssertFalse(oldView.configuration.userContentController.userScripts.contains { $0.source.contains(marker) })
+        let fresh = SearcheXtra.Tab(shy: true)
+        let freshView = fresh.web
+        defer { fresh.close() }
+        XCTAssertTrue(fresh.carriesExtensions)
+        XCTAssertTrue(freshView.configuration.userContentController.userScripts.contains { $0.source.contains(marker) })
+        Extensions.shared.setPrivate(id, false)
+        XCTAssertFalse(context.hasAccessToPrivateData)
+        XCTAssertFalse(freshView.configuration.userContentController.userScripts.contains { $0.source.contains(marker) })
+        XCTAssertFalse(Extensions.shared.seen(fresh, for: context))
     }
 
     func testUserScriptSwitchIsOptInReloadsAndPreservesSavedScripts() async throws {

@@ -68,6 +68,8 @@ struct SearcheXtraApp: App {
                 Divider()
                 Button(L10n.text("App.0119")) { browser.closeFront() }
                     .shortcut("file.closeTab")
+                Button(L10n.text("upstream.closeWindow")) { browser.closeWindow() }
+                    .shortcut("file.closeWindow")
             }
             CommandGroup(replacing: .printItem) {
                 Button(L10n.text("App.0120")) { browser.share() }
@@ -1095,10 +1097,10 @@ struct ContentView: View {
         // Nor by its title bar, which the strip is all the way down: AppKit
         // would move the window on any drag there, a tab picked up to take
         // it elsewhere in the row included. DragStrip moves it instead. The
-        // window stays movable between clicks, though — macOS's Window ›
-        // Move & Resize, its tiling and the tools that arrange windows ask
-        // for a movable one (#286) — and is made unmovable only while a
-        // press lasts (see Browsers.watchFrames).
+        // window stays movable, though — macOS's Window › Move & Resize, its
+        // tiling and the tools that arrange windows ask for a movable one
+        // (#286) — and is made unmovable only while the pointer is over the
+        // strip (see DragStrip).
         window.isMovable = true
 
         // The traffic lights set in from the corner and centred in the strip's
@@ -1211,7 +1213,7 @@ struct ContentView: View {
     /// them to scroll the page sideways and never hands them back, so
     /// passing them on left them dead for going back and forward (#324).
     private func pageFirst(_ event: NSEvent, key: String, shifted: Bool) -> Bool {
-        let reserved = (key == "t") || (key == "w" && !shifted) || (key == "n" && shifted)
+        let reserved = (key == "t") || (key == "w") || (key == "n" && shifted)
             || ((key == "[" || key == "]" || key == "{" || key == "}") && shifted)
             || (key == "z" && browser.veiling)
             || (key == "k" && !shifted)
@@ -1580,6 +1582,8 @@ struct ContentView: View {
             browser.resetZoom()
         case "w" where !shifted:
             browser.closeFront()
+        case "w" where shifted:
+            browser.closeWindow()
         case "l" where !shifted:
             browser.edit()
         case "r" where !shifted:

@@ -191,11 +191,14 @@ final class BookmarkBarTests: XCTestCase {
         XCTAssertFalse(browser.allRows().values.flatMap { $0.groups ?? [] }.contains { $0.id == group })
     }
 
-    func testPrivateExtensionSettingRebuildsExistingPageWithSameStore() throws {
+    func testLegacyGlobalExtensionSettingDoesNotChangePrivatePages() throws {
         guard #available(macOS 15.4, *) else { throw XCTSkip("Extensions require macOS 15.4") }
-        let previous = Shared.prefs.extensionsInPrivate
-        defer { Shared.prefs.extensionsInPrivate = previous }
-        Shared.prefs.extensionsInPrivate = false
+        let previous = Store.settings.object(forKey: "extensions.private")
+        defer {
+            if let previous { Store.settings.set(previous, forKey: "extensions.private") }
+            else { Store.settings.removeObject(forKey: "extensions.private") }
+        }
+        Store.settings.set(false, forKey: "extensions.private")
         let browser = Browser(record: WindowRecord(), opensStartPage: false)
         defer { for tab in browser.tabs { tab.close() } }
         browser.newShyTab()
@@ -205,17 +208,16 @@ final class BookmarkBarTests: XCTestCase {
         let address = URL(string: "https://private.example")!
         tab.setAddressOptimistically(address)
         let oldView = tab.web
-        Shared.prefs.extensionsInPrivate = true
-        XCTAssertTrue(tab.carriesExtensions)
+        XCTAssertFalse(tab.carriesExtensions)
+        Store.settings.set(true, forKey: "extensions.private")
+        XCTAssertFalse(tab.carriesExtensions)
         XCTAssertEqual(tab.id, id)
         XCTAssertTrue(tab.store === store)
-        XCTAssertTrue(tab.web !== oldView)
+        XCTAssertTrue(tab.web === oldView)
         XCTAssertEqual(tab.address, address)
-        Shared.prefs.extensionsInPrivate = false
-        XCTAssertFalse(tab.carriesExtensions)
-        XCTAssertTrue(tab.store === store)
-        XCTAssertFalse(tab.store.isPersistent)
-        XCTAssertEqual(tab.address, address)
+        browser.newShyTab()
+        XCTAssertFalse(browser.active!.carriesExtensions)
+        XCTAssertFalse(browser.active!.store.isPersistent)
     }
 
     func testSettingsPersist() {

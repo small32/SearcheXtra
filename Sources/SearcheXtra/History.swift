@@ -22,6 +22,8 @@ struct Suggestion: Identifiable, Equatable {
         case known
         /// Not a place at all — words, and an engine to ask.
         case search
+        /// Words suggested by the selected search engine.
+        case suggested
         /// Not a place either: something the app itself does.
         case command(AddressCommand)
 
@@ -32,6 +34,7 @@ struct Suggestion: Identifiable, Equatable {
     /// ("Settings" typed with its capital), and two rows can't share a name.
     var id: String {
         if kind.isCommand { return "command " + key }
+        if case .suggested = kind { return "suggested " + key }
         if case .visited = kind { return History.identity(for: url) }
         return key
     }

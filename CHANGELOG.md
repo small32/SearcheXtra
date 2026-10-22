@@ -1,5 +1,15 @@
 # SearcheXtra 更新日志
 
+## 2.2.3 — 2026-10-23
+
+- 合并 Search 上游 `b2048a0..57912ad` 的 16 个提交，仅移植 macOS 代码。
+- 扩展逐个授权访问无痕标签页，兼容本地 MV3 用户脚本权限；修复 Stylus 扩展弹窗空白。
+- 新增默认关闭的搜索引擎输入建议，接入标签内地址编辑；无痕标签、网址、文件路径和敏感内容不会发送，新增设置支持中英双语。
+- 新增默认关闭的固定标签跨站链接预览、⇧⌘W 关闭窗口和标签区域鼠标前进/后退键切换空间。
+- 修复暂停视频占用媒体键、关闭标签后的摄像头/麦克风释放、密码列表过早读取秘密、安全密钥缺少用户句柄、搜索/标题字段误触发密码建议、本地 HTML 跨目录链接、标签拖动及休眠页面布局。
+- 适配搜索建议时修复旧地址输入框的延迟失焦回调误关闭新编辑，覆盖快速切换与连续新建标签。
+- Merge 16 upstream commits through `57912ad` for macOS, retaining SearcheXtra’s embedded address editing, super drag, bilingual interface, MV2/MV3 support and separate ARM64/Intel builds. Search-engine suggestions and pinned-tab cross-site peeks remain off by default.
+
 ## 2.2.2 — 2026-10-21
 
 - 分别发布 macOS ARM64 和 Intel x86_64 安装包，不构建 Universal 版本。

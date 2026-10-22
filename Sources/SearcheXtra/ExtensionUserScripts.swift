@@ -94,6 +94,11 @@ enum ExtensionUserScripts {
         for page in pages.values { page.tab?.extensionRuntimeChanged() }
     }
 
+    /// Regenerate only the scripts for future documents when one extension's
+    /// private consent changes. Existing document access is checked by the
+    /// message bridge; a grant cannot attach a controller to an older tab.
+    static func privacyChanged() { refresh() }
+
     /// Native resource-folder reloads start a new installation of user
     /// scripts and worlds. Extension storage, including GM values, is kept.
     static func reset(_ id: String) throws {
@@ -128,12 +133,12 @@ enum ExtensionUserScripts {
         }
         pages[key] = page
         let permitted = registrations.keys.sorted().filter { id in
-            registrations[id].map { !tab.shy || $0.context.hasAccessToPrivateData } == true
+            registrations[id].map { Extensions.shared.seen(tab, for: $0.context) } == true
         }
         var retained = Set<String>()
         controller.addUserScript(WKUserScript(source: discovery(channel: page.discovery), injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world))
         for id in permitted {
-            guard var registration = registrations[id], !tab.shy || registration.context.hasAccessToPrivateData else { continue }
+            guard var registration = registrations[id], Extensions.shared.seen(tab, for: registration.context) else { continue }
             let scripts = registration.scripts
             let worldIDs = Set([""] + registration.worlds.map { $0["worldId"] as? String ?? "" } + scripts.filter { ($0["world"] as? String) != "MAIN" }.map { $0["worldId"] as? String ?? "" }).union(registration.contentWorlds.keys)
             for worldID in worldIDs {
@@ -242,7 +247,7 @@ enum ExtensionUserScripts {
         let id = context.uniqueIdentifier
         guard var registration = registrations[id], registration.context === context, Extensions.userScriptsAllowed(id),
               let view = tab.built,
-              !tab.shy || context.hasAccessToPrivateData else { throw invalid("User-script context is not authorized") }
+              Extensions.shared.seen(tab, for: context) else { throw invalid("User-script context is not authorized") }
         let target = injection["target"] as? [String: Any] ?? [:]
         try validateTarget(target)
         let requestedWorld = injection["world"] as? String ?? "USER_SCRIPT"
@@ -278,7 +283,7 @@ enum ExtensionUserScripts {
             do {
                 guard tab.built === view, registrations[id]?.context === context,
                       registrations[id]?.generation == registration.generation, Extensions.userScriptsAllowed(id),
-                      !tab.shy || context.hasAccessToPrivateData,
+                      Extensions.shared.seen(tab, for: context),
                       let permitted = permissionURL(selected.url, frame: selected.frame.info),
                       context.hasAccess(to: permitted, in: Extensions.shared.adapter(for: tab)) else { throw invalid("User-script frame access was revoked") }
                 // Checking the per-document marker in the very evaluation
@@ -551,7 +556,7 @@ enum ExtensionUserScripts {
                   let operation = body["operation"] as? String, let url = message.frameInfo.request.url,
                   let registration = registrations[id], registration.context === context,
                   registration.generation == generation, Extensions.userScriptsAllowed(id),
-                  (!tab.shy || registration.context.hasAccessToPrivateData),
+                  (Extensions.shared.seen(tab, for: registration.context)),
                   let permitted = permissionURL(url, frame: message.frameInfo),
                   registration.context.hasAccess(to: permitted, in: Extensions.shared.adapter(for: tab)) else {
                 return replyHandler(["error": "User-script context is no longer authorized"], nil)
@@ -683,13 +688,13 @@ enum ExtensionUserScripts {
         private func authorized(_ source: Source) -> Bool {
             guard current,
                   let tab = source.tab, let view = source.web, tab.built === view,
-                  !tab.shy || context.hasAccessToPrivateData else { return false }
+                  Extensions.shared.seen(tab, for: context) else { return false }
             return permissionURL(source.url, frame: source.frame).map { context.hasAccess(to: $0, in: Extensions.shared.adapter(for: tab)) } ?? false
         }
 
         private func selector(for tab: Tab) throws -> [String: Any] {
             guard let browser = Extensions.shared.browser(of: tab),
-                  let index = Extensions.shared.visibleTabs(of: browser).firstIndex(where: { $0 === tab }),
+                  let index = Extensions.shared.visibleTabs(of: browser, for: context).firstIndex(where: { $0 === tab }),
                   let frame = browser.window?.frame else { throw invalid("The user-script tab is no longer available") }
             let screenHeight = NSScreen.screens.first?.frame.height ?? 0
             return ["index": index, "left": frame.minX, "top": screenHeight - frame.maxY, "width": frame.width, "height": frame.height]
@@ -698,7 +703,7 @@ enum ExtensionUserScripts {
         func targets(_ target: [String: Any], tab: Tab) async throws -> [TargetFrame] {
             try await loaded()
             guard current,
-                  let view = tab.built, !tab.shy || context.hasAccessToPrivateData,
+                  let view = tab.built, Extensions.shared.seen(tab, for: context),
                   let page = pages[ObjectIdentifier(view.configuration.userContentController)] else { throw invalid("The user-script tab is no longer available") }
             // A view handed over by an opener can already have a document
             // when the browser adopts it. Its main frame can join discovery
@@ -738,7 +743,7 @@ enum ExtensionUserScripts {
                           let href = row["url"] as? String, href == native.url.absoluteString else { throw invalid("The user-script document changed during frame lookup") }
                     selected.append(TargetFrame(frame: native.frame, frameID: frameID, documentID: documentID, url: native.url, marker: marker))
                 }
-                guard current, tab.built === view, !tab.shy || context.hasAccessToPrivateData else { throw invalid("User-script context was revoked") }
+                guard current, tab.built === view, Extensions.shared.seen(tab, for: context) else { throw invalid("User-script context was revoked") }
                 clearTargets(marked.values.filter { !used.contains($0.frame.document) }, in: view)
                 return selected.sorted { $0.frameID == 0 ? $1.frameID != 0 : ($1.frameID != 0 && $0.frameID < $1.frameID) }
             } catch {

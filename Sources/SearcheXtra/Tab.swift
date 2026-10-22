@@ -28,7 +28,7 @@ enum Web {
     /// opened by a link inherits its opener's configuration, handlers
     /// included, and registering a name twice is a hard crash.
     @MainActor static func release(_ controller: WKUserContentController) {
-        for name in [ScrollRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name,
+        for name in [ScrollRelay.name, VeilRelay.name, FormRelay.name, ImageRelay.name, MediaKeys.name,
                      StoreRelay.name, PasskeyRelay.name, MiddleRelay.name, IconRelay.name, FlowDragRelay.name, PopupGestureRelay.name, DuskRelay.name] {
             controller.removeScriptMessageHandler(forName: name, contentWorld: world)
             controller.removeScriptMessageHandler(forName: name, contentWorld: .page)
@@ -93,10 +93,13 @@ enum Web {
         // A test run's pretend camera and microphone (see ExtensionCapture).
         if #available(macOS 15.4, *), Store.testing { ExtensionCapture.mockDevices(config.preferences) }
         // Chrome extensions see every page but a private one, unless Settings
-        // › Extensions says they may. The controller has to be there when the
-        // view is made; it can't be added after.
-        if #available(macOS 15.4, *), !shy || Store.settings.bool(forKey: "extensions.private") {
-            MainActor.assumeIsolated { Extensions.attach(config) }
+        // › Extensions lets one in, and WebKit then lets in only that one.
+        // The controller has to be there when the view is made; it can't be
+        // added after.
+        if #available(macOS 15.4, *) {
+            MainActor.assumeIsolated {
+                if !shy || Extensions.shared.contexts.values.contains(where: \.hasAccessToPrivateData) { Extensions.attach(config) }
+            }
         }
         // Left alone, WKWebView says only "AppleWebKit … (KHTML, like Gecko)" —
         // no browser, no version. Google reads that as something it doesn't
@@ -303,6 +306,10 @@ final class Tab: ObservableObject, Identifiable {
     /// connection, and which passwords a sign-in box is offered, go by this
     /// one, set when the new page has arrived.
     @Published private(set) var committed: URL?
+    /// The view has drawn its first frame; until then the peek shows its
+    /// skeleton (see PeekSkeleton). True from the start on a WebKit that
+    /// doesn't say when.
+    @Published private(set) var painted = false
     var pageAddress: URL? { committed ?? address }
 
     func didCommit() {
@@ -522,6 +529,9 @@ final class Tab: ObservableObject, Identifiable {
     /// The middle button was let go over a link. The browser opens it in a
     /// tab of its own beside this one, without leaving the page you are on.
     var onMiddleClick: ((Tab, URL) -> Void)?
+    /// A page on this Mac's link to another file, clicked: here, or in a
+    /// tab of its own for target="_blank" (see MiddleRelay).
+    var onFileLink: ((Tab, URL, Bool) -> Void)?
     /// Sent where this tab's view can't go: from an extension's page to the
     /// web or another extension, or from the web to an extension's page.
     /// WebKit keeps each kind of view to its own pages, so the tab has to be
@@ -549,6 +559,12 @@ final class Tab: ObservableObject, Identifiable {
         }
     }
     var onFlowDrag:((Tab,FlowDragRequest)->Void)?
+    private let media = MediaKeys()
+    /// Counting down once the page's sound stops, to give the media keys
+    /// back (see MediaKeys.swift). One at most.
+    private var quiet: Timer?
+    /// For the bench.
+    var hushing: Bool { quiet != nil }
     private let shop = StoreRelay()
     private let iconChanges = IconRelay()
     private let middles = MiddleRelay()
@@ -606,6 +622,10 @@ final class Tab: ObservableObject, Identifiable {
     /// For a pin, one every space shows (see Pins.shared). Set when the row
     /// is built; pins.json, not the session, says which pins these are.
     var everywhere = false
+    /// For a pin, the site a link from it was just peeked at, and when: the
+    /// page's own script sending the pin there after all is turned away
+    /// (see Browser.peek).
+    var peeked: (site: String, at: Date)?
     /// For a pin, kept as a row under the squares rather than as a square:
     /// Arc's pinned list, below its favourites. Still a pin in every other
     /// way: put down by ⌘W, the same in every window, never in a group.
@@ -715,7 +735,9 @@ final class Tab: ObservableObject, Identifiable {
             guard let self else { return }
             self.onSearch?(self, text)
         }
+        web.onFirstFrame = { [weak self] in self?.painted = true }
         web.holdForFirstFrame()
+        painted = !web.unpainted
         // Pages follow the appearance of the window they are drawn in, and the
         // window follows Settings › Appearance — so a site that honours
         // prefers-color-scheme goes dark with the frame, and not otherwise.
@@ -740,6 +762,7 @@ final class Tab: ObservableObject, Identifiable {
         controller.add(images, contentWorld: Web.world, name: ImageRelay.name)
         flowDrag.tab=self
         controller.add(flowDrag,contentWorld:Web.world,name:FlowDragRelay.name)
+        controller.add(media, contentWorld: Web.world, name: MediaKeys.name)
         controller.add(shop, contentWorld: Web.world, name: StoreRelay.name)
         controller.add(iconChanges, contentWorld: Web.world, name: IconRelay.name)
         controller.add(forms, contentWorld: Web.world, name: FormRelay.name)
@@ -820,11 +843,12 @@ final class Tab: ObservableObject, Identifiable {
         veils_.tab = self
         forms.tab = self
         images.tab = self
+        media.tab = self
         shop.tab = self
         iconChanges.tab = self
         middles.tab = self
         dusk.tab = self
-        ears.watch(web) { [weak self] on in self?.noisy = on }
+        ears.watch(web) { [weak self] on in self?.heard(on) }
         return web
     }
 
@@ -891,6 +915,11 @@ final class Tab: ObservableObject, Identifiable {
             WKUserScript(source: ImageRelay.watch, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
         )
         controller.addUserScript(WKUserScript(source:FlowDragSettings.script,injectionTime:.atDocumentStart,forMainFrameOnly:false,in:Web.world))
+        // Every frame, in Search's world: a paused video gives the media keys
+        // back (see MediaKeys.swift).
+        controller.addUserScript(
+            WKUserScript(source: MediaKeys.watch, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
+        )
         // The store's "Add to Search" only where Search can add extensions.
         // Before macOS 15.4 it was drawn all the same, and pressing it did
         // nothing at all; Settings › Extensions says what they need instead.
@@ -1224,29 +1253,6 @@ final class Tab: ObservableObject, Identifiable {
             discard()
         }
         configuration = Web.configuration(space: space)
-    }
-
-    /// WebKit fixes the extension controller when a view is built. Rebuild
-    /// existing private pages when permission changes, retaining their own
-    /// ephemeral store and the normal page's restorable history.
-    @available(macOS 15.4, *)
-    func privateExtensionsChanged(_ on: Bool) {
-        guard shy, carriesExtensions != on else { return }
-        let previousStore = store
-        let wasBuilt = built != nil
-        if let built {
-            memory = built.isLoading ? nil : built.interactionState
-            pending = address ?? built.url
-            picture = nil
-            cover = nil
-            discard()
-        }
-        configuration = Web.configuration(shy: true, store: previousStore)
-        configuration.webExtensionController = on ? Extensions.shared.controller : nil
-        // A disabled extension's own new-tab page must not keep running.
-        if !on, let address, Browser.extensionHost(of: address) != nil { returnToBlank() }
-        else if wasBuilt { _ = wake() }
-        objectWillChange.send()
     }
 
     /// Settings › Videos wait for a click, changed: the page's next view
@@ -1587,6 +1593,37 @@ final class Tab: ObservableObject, Identifiable {
         discard()
     }
 
+    /// The page's sound started or stopped. Stopped, after it had played,
+    /// one timer counts down; started again, or the page gone, it is dropped.
+    private func heard(_ on: Bool) {
+        let was = noisy
+        noisy = on
+        quiet?.invalidate()
+        quiet = nil
+        guard was, !on else { return }
+        quiet = Timer.scheduledTimer(withTimeInterval: MediaKeys.wait, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hush() }
+        }
+    }
+
+    /// The page is going: its count and its frames with it.
+    func leaving() {
+        quiet?.invalidate()
+        quiet = nil
+        media.forget()
+    }
+
+    /// Quiet long enough: the paused media muted, in the page and in each
+    /// frame that played, so the Mac hands the media keys back.
+    private func hush() {
+        quiet = nil
+        guard !noisy, let built else { return }
+        built.evaluateJavaScript(MediaKeys.hush, in: nil, in: Web.world) { _ in }
+        for frame in media.frames {
+            built.evaluateJavaScript(MediaKeys.hush, in: frame, in: Web.world) { _ in }
+        }
+    }
+
     /// The view and everything listening to it, gone — timers, video,
     /// sockets, and the document WebKit would otherwise keep in its
     /// back-forward cache. The tab keeps its address; `web` builds again the
@@ -1598,6 +1635,9 @@ final class Tab: ObservableObject, Identifiable {
         if !blockedPopups.isEmpty { blockedPopups = [] }
         watch = []
         ears.stop()
+        quiet?.invalidate()
+        quiet = nil
+        media.forget()
         guard let web = built else { return }
         if #available(macOS 15.4, *) { ExtensionUserScripts.discard(web) }
         built = nil
@@ -1619,6 +1659,9 @@ final class Tab: ObservableObject, Identifiable {
         web.searchName = nil
         web.onSearch = nil
         web.stopLoading()
+        // Detaching a view doesn't end capture while something still holds it.
+        web.setCameraCaptureState(.none, completionHandler: nil)
+        web.setMicrophoneCaptureState(.none, completionHandler: nil)
         web.navigationDelegate = nil
         web.uiDelegate = nil
         web.removeFromSuperview()
@@ -1709,6 +1752,33 @@ final class MiddleRelay: NSObject, WKScriptMessageHandler {
           if (!e.defaultPrevented) window.webkit.messageHandlers.officeMiddle.postMessage({ href: href });
         }, 0);
       }, true);
+      // A page on this Mac linking to another file. WebKit lets a file page
+      // read only its own folder, and drops a click on a link out of it
+      // before Search is asked: the page stayed where it was, and only the
+      // address typed in opened it. Search opens it the way it opens a typed
+      // one. A plain click the page hasn't claimed, to a file, not a jump
+      // within the page and not a download.
+      if (location.protocol === 'file:') window.addEventListener('click', function (e) {
+        if (e.button !== 0 || !e.isTrusted || e.defaultPrevented) return;
+        if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+        var a = anchor(e);
+        if (!a || a.hasAttribute('download')) return;
+        var target = (a.getAttribute('target') || '').toLowerCase();
+        if (['', '_self', '_top', '_parent', '_blank'].indexOf(target) < 0) return;
+        var href = a.href;
+        if (typeof href !== 'string' || href.indexOf('file:') !== 0) return;
+        if (href.split('#')[0] === location.href.split('#')[0]) return;
+        e.preventDefault();
+        window.webkit.messageHandlers.officeMiddle.postMessage({ file: href, blank: target === '_blank' });
+      }, false);
+      function anchor(e) {
+        var path = e.composedPath();
+        for (var i = 0; i < path.length; i++) {
+          var tag = path[i].tagName ? path[i].tagName.toLowerCase() : '';
+          if (tag === 'a' || tag === 'area') return path[i];
+        }
+        return null;
+      }
       function link(e) {
         // The path, not the parents: a link inside an open shadow root is
         // on it too. An <area> of an image map is a link, and so is an SVG
@@ -1734,6 +1804,21 @@ final class MiddleRelay: NSObject, WKScriptMessageHandler {
         _ controller: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
+        // A file page's link to another file (see watch): only from a file
+        // page's main frame, only to a file, which then gets the folder it
+        // would have had typed in, and no more (WKWebView.open).
+        if let body = message.body as? [String: Any], let file = body["file"] as? String {
+            guard message.frameInfo.isMainFrame,
+                  message.frameInfo.securityOrigin.protocol == "file",
+                  let url = URL(string: file), url.isFileURL
+            else { return }
+            let blank = body["blank"] as? Bool ?? false
+            MainActor.assumeIsolated { [weak self] in
+                guard let self, let tab, tab.address?.isFileURL == true else { return }
+                tab.onFileLink?(tab, url, blank)
+            }
+            return
+        }
         guard let body = message.body as? [String: Any],
               message.frameInfo.isMainFrame,
               let href = body["href"] as? String,
@@ -1875,6 +1960,8 @@ final class PageView: WKWebView {
     /// Told the moment the page is reached for — a click, a scroll — so the
     /// picture of a tab waking up never stands between you and the page.
     var onTouch: (() -> Void)?
+    /// The page's first frame is on screen (see showFirstFrame).
+    var onFirstFrame: (() -> Void)?
     /// Told when the keys come to this page, however they got here — a
     /// click, or Tab walked past the other page's last field. With two
     /// pages up it makes this one the focused page (Browser.prepare), which
@@ -1980,6 +2067,7 @@ final class PageView: WKWebView {
     func showFirstFrame() {
         guard unpainted else { return }
         unpainted = false
+        onFirstFrame?()
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
             animator().alphaValue = 1

@@ -199,6 +199,7 @@ struct WelcomePanel: View {
                 Key("⌃1", L10n.text("Welcome.1175"))
                 Key("⌥⌘N", L10n.text("Welcome.1176"))
                 Key("⌘O", L10n.text("Welcome.1177"))
+                Key("⌘L", L10n.text("upstream.engineSuggestionsWelcome"))
             }
         }
     }

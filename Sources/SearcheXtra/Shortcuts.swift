@@ -164,6 +164,7 @@ struct Command: Identifiable {
         Command("file.reopen", L10n.text("Shortcuts.0880"), .file, KeyCombo("t", shift: true)) { $0.reopen() },
         Command("file.openAddress", L10n.text("Shortcuts.0881"), .file, KeyCombo("l")) { $0.edit() },
         Command("file.closeTab", L10n.text("Shortcuts.0882"), .file, KeyCombo("w")) { $0.closeFront() },
+        Command("file.closeWindow", L10n.text("upstream.closeWindow"), .file, KeyCombo("w", shift: true)) { $0.closeWindow() },
         Command("file.import", L10n.text("Shortcuts.0883"), .file, nil) { $0.bringingIn = "" },
         Command("file.share", L10n.text("Shortcuts.0884"), .file, nil) { $0.share() },
         Command("file.exportPDF", L10n.text("command.exportPDF"), .file, nil) { $0.exportPDF() },

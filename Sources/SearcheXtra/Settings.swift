@@ -294,6 +294,10 @@ struct SettingsPanel: View {
                 .padding(.bottom, 11)
             }
             Rule()
+            Line(L10n.text("suggestions.title"), suggestDetail) {
+                Switch(on: $prefs.engineSuggests)
+            }
+            Rule()
             Line(L10n.text("Settings.0712"), keywordDetail) {
                 if draft == nil {
                     Pill(L10n.text("Settings.0713")) { draft = Keyword() }
@@ -450,6 +454,13 @@ struct SettingsPanel: View {
             template: current.template.trimmingCharacters(in: .whitespacesAndNewlines)
         ))
         draft = nil
+    }
+
+    private var suggestDetail: String {
+        guard EngineSuggest.endpoint(for: prefs.engine) != nil else {
+            return L10n.text("suggestions.customDetail")
+        }
+        return L10n.text("suggestions.detail", prefs.engine.name(custom: prefs.customEngine))
     }
 
     private var searchDetail: String {
@@ -610,6 +621,10 @@ struct SettingsPanel: View {
             Rule()
             Line(L10n.text("sync.settings.pinsHome"), L10n.text("sync.settings.pinsHome.detail")) {
                 Switch(on: $prefs.pinsGoHome)
+            }
+            Rule()
+            Line(L10n.text("pins.peek.title"), L10n.text("pins.peek.detail")) {
+                Switch(on: $prefs.pinsPeek)
             }
             Rule()
             Line(L10n.text("Settings.0780"), L10n.text("Settings.0781")) {
