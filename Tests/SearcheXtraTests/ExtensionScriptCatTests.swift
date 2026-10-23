@@ -134,9 +134,24 @@ final class ExtensionScriptCatTests: XCTestCase {
             trace("initial ScriptCat options closed")
             trace("opening reloaded ScriptCat options")
             var options = browser.open(try XCTUnwrap(context.optionsPageURL), foreground: true)
+            diagnosticOptions = options
             trace("reloaded ScriptCat options opened")
             show(options)
             trace("reloaded ScriptCat options attached")
+            try await until("reloaded ScriptCat options API") {
+                (try? await self.evaluate(options.web, "return document.readyState === 'complete' && typeof chrome.userScripts?.getScripts === 'function';")) as? Bool == true
+            }
+            // MV3 background initialization can outlive controller loading. A
+            // runtime service wakes it if needed and waits for initReady.
+            trace("waiting for reloaded ScriptCat background readiness")
+            let reloadedService = try await evaluate(options.web, #"""
+            return await chrome.runtime.sendMessage({ action: 'serviceWorker/runtime/pageLoad', data: {} });
+            """#) as? [String: Any]
+            guard reloadedService?["code"] as? Int == 0,
+                  (reloadedService?["data"] as? [String: Any])?["ok"] is Bool else {
+                throw FixtureFailure("Reloaded ScriptCat runtime was not initialized: \(reloadedService ?? [:])")
+            }
+            trace("reloaded ScriptCat background ready")
             try await until("ScriptCat native user-world registration") {
                 let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: context) as? [[String: Any]] ?? []
                 return scripts.contains { $0["id"] as? String == "scriptcat-content" }
