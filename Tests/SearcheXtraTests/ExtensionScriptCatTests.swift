@@ -130,6 +130,11 @@ final class ExtensionScriptCatTests: XCTestCase {
             trace("waiting for initial ScriptCat background readiness")
             _ = try await waitForRuntime(firstOptions, "initial installation")
             trace("initial ScriptCat background ready")
+            // Installing can finish before the first-window startup callback.
+            // Its deferred work must not clear this already running worker.
+            try await until("deferred extension startup") { !Extensions.shared.starting }
+            _ = try await waitForRuntime(firstOptions, "after deferred extension startup")
+            trace("initial ScriptCat background survived deferred startup")
             trace("enabling user-script permission")
             let enable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, true))
             trace("user-script permission setter returned")

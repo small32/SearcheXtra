@@ -191,13 +191,27 @@ final class Extensions: NSObject, ObservableObject {
 
     // MARK: - starting
 
+    /// Startup cleanup must finish before the first load, even when an
+    /// installation arrives before the first window is shown. Retain the
+    /// completed task: later loads must never clear a worker already running.
+    private var startupPreparation: Task<Void, Never>?
+
+    private func prepareForLoading() async {
+        if let startupPreparation { await startupPreparation.value; return }
+        let preparation = Task { @MainActor in
+            await self.forgetWorkersIfChanged()
+            await self.forgetLeftOver()
+        }
+        startupPreparation = preparation
+        await preparation.value
+    }
+
     func start(for browser: Browser) {
         attach(browser)
         let begin: @MainActor () -> Void = { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                await forgetWorkersIfChanged()
-                await forgetLeftOver()
+                await prepareForLoading()
                 // One after another, a moment apart: started all at once, WebKit
                 // fails some of their workers and never tries them again.
                 let enabled = installed.filter(\.enabled)
@@ -493,6 +507,9 @@ final class Extensions: NSObject, ObservableObject {
         let token = UUID()
         loading[item.id] = token
         defer { if loading[item.id] == token { loading[item.id] = nil } }
+        await prepareForLoading()
+        guard loading[item.id] == token,
+              installed.contains(where: { $0.id == item.id && $0.enabled && $0.version == item.version }) else { return false }
         if let forgetting = forgetting[item.id] { await forgetting.value }
         guard loading[item.id] == token else { return false }
         // The shim this build of Search carries, in place of whatever the

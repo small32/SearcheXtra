@@ -8,6 +8,7 @@
 
 - **扩展与无痕标签页**：在扩展详情中逐个授权访问无痕标签页，默认关闭；用户脚本遵循同一权限。首次授权前已打开的无痕标签页需要关闭后重开。撤销权限后，已在运行的脚本会在页面重新加载后停止。
 - **Stylus 兼容**：修复扩展页面依赖 worker 提供动态脚本时弹窗空白的问题。
+- **扩展启动**：修复启动清理与提前安装之间的竞态，避免新启动的后台被后到的清理终止。
 - **搜索建议**：新增搜索引擎输入建议，默认关闭，直接显示在标签内地址输入框下；无痕标签、网址、文件路径和敏感内容不会发送。支持中文、请求取消和超时处理。
 - **固定标签页预览**：新增默认关闭的“固定标签页保留在原网站”选项，跨站链接在预览面板中打开，站内链接照常浏览。
 - **媒体与采集**：暂停视频后归还系统媒体键；关闭标签页时停止其摄像头和麦克风采集，不影响其他标签页。
@@ -22,6 +23,7 @@ Merges 16 Search upstream commits through `57912ad`, retaining super drag, embed
 
 - **Extensions in private tabs:** Grant access separately in each extension’s details, off by default. User scripts follow the same permission. Reopen private tabs created before the first grant. After revocation, scripts already running stop when the page reloads.
 - **Stylus compatibility:** Fixes blank extension popups when a page expects its worker to supply a dynamic script.
+- **Extension startup:** Finishes startup cleanup before loading extensions, preventing deferred cleanup from stopping a newly installed background worker.
 - **Search suggestions:** Adds optional engine suggestions below the embedded address field. Off by default; private tabs, addresses, file paths and sensitive input are never sent. Supports Chinese input, cancellation and timeouts.
 - **Pinned-tab peeks:** Adds an optional “Pins stay on their site” setting. Cross-site links open in a preview panel while links within the site continue normally.
 - **Media and capture:** Paused videos release system media keys. Closing a tab stops its camera and microphone capture while other tabs continue.
