@@ -71,6 +71,9 @@ final class Extensions: NSObject, ObservableObject {
     @Published private(set) var errors: [String: [String]] = [:]
 
     func noteError(_ text: String, for id: String) {
+        if Store.testing {
+            FileHandle.standardError.write(Data(("SC_DIAG native " + id + " " + text + "\n").utf8))
+        }
         var list = errors[id] ?? []
         list.append(text)
         errors[id] = Array(list.suffix(40))

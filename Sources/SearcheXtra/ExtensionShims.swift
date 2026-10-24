@@ -434,6 +434,37 @@ enum ExtensionShims {
       const backgroundPage = manifest.background || {};
       const hasWorker = !!(backgroundPage.service_worker || backgroundPage.scripts || backgroundPage.page);
       const offscreenCapable = [...(manifest.permissions || []), ...(manifest.optional_permissions || [])].includes("offscreen");
+      // Passive CI tracing only. Never log extension message payloads; each
+      // realm reports a routing stage once per action (and response shape).
+      const scDiagSeen = new Set();
+      const scDiagRealm = __SEARCH_VERBOSE__ ? Date.now().toString(36) + ":" + Math.random().toString(36).slice(2, 7) : "";
+      const scDiagAction = (message) => {
+        if (!__SEARCH_VERBOSE__ || !message || typeof message !== "object") return "";
+        if (message.__searchPing === true) return "__searchPing";
+        if (message.type === "userScripts.LISTEN_CONNECTIONS") return message.type;
+        return ["serviceWorker/runtime/pageLoad", "serviceWorker/getExtensionEnv"].includes(message.action) ? message.action : "";
+      };
+      const scDiagShape = (value) => {
+        const shape = { type: typeof value, undefined: value === undefined, null: value === null, array: Array.isArray(value) };
+        try {
+          if (value && typeof value === "object") {
+            if (typeof value.code === "number") shape.code = value.code;
+            if (value.data && typeof value.data.ok === "boolean") shape.ok = value.data.ok;
+          } else if (value === "pong" || value === "late") shape.value = value;
+        } catch (e) {}
+        return shape;
+      };
+      const scDiag = (stage, details = {}) => {
+        if (!__SEARCH_VERBOSE__ || scDiagSeen.has(stage) || scDiagSeen.size >= 100) return;
+        scDiagSeen.add(stage);
+        try {
+          native("debug.error", ["SC_DIAG " + JSON.stringify({ stage, realm: scDiagRealm,
+            path: location.pathname, worker, background, inContent, embedded, ...details })]).catch(() => {});
+        } catch (e) {}
+      };
+      if (__SEARCH_VERBOSE__) scDiag("shim-start", { hasWorker, offscreenCapable,
+        sameRuntime: root.chrome.runtime === runtime, sameBrowserRuntime: root.browser?.runtime === runtime,
+        onMessage: typeof runtime.onMessage?.addListener });
       // A script a worker imports that isn't there: Chrome throws at once.
       // WebKit goes looking for it first, and while it does, runs the
       // promises already waiting — code that notes "still starting" until
@@ -914,14 +945,29 @@ enum ExtensionShims {
         const relayHost = internalMessages && offscreenCapable && !hasWorker;
         const listeners = new Set();
         let attached = false;
+        const scEvent = internalMessages ? "internal" : "external";
+        if (__SEARCH_VERBOSE__) scDiag("gather-init:" + scEvent, { internalMessages, told, relayHost,
+          sameRuntime: root.chrome.runtime === runtime, sameOnMessage: root.chrome.runtime.onMessage === event });
         const dispatch = function (message, sender, respond, local = false) {
+          const scAction = scDiagAction(message);
+          const scStage = (stage) => "dispatch:" + scEvent + ":" + scAction + ":" + stage;
+          if (scAction) scDiag(scStage("enter"), { local, relaying, attached, listeners: listeners.size,
+            sameRuntime: root.chrome.runtime === runtime, sameOnMessage: root.chrome.runtime.onMessage === event,
+            senderOwn: sender?.id === runtime.id, senderPath: String(sender?.url || "").split("/").slice(3).join("/") });
           if (!local && !background && !relaying && fromOwnPages(sender)) {
             const k = relayKey(message);
-            if (k && pending(heardRelayed, k)) { count(heardRelayed, k, -1); return; }
+            if (k && pending(heardRelayed, k)) {
+              if (scAction) scDiag(scStage("deduplicated-relay"));
+              count(heardRelayed, k, -1); return;
+            }
             if (k) count(heardNatively, k, 1);
           }
           let settled = false, keep = false;
-          const sendResponse = (value) => { if (!settled) { settled = true; respond(value); } };
+          const sendResponse = (value) => {
+            if (scAction) scDiag(scStage("sendResponse:" + JSON.stringify(scDiagShape(value)) + ":" + settled),
+              { settled, response: scDiagShape(value) });
+            if (!settled) { settled = true; respond(value); }
+          };
           // WebKit excludes the sender's whole page from runtime delivery,
           // so an offscreen iframe cannot reach its parent directly. Another
           // context of the same extension carries that delivery to the browser.
@@ -994,12 +1040,22 @@ enum ExtensionShims {
             return true;
           }
           sender = untabbed(sender);
+          let scListener = 0;
           for (const listener of [...listeners]) {
+            const scIndex = scListener++;
             let result;
-            try { result = listener(message, sender, sendResponse); } catch (e) { setTimeout(() => { throw e; }); continue; }
+            if (scAction) scDiag(scStage("listener-enter:" + scIndex), { listeners: listeners.size });
+            try { result = listener(message, sender, sendResponse); } catch (e) {
+              if (scAction) scDiag(scStage("listener-throw:" + scIndex), { error: String(e).slice(0, 200) });
+              setTimeout(() => { throw e; }); continue;
+            }
+            if (scAction) scDiag(scStage("listener-return:" + scIndex),
+              { result: scDiagShape(result), returnedTrue: result === true,
+                promise: !!result && typeof result.then === "function", settled });
             if (result === true) keep = true;
             else if (result && typeof result.then === "function") { keep = true; result.then(sendResponse, () => sendResponse(undefined)); }
           }
+          if (scAction) scDiag(scStage("listeners-done"), { keep, settled, listeners: listeners.size });
           if (!local && !inContent) tell(message, keep || settled ? "answers" : "passes", true);
           if (keep || settled) return keep && !settled ? true : undefined;
           // A direct offscreen delivery has no other local receiver to wait for.
@@ -1070,6 +1126,9 @@ enum ExtensionShims {
         }
         put(event, "addListener", (listener) => {
           listeners.add(listener);
+          if (__SEARCH_VERBOSE__) scDiag("listener-added:" + scEvent + ":" + listeners.size, { listeners: listeners.size, attached,
+            sameRuntime: root.chrome.runtime === runtime, sameOnMessage: root.chrome.runtime.onMessage === event,
+            source: String(listener).slice(0, 140) });
           if (told) { join(); deliverRelayed = (m, s) => dispatch(m, s, () => {}); }
           if (!attached) { attached = true; add(dispatch); }
         });
@@ -1085,7 +1144,11 @@ enum ExtensionShims {
         // A worker may only add listeners while it starts; one that adds its
         // first later would be refused. So in a worker the one listener is
         // WebKit's from the start.
-        if (background || relayHost) { attached = true; add(dispatch); if (told) join(); }
+        if (background || relayHost) {
+          attached = true; add(dispatch); if (told) join();
+          if (__SEARCH_VERBOSE__) scDiag("native-dispatch-attached:" + scEvent, { attached, listeners: listeners.size,
+            sameOnMessage: root.chrome.runtime.onMessage === event });
+        }
       };
       if (runtime) {
         const names = new Set();
@@ -1411,7 +1474,13 @@ enum ExtensionShims {
           // unanswered for reasons that pass. Waking a worker that runs
           // starts it over, so that is kept for last.
           const ping = Object.getPrototypeOf(runtime).sendMessage;
-          const ask = () => Promise.race([ping.call(runtime, { __searchPing: true }), new Promise((r) => setTimeout(() => r("late"), 15000))]).catch(() => undefined);
+          const ask = () => Promise.race([ping.call(runtime, { __searchPing: true }), new Promise((r) => setTimeout(() => r("late"), 15000))]).then((result) => {
+            scDiag("native-ping-reply:" + JSON.stringify(scDiagShape(result)), { response: scDiagShape(result) });
+            return result;
+          }, (error) => {
+            scDiag("native-ping-rejected", { error: String(error).slice(0, 200) });
+            return undefined;
+          });
           const pause = (ms) => new Promise((w) => setTimeout(w, ms));
           const tries = [() => ask(), () => pause(1000).then(ask), () => pause(1000).then(ask),
             () => native("background.wake", []).catch(() => {}).then(() => pause(1000)).then(ask)];
@@ -1433,7 +1502,14 @@ enum ExtensionShims {
           // Never heard back by the one that sends it, so said for it.
           if (!inContent) tell(typeof args[0] === "string" && args.length > 1 && typeof args[1] !== "function" ? args[1] : args[0], "passes");
           checkWorker();
-          const answer = send(...args).then((r) => { if (r !== undefined) heard = Date.now(); return r; });
+          const scMessage = typeof args[0] === "string" && args.length > 1 ? args[1] : args[0];
+          const scAction = scDiagAction(scMessage);
+          if (scAction) scDiag("native-send:" + scAction, { callback: typeof callback === "function",
+            sameRuntime: root.chrome.runtime === runtime, sameOnMessage: root.chrome.runtime.onMessage === runtime.onMessage });
+          const answer = send(...args).then((r) => {
+            if (scAction) scDiag("native-reply:" + scAction + ":" + JSON.stringify(scDiagShape(r)), { response: scDiagShape(r) });
+            if (r !== undefined) heard = Date.now(); return r;
+          });
           if (typeof args[0] !== "string" && !(args[0] && Object.keys(args[0]).some((k) => k.startsWith("__search")))) relay(args[0]);
           return replied(answer, callback, "The message port closed before a response was received.");
         });

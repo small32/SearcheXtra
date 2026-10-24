@@ -1,0 +1,82 @@
+name: ScriptCat diagnostics
+
+on:
+  push:
+    branches: [codex/scriptcat-ci-diagnostics]
+
+permissions:
+  contents: read
+
+jobs:
+  scriptcat:
+    name: Diagnose macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      SEARCH_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+
+      - name: Verify native environment
+        run: |
+          test "$(uname -m)" = "$SEARCH_ARCH"
+          sw_vers
+          xcodebuild -version
+          swift --version
+          mkdir -p "$RUNNER_TEMP/scriptcat-diagnostics"
+
+      - name: Build native test target once
+        shell: bash
+        run: |
+          swift test -c release --arch "$SEARCH_ARCH" -Xswiftc -Osize --list-tests 2>&1 | tee "$RUNNER_TEMP/scriptcat-diagnostics/build.log"
+
+      - name: Fetch original verified ScriptCat package
+        shell: bash
+        run: |
+          package="$RUNNER_TEMP/scriptcat-v1.4.0-chrome.zip"
+          curl --fail --location --retry 3 'https://github.com/scriptscat/scriptcat/releases/download/v1.4.0/scriptcat-v1.4.0-chrome.zip' --output "$package"
+          printf '92be0136bef5b18863965f1ec9a5c780549e0269f0c61391689eb51152792e43  %s\n' "$package" | shasum -a 256 --check
+          echo "SEARCHEXTRA_TEST_MV3_FOLDER=$package" >> "$GITHUB_ENV"
+
+      - name: Diagnose three isolated cold starts
+        shell: bash
+        run: |
+          failed=0
+          for cold_start in 1 2 3; do
+            if SEARCH_PROBE="scriptcat-diag-$SEARCH_ARCH-$cold_start" swift test -c release --arch "$SEARCH_ARCH" -Xswiftc -Osize --skip-build --filter ExtensionScriptCatTests 2>&1 | tee "$RUNNER_TEMP/scriptcat-diagnostics/cold-$cold_start.log"; then
+              echo "Cold startup $cold_start passed"
+            else
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      - name: Collect crash reports
+        if: failure()
+        shell: bash
+        run: |
+          for report_attempt in {1..10}; do
+            for reports in "$HOME/Library/Logs/DiagnosticReports" /Library/Logs/DiagnosticReports; do
+              if [ -d "$reports" ]; then
+                find "$reports" -maxdepth 2 -type f \( -name '*SearcheXtra*' -o -name '*xctest*' -o -name '*XCTest*' \) -exec cp {} "$RUNNER_TEMP/scriptcat-diagnostics/" \;
+              fi
+            done
+            sleep 2
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ScriptCat-diagnostics-${{ matrix.arch }}
+          path: ${{ runner.temp }}/scriptcat-diagnostics
+          if-no-files-found: ignore
