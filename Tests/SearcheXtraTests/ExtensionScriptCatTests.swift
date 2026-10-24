@@ -96,6 +96,16 @@ final class ExtensionScriptCatTests: XCTestCase {
             return { scripts, isolated };
             """#, arguments: ["website": pageServer.url("/page").absoluteString])
         }
+        func waitForRuntime(_ options: Tab, _ label: String) async throws -> [String: Any] {
+            var service: [String: Any] = [:]
+            try await until("ScriptCat runtime initialization: \(label)") {
+                service = try await self.evaluate(options.web, #"""
+                return await chrome.runtime.sendMessage({ action: 'serviceWorker/runtime/pageLoad', data: {} });
+                """#) as? [String: Any] ?? [:]
+                return service["code"] as? Int == 0 && (service["data"] as? [String: Any])?["ok"] is Bool
+            }
+            return service
+        }
         do {
             trace("installing original ScriptCat")
             let install = try XCTUnwrap(Extensions.shared.installFolder(at: package, confirm: false))
@@ -103,7 +113,11 @@ final class ExtensionScriptCatTests: XCTestCase {
             trace("original ScriptCat installed")
             let first = try XCTUnwrap(Extensions.shared.contexts[identifier])
             XCTAssertFalse(Extensions.userScriptsAllowed(identifier))
+            trace("loading initial native background")
+            try await loadBackground(first, "initial installation")
+            trace("initial native background loaded")
             let firstOptions = browser.open(try XCTUnwrap(first.optionsPageURL), foreground: true)
+            diagnosticOptions = firstOptions
             show(firstOptions)
             try await until("ScriptCat options API") {
                 (try? await self.evaluate(firstOptions.web, "return document.readyState === 'complete' && typeof chrome.userScripts?.getScripts === 'function';")) as? Bool == true
@@ -114,13 +128,7 @@ final class ExtensionScriptCatTests: XCTestCase {
             // service waits for ScriptCat's initReady even while user scripts
             // are denied; no matching script is a valid { ok: false } reply.
             trace("waiting for initial ScriptCat background readiness")
-            let initialService = try await evaluate(firstOptions.web, #"""
-            return await chrome.runtime.sendMessage({ action: 'serviceWorker/runtime/pageLoad', data: {} });
-            """#) as? [String: Any]
-            guard initialService?["code"] as? Int == 0,
-                  (initialService?["data"] as? [String: Any])?["ok"] is Bool else {
-                throw FixtureFailure("Initial ScriptCat runtime was not initialized: \(initialService ?? [:])")
-            }
+            _ = try await waitForRuntime(firstOptions, "initial installation")
             trace("initial ScriptCat background ready")
             trace("enabling user-script permission")
             let enable = try XCTUnwrap(Extensions.shared.setUserScriptsAllowed(identifier, true))
@@ -129,6 +137,9 @@ final class ExtensionScriptCatTests: XCTestCase {
             trace("user-script permission reload completed: \(enabled)")
             XCTAssertTrue(enabled)
             var context = try XCTUnwrap(Extensions.shared.contexts[identifier])
+            trace("loading reloaded native background")
+            try await loadBackground(context, "first permission grant")
+            trace("reloaded native background loaded")
             trace("closing initial ScriptCat options")
             browser.close(firstOptions)
             trace("initial ScriptCat options closed")
@@ -144,13 +155,7 @@ final class ExtensionScriptCatTests: XCTestCase {
             // MV3 background initialization can outlive controller loading. A
             // runtime service wakes it if needed and waits for initReady.
             trace("waiting for reloaded ScriptCat background readiness")
-            let reloadedService = try await evaluate(options.web, #"""
-            return await chrome.runtime.sendMessage({ action: 'serviceWorker/runtime/pageLoad', data: {} });
-            """#) as? [String: Any]
-            guard reloadedService?["code"] as? Int == 0,
-                  (reloadedService?["data"] as? [String: Any])?["ok"] is Bool else {
-                throw FixtureFailure("Reloaded ScriptCat runtime was not initialized: \(reloadedService ?? [:])")
-            }
+            _ = try await waitForRuntime(options, "first permission grant")
             trace("reloaded ScriptCat background ready")
             try await until("ScriptCat native user-world registration") {
                 let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: context) as? [[String: Any]] ?? []
@@ -237,13 +242,7 @@ final class ExtensionScriptCatTests: XCTestCase {
                 trace("permission cycle native registrations: \(label) \(restoredRuntime)")
                 // A persisted ID does not establish worker readiness. This
                 // real service waits for ScriptCat's initReady middleware.
-                let service = try await evaluate(restoredOptions.web, #"""
-                return await chrome.runtime.sendMessage({ action: 'serviceWorker/runtime/pageLoad', data: {} });
-                """#) as? [String: Any]
-                restoredRuntime["service"] = service ?? [:]
-                guard service?["code"] as? Int == 0, (service?["data"] as? [String: Any])?["ok"] is Bool else {
-                    throw FixtureFailure("ScriptCat runtime was not initialized: \(label) \(service ?? [:])")
-                }
+                restoredRuntime["service"] = try await waitForRuntime(restoredOptions, label)
                 context = restoredContext
                 options = restoredOptions
                 show(website)
@@ -415,6 +414,18 @@ final class ExtensionScriptCatTests: XCTestCase {
 
     private func trace(_ stage: String) {
         FileHandle.standardError.write(Data(("ScriptCat native stage: " + stage + "\n").utf8))
+    }
+
+    private func loadBackground(_ context: WKWebExtensionContext, _ label: String) async throws {
+        // Controller loading and background loading have separate completions.
+        // Bound the native callback as well as the subsequent JS service wait.
+        var completed = false
+        var failure: Error?
+        context.loadBackgroundContent { error in
+            MainActor.assumeIsolated { failure = error; completed = true }
+        }
+        try await until("native ScriptCat background loading: \(label)") { completed }
+        if let failure { throw failure }
     }
 
     private func until(_ label: String, _ predicate: () async throws -> Bool) async throws {

@@ -87,14 +87,19 @@ final class FindStageTests: XCTestCase {
         let point = bar.convert(closePoint(in: bar), to: nil)
         let target = try XCTUnwrap(stage.hitTest(stage.superview!.convert(point, from: nil)))
         XCTAssertTrue(target === bar || target.isDescendant(of: bar), "X must receive the press before the page")
-        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            let event = try XCTUnwrap(NSEvent.mouseEvent(
+        let click = try [NSEvent.EventType.leftMouseDown, .leftMouseUp].map { type in
+            try XCTUnwrap(NSEvent.mouseEvent(
                 with: type, location: point, modifierFlags: [],
                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                 context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1
             ))
+        }
+        // Keep the release available when the press enters AppKit's tracking
+        // loop; SwiftUI can also leave it for the next event dispatch.
+        for event in click.reversed() { NSApp.postEvent(event, atStart: true) }
+        while let event = NSApp.nextEvent(matching: [.leftMouseDown, .leftMouseUp],
+                                         until: .distantPast, inMode: .default, dequeue: true) {
             window.sendEvent(event)
-            try await Task.sleep(for: .milliseconds(20))
         }
         try await waitUntil("X closes Find and clears page highlights") {
             guard !browser.finding else { return false }

@@ -87,7 +87,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/test-diagnostics"
-          SEARCH_PROBE=interface-tests swift test -c release --arch "$SEARCH_ARCH" -Xswiftc -Osize --filter ExtensionScriptCatTests 2>&1 | tee "$RUNNER_TEMP/test-diagnostics/scriptcat.log"
+          : > "$RUNNER_TEMP/test-diagnostics/scriptcat.log"
+          for cold_start in 1 2 3; do
+            echo "ScriptCat cold startup $cold_start/3 ($SEARCH_ARCH)" | tee -a "$RUNNER_TEMP/test-diagnostics/scriptcat.log"
+            SEARCH_PROBE="scriptcat-release-$SEARCH_ARCH-$cold_start" swift test -c release --arch "$SEARCH_ARCH" -Xswiftc -Osize --filter ExtensionScriptCatTests 2>&1 | tee -a "$RUNNER_TEMP/test-diagnostics/scriptcat.log"
+          done
 
       - name: Capture failed ScriptCat native backtrace
         if: ${{ failure() && steps.scriptcat.outcome == 'failure' }}
