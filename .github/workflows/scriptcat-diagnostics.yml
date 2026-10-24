@@ -48,16 +48,18 @@ jobs:
           printf '92be0136bef5b18863965f1ec9a5c780549e0269f0c61391689eb51152792e43  %s\n' "$package" | shasum -a 256 --check
           echo "SEARCHEXTRA_TEST_MV3_FOLDER=$package" >> "$GITHUB_ENV"
 
-      - name: Diagnose three isolated cold starts
+      - name: Compare default and named WebKit containers
         shell: bash
         run: |
           failed=0
-          for cold_start in 1 2 3; do
-            if SEARCH_PROBE="scriptcat-diag-$SEARCH_ARCH-$cold_start" swift test -c release --arch "$SEARCH_ARCH" -Xswiftc -Osize --skip-build --filter ExtensionScriptCatTests 2>&1 | tee "$RUNNER_TEMP/scriptcat-diagnostics/cold-$cold_start.log"; then
-              echo "Cold startup $cold_start passed"
-            else
-              failed=1
-            fi
+          for named_stores in 0 1; do
+            for cold_start in 1 2 3; do
+              if SEARCHEXTRA_DIAG_NAMED_STORES="$named_stores" SEARCH_PROBE="scriptcat-diag-$SEARCH_ARCH-$named_stores-$cold_start" swift test -c release --arch "$SEARCH_ARCH" -Xswiftc -Osize --skip-build --filter ExtensionScriptCatTests 2>&1 | tee "$RUNNER_TEMP/scriptcat-diagnostics/stores-$named_stores-cold-$cold_start.log"; then
+                echo "Named stores $named_stores, cold startup $cold_start passed"
+              else
+                failed=1
+              fi
+            done
           done
           exit "$failed"
 

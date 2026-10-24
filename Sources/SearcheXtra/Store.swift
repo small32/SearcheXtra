@@ -98,7 +98,8 @@ enum Store {
     /// differ from stores made by identifier in how long extension workers
     /// are let live.
     static var ownContainer: Bool {
-        (Bundle.main.bundleIdentifier ?? "") != "com.officecommun.search"
+        if testing, ProcessInfo.processInfo.environment["SEARCHEXTRA_DIAG_NAMED_STORES"] == "1" { return false }
+        return (Bundle.main.bundleIdentifier ?? "") != "com.officecommun.search"
     }
 
     /// The fixed identifiers of a test world's WebKit stores: 1 for websites,
