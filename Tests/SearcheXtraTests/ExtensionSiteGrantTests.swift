@@ -39,9 +39,14 @@ final class ExtensionSiteGrantTests: XCTestCase {
         let compact = WKWebExtensionContext(for: ext)
         Extensions.grantSites(compact)
         Extensions.fence(compact)
-        XCTAssertEqual(Set(compact.grantedPermissionMatchPatterns.keys.map(\.string)), [
-            "https://*.example.com/*", "http://example.com/*", "https://other.example/*", "file:///*",
-        ])
+        // WebKit may omit local-file host permissions from the exposed
+        // grants. Compaction must preserve whichever file access the
+        // original context actually has, without adding any permission.
+        let expected = Set([
+            "https://*.example.com/*", "http://example.com/*", "https://other.example/*",
+        ]).union(original.grantedPermissionMatchPatterns.keys.filter { $0.scheme?.lowercased() == "file" }.map(\.string))
+        let granted = Set(compact.grantedPermissionMatchPatterns.keys.map(\.string))
+        XCTAssertEqual(granted, expected)
         for text in ["https://example.com/", "https://news.example.com/article", "https://deep.news.example.com/",
                      "http://example.com/", "http://news.example.com/", "https://other.example/",
                      "https://notexample.com/", "https://example.com.evil.invalid/", "https://unrelated.invalid/", "file:///tmp/example"] {
@@ -58,7 +63,7 @@ final class ExtensionSiteGrantTests: XCTestCase {
             "api": "permissions.afterClick", "args": [[], [named.string]],
         ], from: compact, owner: Extensions.shared) as? [String: Any]
         XCTAssertEqual(reply?["value"] as? Bool, true, "an existing wildcard grant must not ask again: \(String(describing: reply))")
-        XCTAssertEqual(compact.grantedPermissionMatchPatterns.count, 4)
+        XCTAssertEqual(Set(compact.grantedPermissionMatchPatterns.keys.map(\.string)), granted)
         Extensions.clicked[compact.uniqueIdentifier] = Date()
         let refused = try await ExtensionShims.answer([
             "api": "permissions.afterClick", "args": [[], ["https://unrelated.invalid/*"]],

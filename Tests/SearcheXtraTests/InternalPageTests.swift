@@ -45,4 +45,18 @@ final class InternalPageTests: XCTestCase {
         XCTAssertEqual(manager.page?.kind, .bookmarks)
         XCTAssertTrue(browser.tabs.contains { $0 !== manager && $0.page?.kind == .downloads })
     }
+
+    func testBackgroundInternalPageDoesNotReplaceTheActiveBlankTab() {
+        _ = NSApplication.shared
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        defer { browser.closeAll() }
+        let source = browser.active!
+        let count = browser.tabs.count
+        let opened = browser.open(InternalPage(.downloads).url, foreground: false)
+        XCTAssertEqual(browser.activeID, source.id)
+        XCTAssertTrue(source.isBlank)
+        XCTAssertNotEqual(opened.id, source.id)
+        XCTAssertEqual(opened.page?.kind, .downloads)
+        XCTAssertEqual(browser.tabs.count, count + 1)
+    }
 }

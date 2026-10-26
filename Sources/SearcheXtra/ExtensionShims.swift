@@ -41,7 +41,7 @@ enum ExtensionShims {
     nonisolated static let stamp = ".search-shim"
     /// Raised when `prepare` changes what it does to a package, so that
     /// extensions prepared before are prepared again.
-    nonisolated private static let preparation = "4"
+    nonisolated private static let preparation = "5"
     nonisolated static let version: String = {
         SHA256.hash(data: Data((script + PasskeyRelay.page + ExtensionUserScripts.hostHTML + ExtensionUserScripts.hostScript + preparation).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() + (Store.testing ? "-test" : "")
     }()
@@ -99,6 +99,11 @@ enum ExtensionShims {
             if let worker = background["service_worker"] as? String,
                let path = inside(worker, of: folder) {
                 if var source = try? String(contentsOf: path, encoding: .utf8) {
+                    // UTF-8 preparation may have put a signature before
+                    // the marker or module import. Read it as encoding,
+                    // so a new revision replaces its shim instead of
+                    // stacking one. The resource pass adds it back below.
+                    if source.hasPrefix("\u{FEFF}") { source.removeFirst() }
                     // Already carrying one: take the old one off, so a newer
                     // Search puts its newer shim in its place.
                     if source.hasPrefix(marker), let end = source.range(of: ender) {
@@ -302,6 +307,7 @@ enum ExtensionShims {
         while let url = walker?.nextObject() as? URL {
             guard url.pathExtension == "js", url.lastPathComponent != file,
                   var text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            if text.hasPrefix("\u{FEFF}") { text.removeFirst() }
             // Not the shim's own words, in a worker that already carries it.
             if text.hasPrefix(marker), let end = text.range(of: ender) { text = String(text[end.upperBound...]) }
             let range = NSRange(text.startIndex..., in: text)

@@ -1,10 +1,12 @@
+import AppKit
 import XCTest
 @testable import SearcheXtra
 
 /// Profiles (Profiles.swift): what each keeps apart in its files — its
 /// spaces, its pins every space shows, its history — and what an older
-/// Search finds there. WebKit stores are left to Tests/profiles.py, which
-/// runs a hidden probe: made here they would land in xctest's own container.
+/// Search finds there. Store-isolation coverage is in Tests/profiles.py;
+/// these fixtures still initialize AppKit for WebKit's asynchronous cleanup
+/// when a profile is deleted, without opening a browser or a visible window.
 @MainActor
 final class ProfilesTests: XCTestCase {
     private static var world: String?
@@ -14,6 +16,16 @@ final class ProfilesTests: XCTestCase {
         let name = "profiles-tests-\(UUID().uuidString.lowercased().prefix(8))"
         world = name
         setenv("SEARCH_PROBE", name, 1)
+    }
+
+    override func setUp() async throws {
+        try await super.setUp()
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        // Removing a never-opened profile still calls WebKit's static
+        // data-store removal API. AppKit alone does not initialize WebKit's
+        // main run loop; construct the test world's store before that call.
+        _ = Store.websites
     }
 
     override class func tearDown() {
@@ -76,7 +88,7 @@ final class ProfilesTests: XCTestCase {
         XCTAssertFalse(Profiles.bookmarks(made.id) === Profiles.bookmarks(Profile.personalID))
     }
 
-    func testDeletingAProfileTakesItsSpacesAndFiles() throws {
+    func testDeletingAProfileTakesItsSpacesAndFiles() async throws {
         let made = Profiles.shared.add(named: "Gone")
         let url = try XCTUnwrap(URL(string: "https://gone.example/"))
         let history = Profiles.history(made.id)
@@ -93,9 +105,7 @@ final class ProfilesTests: XCTestCase {
         _ = bookmarks.add(try XCTUnwrap(URL(string: "https://late.example/")), title: "Late")
         Disk.drain()
         // The save waits a moment (History.save); it must not bring the file back.
-        let pause = expectation(description: "save window")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { pause.fulfill() }
-        wait(for: [pause], timeout: 4)
+        try await Task.sleep(nanoseconds: 2_000_000_000)
         Disk.drain()
         XCTAssertFalse(Profiles.shared.list.contains { $0.id == made.id })
         XCTAssertTrue(Spaces.read(profile: made.id).isEmpty)

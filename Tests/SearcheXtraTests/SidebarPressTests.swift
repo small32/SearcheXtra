@@ -10,11 +10,14 @@ final class SidebarPressTests: XCTestCase {
     private var restorePreferences: (() -> Void)?
     private var activationPolicy: NSApplication.ActivationPolicy?
     private var previousPins: [UUID: [PinDef]] = [:]
+    private var previousSession: Session.Shape?
 
     override func setUp() async throws {
         try await super.setUp()
         Pins.load()
         previousPins = Pins.bySpace
+        previousSession = Session.read(space: Space.firstID)
+        Session.write(now: true, space: Space.firstID, .init(tabs: [], active: 0))
     }
 
     override func tearDown() async throws {
@@ -34,6 +37,10 @@ final class SidebarPressTests: XCTestCase {
         if let activationPolicy { NSApp.setActivationPolicy(activationPolicy) }
         Disk.drain()
         try await settle()
+        if let previousSession {
+            Session.write(now: true, space: Space.firstID, previousSession)
+        }
+        previousSession = nil
         try await super.tearDown()
     }
 
@@ -374,12 +381,14 @@ final class SidebarPressTests: XCTestCase {
 
     private func makeBrowser() -> Browser {
         _ = NSApplication.shared
-        activationPolicy = NSApp.activationPolicy()
+        if activationPolicy == nil { activationPolicy = NSApp.activationPolicy() }
         NSApp.setActivationPolicy(.prohibited)
         let prefs = Shared.prefs
-        let previous = (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs, prefs.usesSpaces)
-        restorePreferences = {
-            (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs, prefs.usesSpaces) = previous
+        if restorePreferences == nil {
+            let previous = (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs, prefs.usesSpaces, prefs.navigationLeft)
+            restorePreferences = {
+                (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs, prefs.usesSpaces, prefs.navigationLeft) = previous
+            }
         }
         prefs.sidebar = true
         prefs.usesTabGroups = false
@@ -391,6 +400,9 @@ final class SidebarPressTests: XCTestCase {
         // A pin created by one test must not turn the next test's row into
         // a pinned square, which has a different position and drag axis.
         for space in Array(Pins.bySpace.keys) { Pins.forget(space) }
+        // Some tests create two independent fixtures and keep both windows
+        // alive. Each must start empty even after the first has saved a row.
+        Session.write(now: true, space: Space.firstID, .init(tabs: [], active: 0))
         let browser = Browser(record: WindowRecord(), opensStartPage: false)
         browsers.append(browser)
         XCTAssertEqual(browser.tabs.count, 1, "The fixture must start with only its blank tab")
@@ -419,7 +431,9 @@ final class SidebarPressTests: XCTestCase {
     }
 
     private func makeStripWindow(_ browser: Browser) -> NSWindow {
-        makeWindow(root: TabBar(browser: browser), width: 900, height: Metrics.strip)
+        // These event coordinates put the tabs immediately after the lights.
+        browser.prefs.navigationLeft = false
+        return makeWindow(root: TabBar(browser: browser), width: 900, height: Metrics.strip)
     }
 
     /// The middle of a pill in the 900-point strip of three tabs: each is

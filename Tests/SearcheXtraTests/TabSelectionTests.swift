@@ -4,14 +4,54 @@ import XCTest
 
 @MainActor
 final class TabSelectionTests: XCTestCase {
+    private var browsers: [Browser] = []
+    private var previousSession: Session.Shape?
+    private var previousPreferences: (split: Bool, spaces: Bool, groups: Bool)?
+    private var activationPolicy: NSApplication.ActivationPolicy?
+
     override class func setUp() {
         setenv("SEARCH_PROBE", "tab-selection-\(getpid())", 1)
         super.setUp()
     }
 
-    func testCommandTogglesAndShiftSelectsVisibleRange() {
+    override func setUp() async throws {
+        try await super.setUp()
+        guard Store.testing else { throw XCTSkip("Run browser model tests with SEARCH_PROBE=interface-tests") }
         _ = NSApplication.shared
+        activationPolicy = NSApp.activationPolicy()
         NSApp.setActivationPolicy(.prohibited)
+        previousSession = Session.read(space: Space.firstID)
+        Session.write(now: true, space: Space.firstID, .init(tabs: [], active: 0))
+        let prefs = Shared.prefs
+        previousPreferences = (prefs.splitView, prefs.usesSpaces, prefs.usesTabGroups)
+        prefs.splitView = false
+        prefs.usesSpaces = false
+        prefs.usesTabGroups = false
+    }
+
+    override func tearDown() async throws {
+        for browser in browsers { browser.closeAll() }
+        // Session callbacks hold weak owners. Release them before restoring
+        // the saved row and preferences, so this test cannot write it again.
+        browsers.removeAll()
+        Disk.drain()
+        if let previousSession {
+            Session.write(now: true, space: Space.firstID, previousSession)
+        }
+        previousSession = nil
+        if let previousPreferences {
+            let prefs = Shared.prefs
+            prefs.splitView = previousPreferences.split
+            prefs.usesSpaces = previousPreferences.spaces
+            prefs.usesTabGroups = previousPreferences.groups
+        }
+        previousPreferences = nil
+        if let activationPolicy { NSApp.setActivationPolicy(activationPolicy) }
+        activationPolicy = nil
+        try await super.tearDown()
+    }
+
+    func testCommandTogglesAndShiftSelectsVisibleRange() {
         let browser = makeBrowser()
         let tabs = browser.shownTabs
         XCTAssertEqual(tabs.count, 4)
@@ -32,8 +72,6 @@ final class TabSelectionTests: XCTestCase {
     }
 
     func testBothSplitHalvesCanBeSelectedAndRangesIncludeBoth() {
-        _ = NSApplication.shared
-        NSApp.setActivationPolicy(.prohibited)
         let browser = makeBrowser()
         let tabs = browser.shownTabs
         browser.prefs.splitView = true
@@ -52,7 +90,8 @@ final class TabSelectionTests: XCTestCase {
     }
 
     private func makeBrowser() -> Browser {
-        let browser = Browser(record: WindowRecord())
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        browsers.append(browser)
         for word in ["one", "two", "three", "four"] {
             if browser.tabs.last?.isBlank == false { browser.newTab() }
             browser.tabs.last?.restore(url: URL(string: "https://\(word).example/")!, title: word)

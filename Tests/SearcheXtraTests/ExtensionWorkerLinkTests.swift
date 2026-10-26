@@ -26,17 +26,28 @@ final class ExtensionWorkerLinkTests: XCTestCase {
 
     func testWorkerLinkInsidePackageBecomesShimmedCopy() throws {
         let folder = try package(worker: "background-143.js")
-        try "console.log('made up worker');\n".write(to: folder.appendingPathComponent("background.js"), atomically: true, encoding: .utf8)
+        let original = "console.log('made up worker');\n"
+        try original.write(to: folder.appendingPathComponent("background.js"), atomically: true, encoding: .utf8)
         try FileManager.default.createSymbolicLink(atPath: folder.appendingPathComponent("background-143.js").path, withDestinationPath: "background.js")
 
         try ExtensionShims.prepare(folder, fresh: true)
 
         let worker = folder.appendingPathComponent("background-143.js")
         XCTAssertEqual(try worker.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink, false)
-        let source = try String(contentsOf: worker, encoding: .utf8)
-        XCTAssertTrue(source.hasPrefix(ExtensionShims.marker))
-        XCTAssertTrue(source.hasSuffix("console.log('made up worker');\n"))
-        XCTAssertEqual(try String(contentsOf: folder.appendingPathComponent("background.js"), encoding: .utf8), "console.log('made up worker');\n")
+        func checkCopy() throws {
+            let encoded = try String(contentsOf: worker, encoding: .utf8)
+            let source = encoded.hasPrefix("\u{FEFF}") ? String(encoded.dropFirst()) : encoded
+            XCTAssertTrue(source.hasPrefix(ExtensionShims.marker))
+            XCTAssertEqual(source.components(separatedBy: ExtensionShims.marker).count - 1, 1)
+            let end = try XCTUnwrap(source.range(of: ExtensionShims.ender))
+            XCTAssertEqual(String(source[end.upperBound...]), "\n" + original)
+            XCTAssertEqual(try String(contentsOf: folder.appendingPathComponent("background.js"), encoding: .utf8), original)
+        }
+        try checkCopy()
+        // A new worker revision replaces the shim even after UTF-8
+        // preparation added a signature to the generated worker.
+        try ExtensionShims.prepare(folder, workerGeneration: 1)
+        try checkCopy()
     }
 
     func testWorkerUnderLinkedFolderOutsidePackageIsLeftAlone() throws {

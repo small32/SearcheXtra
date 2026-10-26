@@ -64,8 +64,11 @@ final class TabGroupDropTests: XCTestCase {
         XCTAssertEqual(browser.tabs.first?.id, tabs[1].id)
         XCTAssertEqual(browser.tabs.last?.id, tabs[0].id)
         XCTAssertNil(browser.split(for: tabs[1]))
-        let saved = try XCTUnwrap(browser.record.rows[browser.spaceID.uuidString])
-        let restored = Browser(record: browser.record)
+        let saved = try XCTUnwrap(browser.allRows()[browser.spaceID.uuidString])
+        var record = browser.record
+        record.rows[browser.spaceID.uuidString] = saved
+        let restored = Browser(record: record)
+        defer { browser.closeAll(); restored.closeAll() }
         XCTAssertEqual(restored.tabs.map { $0.address?.absoluteString }, saved.tabs.map { Optional($0.url) })
         XCTAssertEqual(restored.tabs.map(\.groupID), saved.tabs.map(\.groupID))
     }

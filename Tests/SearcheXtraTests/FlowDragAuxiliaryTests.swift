@@ -11,6 +11,7 @@ final class FlowDragAuxiliaryTests: XCTestCase {
     private var previousGroups = false
     private var previousSplit = false
     private var previousPins: [UUID: [PinDef]] = [:]
+    private var previousSession: Session.Shape?
 
     override func setUp() async throws {
         guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
@@ -22,11 +23,13 @@ final class FlowDragAuxiliaryTests: XCTestCase {
         previousSpaces = Shared.prefs.usesSpaces
         previousGroups = Shared.prefs.usesTabGroups
         previousSplit = Shared.prefs.splitView
+        previousSession = Session.read(space: Space.firstID)
+        Session.write(now: true, space: Space.firstID, .init(tabs: [], active: 0))
         Shared.prefs.usesSpaces = false
         Shared.prefs.usesTabGroups = false
         Shared.prefs.splitView = false
-        // WindowRecord starts with an empty row, but Browser reconciles the
-        // globally shared pins into it. Keep each fixture's row independent.
+        // The profile's first window reads its session files and reconciles
+        // shared pins even for an empty WindowRecord. Isolate both sources.
         for space in Array(Pins.bySpace.keys) { Pins.forget(space) }
         browser = Browser(record: WindowRecord(), opensStartPage: false)
         XCTAssertEqual(browser.tabs.count, 1)
@@ -53,6 +56,10 @@ final class FlowDragAuxiliaryTests: XCTestCase {
         Shared.prefs.usesTabGroups = previousGroups
         Shared.prefs.splitView = previousSplit
         Disk.drain()
+        if let previousSession {
+            Session.write(now: true, space: Space.firstID, previousSession)
+        }
+        previousSession = nil
     }
 
     func testPrivatePeekAndItsBackgroundDragKeepSourceSignIns() throws {

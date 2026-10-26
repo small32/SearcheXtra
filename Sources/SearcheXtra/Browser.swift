@@ -4519,7 +4519,7 @@ final class Browser: NSObject, ObservableObject {
         }
         // One of Search's own pages, from a link, a script or another app:
         // its own tab, one of each (see InternalPages.swift).
-        if let own = InternalPage(url: url) { return show(own) }
+        if let own = InternalPage(url: url) { return show(own, foreground: foreground) }
         // An extension's own page is served only to a view built from that
         // extension's configuration.
         let url = Browser.page(url)
@@ -7036,9 +7036,9 @@ extension Browser {
     /// never private, as Chrome's settings never open in an incognito
     /// window — and the page opens beside it.
     @discardableResult
-    func show(_ page: InternalPage) -> Tab {
+    func show(_ page: InternalPage, foreground: Bool = true) -> Tab {
         // A pop-up window holds its one page: Search's own open beside it.
-        if websitePopup { return tabDestination.show(page) }
+        if websitePopup { return tabDestination.show(page, foreground: foreground) }
         if page.kind == .settings, let detail = page.detail, let section = SettingsPanel.Page.named( detail) {
             settingsPage = section
         }
@@ -7054,7 +7054,7 @@ extension Browser {
                 objectWillChange.send()
             }
         } else {
-            if let blank = active, blank.isBlank, !blank.shy, !blank.bench, blank.pin == nil,
+            if foreground, let blank = active, blank.isBlank, !blank.shy, !blank.bench, blank.pin == nil,
                blank.draft.isEmpty, typed.isEmpty {
                 tab = blank
             } else {
@@ -7064,10 +7064,12 @@ extension Browser {
             }
             tab.show(page)
         }
-        summoning = false
-        editing = false
-        typed = ""
-        if activeID != tab.id { select(tab) }
+        if foreground {
+            summoning = false
+            editing = false
+            typed = ""
+            if activeID != tab.id { select(tab) }
+        }
         writeSessionSoon()
         return tab
     }
