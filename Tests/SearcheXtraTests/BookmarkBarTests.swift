@@ -7,6 +7,8 @@ final class BookmarkBarTests: XCTestCase {
     private var previousOpening: BookmarkBarOpening = .standard
     private var previousCompact = false
     private var previousLazy = false
+    private var previousSession: Session.Shape?
+    private var browsers: [Browser] = []
 
     override func setUp() async throws {
         guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
@@ -15,21 +17,36 @@ final class BookmarkBarTests: XCTestCase {
         previousOpening = Shared.prefs.bookmarkBarOpening
         previousCompact = Shared.prefs.compactBookmarksBar
         previousLazy = Shared.prefs.lazyTabs
+        previousSession = Session.read(space: Space.firstID)
+        Session.write(now: true, space: Space.firstID, .init(tabs: [], active: 0))
     }
 
     override func tearDown() async throws {
         guard Store.testing else { return }
+        for browser in browsers { browser.closeAll() }
+        browsers.removeAll()
+        Disk.drain()
+        if let previousSession {
+            Session.write(now: true, space: Space.firstID, previousSession)
+        }
+        previousSession = nil
         Shared.prefs.bookmarkBarOpening = previousOpening
         Shared.prefs.compactBookmarksBar = previousCompact
         Shared.prefs.lazyTabs = previousLazy
+    }
+
+    private func makeBrowser() -> Browser {
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        browsers.append(browser)
+        return browser
     }
 
     func testOpeningModesPreserveOrChangeTheActiveTab() {
         let original = URL(string: "http://127.0.0.1:1/original")!
         let bookmark = URL(string: "http://127.0.0.1:1/bookmark")!
         for mode in BookmarkBarOpening.allCases {
-            let browser = Browser(record: WindowRecord(), opensStartPage: false)
-            defer { for tab in browser.tabs { tab.close() } }
+            let browser = makeBrowser()
+            defer { browser.closeAll() }
             browser.visit(original)
             let first = browser.active!
             let count = browser.tabs.count
@@ -57,13 +74,14 @@ final class BookmarkBarTests: XCTestCase {
 
     func testOrdinaryBookmarkDoesNotReplaceAPinnedTab() {
         Shared.prefs.bookmarkBarOpening = .standard
-        let browser = Browser(record: WindowRecord(), opensStartPage: false)
-        defer { for tab in browser.tabs { tab.close() } }
+        let browser = makeBrowser()
+        defer { browser.closeAll() }
         let home = URL(string: "http://127.0.0.1:1/pin")!
         let destination = URL(string: "http://127.0.0.1:1/bookmark")!
         browser.visit(home)
         let pinned = browser.active!
         browser.pin(pinned)
+        defer { browser.unpin(pinned) }
         browser.visitBookmarkBar(destination)
         XCTAssertEqual(pinned.address, home)
         XCTAssertNotEqual(browser.activeID, pinned.id)
@@ -72,8 +90,8 @@ final class BookmarkBarTests: XCTestCase {
 
     func testBulkOpeningPreservesBookmarkOrder() {
         Shared.prefs.lazyTabs = true
-        let browser = Browser(record: WindowRecord(), opensStartPage: false)
-        defer { for tab in browser.tabs { tab.close() } }
+        let browser = makeBrowser()
+        defer { browser.closeAll() }
         let urls = ["a", "b", "c"].map { URL(string: "http://127.0.0.1:1/" + $0)! }
         let opened = browser.openBookmarks(urls)
         XCTAssertEqual(opened.compactMap { $0.pending ?? $0.address }, urls)
@@ -84,8 +102,8 @@ final class BookmarkBarTests: XCTestCase {
         Shared.prefs.lazyTabs = true
         for mode in BookmarkBarOpening.allCases {
             Shared.prefs.bookmarkBarOpening = mode
-            let browser = Browser(record: WindowRecord(), opensStartPage: false)
-            defer { for tab in browser.tabs { tab.close() } }
+            let browser = makeBrowser()
+            defer { browser.closeAll() }
             let original = URL(string: "http://127.0.0.1:1/original")!
             browser.visit(original)
             let source = browser.active!
@@ -106,8 +124,8 @@ final class BookmarkBarTests: XCTestCase {
 
     func testExplicitBackgroundBookmarkKeepsPrivateStore() {
         Shared.prefs.lazyTabs = true
-        let browser = Browser(record: WindowRecord(), opensStartPage: false)
-        defer { for tab in browser.tabs { tab.close() } }
+        let browser = makeBrowser()
+        defer { browser.closeAll() }
         browser.newShyTab()
         let source = browser.active!
         source.setAddressOptimistically(URL(string: "https://private.example/original")!)
@@ -119,8 +137,8 @@ final class BookmarkBarTests: XCTestCase {
     }
 
     func testBookmarkFolderPopupStaysBelowBarAndCloses() {
-        let browser = Browser(record: WindowRecord(), opensStartPage: false)
-        defer { for tab in browser.tabs { tab.close() } }
+        let browser = makeBrowser()
+        defer { browser.closeAll() }
         let folder = browser.bookmarks.insert(.folder("Popup test", [.site("Bookmark", URL(string: "https://example.com")!)]), into: nil)
         defer { browser.bookmarks.remove(folder.id); BookmarkBarPanel.hide() }
         let window = NSWindow(contentRect: NSRect(x: 160, y: 200, width: 600, height: 400), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -154,8 +172,8 @@ final class BookmarkBarTests: XCTestCase {
     }
 
     func testLastPrivatePageLeavesAPrivateBlankTab() {
-        let browser = Browser(record: WindowRecord(), opensStartPage: false)
-        defer { for tab in browser.tabs { tab.close() } }
+        let browser = makeBrowser()
+        defer { browser.closeAll() }
         browser.newShyTab()
         let privatePage = browser.active!
         privatePage.setAddressOptimistically(URL(string: "https://private.example")!)
@@ -173,8 +191,8 @@ final class BookmarkBarTests: XCTestCase {
         let previousGroups = Shared.prefs.usesTabGroups
         defer { Shared.prefs.usesTabGroups = previousGroups }
         Shared.prefs.lazyTabs = true
-        let browser = Browser(record: WindowRecord(), opensStartPage: false)
-        defer { for tab in browser.tabs { tab.close() } }
+        let browser = makeBrowser()
+        defer { browser.closeAll() }
         let ordinary = browser.active!
         ordinary.setAddressOptimistically(URL(string: "https://ordinary.example")!)
         browser.newShyTab()
@@ -201,8 +219,8 @@ final class BookmarkBarTests: XCTestCase {
             else { Store.settings.removeObject(forKey: "extensions.private") }
         }
         Store.settings.set(false, forKey: "extensions.private")
-        let browser = Browser(record: WindowRecord(), opensStartPage: false)
-        defer { for tab in browser.tabs { tab.close() } }
+        let browser = makeBrowser()
+        defer { browser.closeAll() }
         browser.newShyTab()
         let tab = browser.active!
         let id = tab.id

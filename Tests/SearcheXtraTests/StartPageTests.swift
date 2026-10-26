@@ -5,19 +5,39 @@ import XCTest
 @MainActor
 final class StartPageTests: XCTestCase {
     private var previousPage = ""
+    private var previousSession: Session.Shape?
+    private var browsers: [Browser] = []
 
     override func setUp() async throws {
         guard Store.testing else { throw XCTSkip("Run browser model tests with SEARCH_PROBE=interface-tests") }
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
         previousPage = Shared.prefs.startPage
+        // A fresh profile window now reads the profile's session files even
+        // when it is made with an empty WindowRecord. Give every test an
+        // empty first space instead of a row left by an earlier fixture.
+        previousSession = Session.read(space: Space.firstID)
+        Session.write(now: true, space: Space.firstID, .init(tabs: [], active: 0))
         Shared.prefs.startPage = ""
     }
 
     override func tearDown() async throws {
         guard Store.testing else { return }
+        for browser in browsers { browser.closeAll() }
+        browsers.removeAll()
+        Disk.drain()
+        if let previousSession {
+            Session.write(now: true, space: Space.firstID, previousSession)
+        }
+        previousSession = nil
         Shared.prefs.startPage = previousPage
         XCTAssertTrue(NSApp.windows.allSatisfy { !$0.isVisible })
+    }
+
+    private func makeBrowser(record: WindowRecord = WindowRecord(), opensStartPage: Bool = true) -> Browser {
+        let browser = Browser(record: record, opensStartPage: opensStartPage)
+        browsers.append(browser)
+        return browser
     }
 
     func testAddressesNormalizeAndRejectNonWebInputs() {
@@ -39,7 +59,7 @@ final class StartPageTests: XCTestCase {
     func testFreshWindowUsesStartPageButNormalNewTabsStayBlank() {
         let url = "http://127.0.0.1:1/start"
         Shared.prefs.startPage = url
-        let browser = Browser(record: WindowRecord())
+        let browser = makeBrowser()
         XCTAssertEqual(browser.active?.address?.absoluteString, url)
         let first = browser.activeID
         browser.newTab()
@@ -49,12 +69,12 @@ final class StartPageTests: XCTestCase {
         XCTAssertNil(browser.active?.pending)
         XCTAssertEqual(Shared.prefs.startPage, url)
         // The setting still applies to the first tab of another fresh window.
-        let anotherWindow = Browser(record: WindowRecord())
+        let anotherWindow = makeBrowser()
         XCTAssertEqual(anotherWindow.active?.address?.absoluteString, url)
     }
 
     func testUnsetStartPageKeepsFreshWindowsAndNewTabsBlank() {
-        let browser = Browser(record: WindowRecord())
+        let browser = makeBrowser()
         XCTAssertEqual(browser.active?.isBlank, true)
         browser.open(URL(string: "http://127.0.0.1:1/previous")!, foreground: true)
         browser.newTab()
@@ -65,7 +85,7 @@ final class StartPageTests: XCTestCase {
 
     func testPrivateTabsStayBlankAndClearingRestoresBlankNewTabs() {
         Shared.prefs.startPage = "http://127.0.0.1:1/start"
-        let browser = Browser(record: WindowRecord())
+        let browser = makeBrowser()
         browser.newShyTab()
         browser.newTab()
         XCTAssertEqual(browser.active?.shy, true)
@@ -96,7 +116,7 @@ final class StartPageTests: XCTestCase {
     }
 
     func testHomeNavigatesCurrentTabWithoutAddingTabs() {
-        let browser = Browser(record: WindowRecord())
+        let browser = makeBrowser()
         browser.open(URL(string: "http://127.0.0.1:1/previous")!, foreground: true)
         let id = browser.activeID
         let count = browser.tabs.count
@@ -115,7 +135,7 @@ final class StartPageTests: XCTestCase {
     }
 
     func testHomeKeepsPrivateTabPrivate() {
-        let browser = Browser(record: WindowRecord())
+        let browser = makeBrowser()
         browser.newShyTab()
         let id = browser.activeID
         Shared.prefs.startPage = "http://127.0.0.1:1/home"
@@ -127,7 +147,7 @@ final class StartPageTests: XCTestCase {
 
     func testExplicitWindowPagesCanSkipStartPage() {
         Shared.prefs.startPage = "http://127.0.0.1:1/start"
-        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        let browser = makeBrowser(opensStartPage: false)
         XCTAssertEqual(browser.active?.isBlank, true)
     }
 
@@ -138,7 +158,7 @@ final class StartPageTests: XCTestCase {
         record.rows[record.space.uuidString] = Session.Shape(tabs: [
             Session.Entry(url: restored, title: "Previous", pin: nil, name: nil, home: nil)
         ], active: 0)
-        let browser = Browser(record: record)
+        let browser = makeBrowser(record: record)
         XCTAssertEqual((browser.active?.pending ?? browser.active?.address)?.absoluteString, restored)
     }
 }
