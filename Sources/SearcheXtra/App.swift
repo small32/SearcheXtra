@@ -12,6 +12,8 @@ struct SearcheXtraApp: App {
     /// Your own keys (Settings › Shortcuts): the menus are drawn again when
     /// one changes, and show it.
     @ObservedObject private var shortcuts = ShortcutStore.shared
+    /// Only for the File menu's Profile list, once there is a second one.
+    @ObservedObject private var profiles = Profiles.shared
     /// Links from other apps, and the Dock icon.
     @NSApplicationDelegateAdaptor(Links.self) private var links
 
@@ -49,6 +51,19 @@ struct SearcheXtraApp: App {
                 // Another window, with tabs of its own (see Windows.swift).
                 Button(L10n.text("App.0114")) { Browsers.newWindow() }
                     .shortcut("file.newWindow")
+                // The profiles, once there is more than one (see Profiles.swift):
+                // each one's window, brought forward or opened.
+                if profiles.several {
+                    Menu(L10n.text("ImportPanel.0566")) {
+                        ForEach(profiles.list) { profile in
+                            Button(profile.id == browser.profileID ? "\(profile.name) ✓" : profile.name) {
+                                Browsers.open(profile: profile.id)
+                            }
+                        }
+                        Divider()
+                        Button(L10n.text("profiles.newAction")) { ProfileMenu.askNew() }
+                    }
+                }
                 Button(L10n.text("App.0115")) { browser.newTab() }
                     .shortcut("file.newTab")
                 Button(L10n.text("App.0116")) { browser.newShyTab() }
@@ -74,19 +89,23 @@ struct SearcheXtraApp: App {
             CommandGroup(replacing: .printItem) {
                 Button(L10n.text("App.0120")) { browser.share() }
                     .shortcut("file.share")
-                    .disabled(browser.active?.isBlank ?? true)
+                    .disabled(!(browser.active?.isWeb ?? false))
                 Button(L10n.text("command.exportPDF")) { browser.exportPDF() }
                     .shortcut("file.exportPDF")
-                    .disabled(browser.active?.isBlank ?? true)
+                    .disabled(!(browser.active?.isWeb ?? false))
                 Button(L10n.text("App.0121")) { browser.printPage() }
                     .shortcut("file.print")
-                    .disabled(browser.active?.isBlank ?? true)
+                    .disabled(!(browser.active?.isWeb ?? false))
             }
             CommandGroup(after: .pasteboard) {
+                Button(L10n.text("upstream.copyCleanLink")) { browser.copyCleanLink() }
+                    .shortcut("edit.copyCleanLink")
+                    .disabled(browser.active?.isBlank ?? true)
                 Divider()
                 Button(L10n.text("App.0122")) { browser.openFind() }
                     .shortcut("edit.find")
-                    .disabled(browser.active?.isBlank ?? true)
+                    // On the Settings tab, ⌘F finds a setting.
+                    .disabled(!(browser.active?.isWeb ?? false) && browser.active?.page?.kind != .settings)
                 Button(L10n.text("App.0123")) { browser.look(forward: true) }
                     .shortcut("edit.findNext")
                     .disabled(!browser.finding)
@@ -105,6 +124,14 @@ struct SearcheXtraApp: App {
                             set: { _ in browser.toggleSubstitution(kind) }
                         ))
                     }
+                }
+                // Moved here from Settings, as Safari has it. WebKit reads it
+                // once, so it counts from the next page on.
+                Menu(L10n.text("upstream.merge.b02438f2db")) {
+                    Toggle(L10n.text("upstream.merge.89dfce3f06"), isOn: Binding(
+                        get: { browser.prefs.autocorrect },
+                        set: { browser.prefs.autocorrect = $0 }
+                    ))
                 }
             }
             CommandGroup(replacing: .toolbar) {
@@ -136,6 +163,19 @@ struct SearcheXtraApp: App {
                     .shortcut("view.reader")
                 Button(L10n.text("App.0134")) { browser.toggleFloat() }
                     .shortcut("view.float")
+                // Websites in the side panel, only once they are on
+                // (Settings › Browsing).
+                if browser.prefs.sitesInPanel {
+                    Menu(L10n.text("upstream.merge.67ddad5e20")) {
+                        Button(browser.sidePanelShown ? L10n.text("upstream.merge.e18c360e7a") : L10n.text("upstream.merge.03fa46a625")) { browser.toggleSitePanel() }
+                            .shortcut("view.sitePanel")
+                        Divider()
+                        Button(L10n.text("panel.site.add")) { browser.askForPanelSite() }
+                        Divider()
+                        Button(L10n.text("upstream.merge.533ac7812c")) { if let tab = browser.active { browser.openInSidePanel(tab) } }
+                            .disabled(!(browser.active?.isWeb ?? false) || (browser.active?.shy ?? true))
+                    }
+                }
                 // Dark pages, only once they are on (Settings › Appearance).
                 if browser.prefs.darkensPages {
                     Divider()
@@ -213,10 +253,10 @@ struct SearcheXtraApp: App {
                     let rows = browser.prefs.showsPinRows
                     if tab.pin == nil {
                         Button(L10n.text("App.0157")) { browser.pin(tab) }
-                            .disabled(tab.isBlank || tab.shy)
+                            .disabled(!tab.isWeb || tab.shy)
                         if rows {
                             Button(L10n.text("App.0158")) { browser.pin(tab, listed: true) }
-                                .disabled(tab.isBlank || tab.shy)
+                                .disabled(!tab.isWeb || tab.shy)
                         }
                     } else {
                         if rows {
@@ -233,13 +273,13 @@ struct SearcheXtraApp: App {
                     .disabled(browser.active == nil)
                 Button(L10n.text("App.0164")) { browser.duplicate() }
                     .shortcut("tabs.duplicate")
-                    .disabled(browser.active?.isBlank ?? true)
+                    .disabled(!(browser.active?.isWeb ?? false))
                 Button(L10n.text("App.0165")) { browser.copyAddress() }
                     .shortcut("tabs.copyAddress")
-                    .disabled(browser.active?.isBlank ?? true)
+                    .disabled(!(browser.active?.isWeb ?? false))
                 Button(L10n.text("App.0166")) { browser.copyMarkdownLink() }
                     .shortcut("tabs.copyMarkdown")
-                    .disabled(browser.active?.isBlank ?? true)
+                    .disabled(!(browser.active?.isWeb ?? false))
                 Button(L10n.text("App.0167")) { browser.pasteAndGo() }
                     .shortcut("tabs.pasteAndGo")
                 Divider()
@@ -252,7 +292,7 @@ struct SearcheXtraApp: App {
             CommandMenu(L10n.text("App.0170")) {
                 Button(browser.pageKept ? L10n.text("App.0171") : L10n.text("App.0172")) { browser.bookmarkCurrent() }
                     .shortcut("bookmarks.add")
-                    .disabled(browser.active?.isBlank ?? true)
+                    .disabled(!(browser.active?.isWeb ?? false))
                 Button(L10n.text("App.0173")) { browser.bookmarking = true }
                     .shortcut("bookmarks.show")
                 Toggle(L10n.text("App.0174"), isOn: Binding(
@@ -305,9 +345,23 @@ struct SearcheXtraApp: App {
                 Button(L10n.text("App.0184")) { browser.managing = true }
                     .shortcut("app.passwords")
             }
-            CommandGroup(replacing: .help) {
-                Button(L10n.text("App.0185")) { Links.writeFeedback() }
+            QuitAndHelp()
+        }
+    }
+}
+
+/// Quit Search, which can ask first (Settings › General), and Help. One
+/// value, because a scene's commands take at most ten.
+private struct QuitAndHelp: Commands {
+    var body: some Commands {
+        CommandGroup(replacing: .appTermination) {
+            Button(L10n.text("upstream.merge.c459c107f1")) {
+                if Links.shouldQuit() { NSApp.terminate(nil) }
             }
+            .keyboardShortcut("q", modifiers: .command)
+        }
+        CommandGroup(replacing: .help) {
+            Button(L10n.text("App.0185")) { Links.writeFeedback() }
         }
     }
 }
@@ -318,8 +372,7 @@ struct MenuLine: View {
     let url: URL
 
     var body: some View {
-        if let site = Favicons.site(url),
-           let icon = Favicons.shared.cached(site) {
+        if let icon = Favicons.shared.cached(for: url) {
             Label {
                 Text(title)
             } icon: {
@@ -474,7 +527,7 @@ struct ContentView: View {
         if browser.prefs.splitView {
             SplitStage(browser: browser, corner: cards ? Metrics.cardRadius : 0, immersed: fullscreenTab?.id)
         } else if let tab = browser.active {
-            Page(tab: tab, corner: cards ? Metrics.cardRadius : 0)
+            Page(tab: tab, corner: cards ? Metrics.cardRadius : 0, browser: browser)
                 .overlay {
                     if browser.prefs.showsLinks { LinkBubble(status: browser.linkStatus) }
                 }
@@ -491,6 +544,13 @@ struct ContentView: View {
                     }
                 }
                 .animation(Motion.quick, value: browser.suggesting)
+                .overlay(alignment: .topLeading) {
+                    if let pairing = browser.applePairing, pairing.tab == tab.id {
+                        ApplePairingCard(browser: browser, apple: browser.applePasswords, pairing: pairing)
+                            .transition(.opacity)
+                    }
+                }
+                .animation(Motion.quick, value: browser.applePairing)
         } else {
             Palette.ground
         }
@@ -519,10 +579,10 @@ struct ContentView: View {
     /// The card's gap on the side away from the column, and along the bottom.
     private var farGap: CGFloat { cards ? Metrics.cardGap : 0 }
 
-    /// The side panel is up: an extension's page in it, and no page filling
-    /// the screen.
+    /// The side panel is up: an extension's page in it, the tab in front one
+    /// that extension may see, and no page filling the screen.
     private var panelUp: Bool {
-        browser.sidePanelShown && browser.sidePanel != nil && fullscreenTab == nil
+        browser.sidePanelShown && browser.sidePanel != nil && !browser.sidePanelHeld && fullscreenTab == nil
     }
 
     /// The side panel's width as drawn: as you left it, or narrower in a
@@ -602,11 +662,14 @@ struct ContentView: View {
         VStack(spacing: 8) {
             announcement
             if let ask = browser.asking {
-                captureAsking(ask)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                Group {
+                    if ask.screen { ScreenQuestion(browser: browser, ask: ask) }
+                    else { CaptureQuestion(browser: browser, ask: ask) }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if let offer = browser.offering {
-                keepAsking(offer)
+                PasswordOffer(browser: browser, offer: offer)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             StoreOffer(browser: browser)
@@ -639,46 +702,26 @@ struct ContentView: View {
         }
     }
 
-    /// The panels. All the same kind of thing, so they are built the same way.
+    /// What still comes over the page. Settings, History, Downloads,
+    /// Bookmarks, Passwords, Bring Things Over and the release notes are
+    /// tabs of their own now (see InternalPages.swift); what is left here
+    /// either comes before there are tabs (Welcome) or comes once by itself
+    /// and goes (What's New).
     @ViewBuilder
     private var panels: some View {
-        if browser.recalling {
-            sheet { HistoryPanel(browser: browser) } close: { browser.recalling = false }
-        }
-        if browser.hoarding {
-            sheet { DownloadsPanel(browser: browser, loot: browser.loot) }
-                close: { browser.hoarding = false }
-        }
-        if browser.tuning {
-            sheet { SettingsPanel(browser: browser, prefs: browser.prefs) }
-                close: { browser.tuning = false }
-        }
-        if browser.bookmarking {
-            sheet { BookmarksPanel(browser: browser, bookmarks: browser.bookmarks) }
-                close: { browser.bookmarking = false }
-        }
         if browser.welcoming {
             WelcomePanel(browser: browser, prefs: browser.prefs)
                 .ignoresSafeArea()
         }
-        if browser.managing {
-            sheet { PasswordsPanel(browser: browser) } close: { browser.managing = false }
-        }
-        if browser.bringingIn != nil {
-            sheet { ImportPanel(browser: browser) } close: { browser.bringingIn = nil }
-        }
-        // What's new, once after an update, and every version's notes
-        // (see WhatsNew.swift).
+        // What's new, once after an update (see WhatsNew.swift). Every
+        // version's notes are a tab.
         if browser.newsShowing, let release = WhatsNew.current {
             sheet {
                 WhatsNewCard(release: release, prefs: browser.prefs, close: { browser.newsShowing = false }) {
                     browser.newsShowing = false
-                    browser.notesShowing = true
+                    browser.show(InternalPage(.notes))
                 }
             } close: { browser.newsShowing = false }
-        }
-        if browser.notesShowing {
-            sheet { ReleaseNotesPanel { browser.notesShowing = false } } close: { browser.notesShowing = false }
         }
         if browser.reviewing {
             // No dimming for this one: the whole point is to keep looking at
@@ -741,6 +784,7 @@ struct ContentView: View {
             .overlay(alignment: .topTrailing) {
                 if let job = browser.fileImport { ImportProgress(browser: browser, job: job) }
             }
+            .environment(\.tabShortcutNumbers, browser.tabShortcutNumbers)
             // The field comes on its spring, and goes quickly: once Return
             // is pressed the page is on its way, and the field is not what
             // there is to watch.
@@ -764,6 +808,7 @@ struct ContentView: View {
             // go on in their place until the app comes back.
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
                 browser.tabSwitcher.cancel()
+                if browser.commandHeld { browser.commandHeld = false }
                 measureLights()
                 resting?.isHidden = false
                 // Only the window you were in, or every window's video would come.
@@ -773,7 +818,10 @@ struct ContentView: View {
                 if let window, (note.object as? NSWindow) === window { Browsers.becameKey(browser) }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
-                if let window, (note.object as? NSWindow) === window { browser.tabSwitcher.cancel() }
+                if let window, (note.object as? NSWindow) === window {
+                    browser.tabSwitcher.cancel()
+                    if browser.commandHeld { browser.commandHeld = false }
+                }
             }
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { note in
                 if let window, (note.object as? NSWindow) === window { browser.fullScreen = true }
@@ -801,15 +849,8 @@ struct ContentView: View {
                 }
             }
             .onChange(of: browser.activeID) { _, _ in handBack() }
-            .animation(Motion.settle, value: browser.recalling)
-            .animation(Motion.settle, value: browser.hoarding)
-            .animation(Motion.settle, value: browser.tuning)
             .animation(Motion.settle, value: browser.welcoming)
-            .animation(Motion.settle, value: browser.bookmarking)
-            .animation(Motion.settle, value: browser.managing)
             .animation(Motion.settle, value: browser.newsShowing)
-            .animation(Motion.settle, value: browser.notesShowing)
-            .animation(Motion.settle, value: browser.bringingIn != nil)
             .animation(Motion.settle, value: browser.reviewing)
         .onAppear {
             watchKeys()
@@ -832,7 +873,8 @@ struct ContentView: View {
         guard !browser.fieldShowing, browser.editingTab == nil else { return }
         DispatchQueue.main.async {
             guard !browser.fieldShowing, browser.editingTab == nil else { return }
-            guard let web = browser.active?.web, let window = web.window else { return }
+            // Search's own pages have no web view to hand the keys to.
+            guard browser.active?.page == nil, let web = browser.active?.web, let window = web.window else { return }
             if let responder = window.firstResponder as? NSView,
                responder === web || responder.isDescendant(of: web) { return }
             window.makeFirstResponder(web)
@@ -868,90 +910,6 @@ struct ContentView: View {
                 .animation(Motion.settle, value: browser.announcement)
         }
     }
-
-    /// A page asking to see or hear you. Named by the site, in its own words,
-    /// with the answer remembered so it is asked once and not every call.
-    private func captureAsking(_ ask: Browser.CaptureAsk) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: ask.wants == "location" ? "location" : ask.wants == L10n.text("App.0188") ? "mic" : ask.wants == "notifications" ? "bell" : "video")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.muted)
-            Text(ask.wants == "location" ? L10n.text("App.0189", String(describing: ask.host))
-                 : ask.wants == "notifications" ? L10n.text("App.0190", String(describing: ask.host))
-                 : L10n.text("App.0191", String(describing: ask.host), String(describing: ask.wants)))
-                .font(.system(size: 12.5))
-                .foregroundStyle(Palette.ink)
-            Button { ask.once ? browser.allowCaptureOnce() : browser.allowCapture() } label: {
-                Text(ask.once ? L10n.text("App.0192") : L10n.text("App.0193"))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.ground)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 5)
-                    .background(Palette.ink, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            if ask.once, ask.keeps {
-                Button { browser.allowCapture() } label: {
-                    Text(L10n.text("App.0194"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(Palette.ink)
-                }
-                .buttonStyle(.plain)
-            }
-            Button { browser.denyCapture() } label: {
-                Text(L10n.text("App.0195"))
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.leading, 16)
-        .padding(.trailing, 10)
-        .padding(.vertical, 9)
-        .background(Palette.ground, in: Capsule())
-        .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
-        .shadow(color: .black.opacity(0.12), radius: 20, y: 6)
-    }
-
-    /// Offered once, answered once. The password is never shown back to you —
-    /// there is nothing to be learned from reading your own password.
-    private func keepAsking(_ offer: Browser.Offer) -> some View {
-        let login = offer.login
-        return HStack(spacing: 12) {
-            Text(offer.changed
-                 ? L10n.text("App.0196", String(describing: login.user), String(describing: login.host))
-                 : (login.user.isEmpty
-                    ? L10n.text("App.0197", String(describing: login.host))
-                    : L10n.text("App.0198", String(describing: login.user), String(describing: login.host))))
-                .font(.system(size: 12.5))
-                .foregroundStyle(Palette.ink)
-                .lineLimit(1)
-            Button(offer.changed ? L10n.text("App.0199") : L10n.text("App.0200")) { browser.keepOffer() }
-                .buttonStyle(.plain)
-                .font(.system(size: 12))
-                .foregroundStyle(Palette.ground)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 5)
-                .background(Palette.ink, in: Capsule())
-            Button(L10n.text("App.0201")) { browser.dropOffer() }
-                .buttonStyle(.plain)
-                .font(.system(size: 12))
-                .foregroundStyle(Palette.muted)
-            if !offer.changed {
-                Button(L10n.text("App.0202")) { browser.neverOffer() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-            }
-        }
-        .padding(.leading, 16)
-        .padding(.trailing, 12)
-        .padding(.vertical, 9)
-        .background(Palette.ground, in: Capsule())
-        .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: 1))
-        .shadow(color: .black.opacity(0.12), radius: 20, y: 6)
-    }
-
 
     /// A dark pill, for the one mode this browser has. It stays up for as long
     /// as the mode does, which is how you know you are still in it.
@@ -1156,15 +1114,52 @@ struct ContentView: View {
             // window).
             guard mine(event) else { return event }
             guard event.type == .keyDown else {
-                // ⌃ let go of switches to the tab the switcher is on.
-                if browser.tabSwitcher.active, !event.modifierFlags.contains(.control) {
+                let held = browser.prefs.showsTabShortcuts && event.modifierFlags.contains(.command)
+                if browser.commandHeld != held { browser.commandHeld = held }
+                // ⌃ let go of switches to the tab the switcher is on — or
+                // whichever its key is held with (Settings › Shortcuts).
+                if browser.tabSwitcher.active, !ShortcutStore.shared.recentHeld(event.modifierFlags) {
                     browser.commitTabSwitch()
                 }
                 // ⌘ let go of ends a ⌘K walk, wherever it stopped.
                 if !event.modifierFlags.contains(.command) { browser.landSummon() }
                 return event
             }
+            // Escape on a page filling the screen is WebKit's, which leaves
+            // on the first one, as Safari does. Its window isn't a browser's,
+            // so the key came here first and put away what was left up in
+            // the window behind the video, a find bar or the address field,
+            // and only the second press reached the page.
+            // A ⌃Tab switcher up behind it goes too, or letting ⌃ go would
+            // switch tabs as the page comes back. With Esc twice asked for
+            // (Settings › General), as in Arc, the first press only puts a
+            // reminder up (see FullScreenEscape).
+            if event.keyCode == 53, let page = ContentView.pageFillingScreen(event) {
+                if browser.tabSwitcher.active { browser.tabSwitcher.cancel() }
+                guard browser.prefs.escapeTwice else { return event }
+                return FullScreenEscape.shared.passes(event, to: page) ? event : nil
+            }
+            // A key typed while the field is on its way is the field's (holdKey),
+            // Escape in a full-screen window included.
             if browser.holdKey(event) { return nil }
+            // Escape in this window while it is itself in macOS full screen
+            // (the green button, ⌃⌘F). Nothing in Search wanting it, it went
+            // on through the page to AppKit, which takes the window out of
+            // full screen on it: one press, whatever it was meant for. With
+            // Esc twice asked for, Search's own Escape jobs still go first and
+            // at one press — the find bar, the address field, a peek, a panel,
+            // a rename, a new tab never sent anywhere, the ⌃Tab switcher —
+            // and a press none of them wants is kept from the page and from
+            // AppKit and counted instead (see FullScreenEscape): the first
+            // puts the reminder up, a second within two seconds leaves. Held
+            // down, its repeats are kept and count for nothing.
+            if event.keyCode == 53, browser.prefs.escapeTwice, let window, event.window === window,
+               window.styleMask.contains(.fullScreen) {
+                if event.isARepeat { return nil }
+                if take(event) { return nil }
+                FullScreenEscape.shared.press(event, leaving: window)
+                return nil
+            }
             return take(event) ? nil : event
         }
         ContentView.keyHooks[id] = { event in take(event) ? nil : event }
@@ -1185,8 +1180,21 @@ struct ContentView: View {
 
     /// Whether a key is this window's to act on.
     private func mine(_ event: NSEvent) -> Bool {
-        if let window = event.window, Browsers.browser(for: window) != nil { return window === self.window }
+        if let window = event.window, let owner = Browsers.browser(for: window) {
+            // Popup hosts have no ContentView monitor of their own.
+            return owner.isPopup ? Browsers.acting === browser : window === self.window
+        }
         return Browsers.acting === browser
+    }
+
+    /// The page a key goes to, if it fills the screen: one WebKit has in its
+    /// own window, where the page's view takes the keys, or one whose page
+    /// said it is going (Tab.immersed, which is how the bench fakes it).
+    private static func pageFillingScreen(_ event: NSEvent) -> PageView? {
+        guard let page = event.window?.firstResponder as? PageView else { return nil }
+        let fills = page.fullscreenState != .notInFullscreen
+            || Browsers.all.contains { $0.tabs.contains { $0.immersed && $0.built === page } }
+        return fills ? page : nil
     }
 
     /// The same handling the key monitor gives an event, for the bench to
@@ -1249,8 +1257,9 @@ struct ContentView: View {
     /// in a corner, stays open, and looks again on the tab picked (#553).
     private func canSwitchTabs(_ event: NSEvent) -> Bool {
         guard let window, event.window === window else { return false }
-        return !browser.tuning && !browser.recalling && !browser.hoarding &&
-            !browser.bookmarking && !browser.welcoming && !browser.managing &&
+        // Settings, History and the rest are tabs, and ⌃Tab goes to and
+        // from them like any other.
+        return !browser.welcoming &&
             !browser.reviewing && !browser.bookmarksOpen &&
             !browser.veiling && !browser.summoning && !browser.makingSpace &&
             browser.peekTab == nil && browser.editingTab == nil &&
@@ -1266,13 +1275,22 @@ struct ContentView: View {
         // A question hanging from the window (Ask) answers its own keys. Esc
         // there is its Cancel: taken here, it closed the panel under it and
         // left the question up, with Return still on its first button.
-        if event.window?.sheetParent != nil { return false }
+        if event.window?.sheetParent != nil || NSApp.modalWindow != nil { return false }
         // A small window's keys are its own (see Little.swift).
         if let little = LittleWindow.owning(event.window) { return little.take(event) }
-        // An extension's popup window: ⌘W closes it, not a tab of the
-        // window menus act on; every other key is its page's.
-        if let popup = Browsers.browser(for: event.window), popup.extensionPopup != nil {
+        // A popup window: ⌘W closes it, not a tab of the
+        // window menus act on. New tabs return to its browser; Escape
+        // dismisses its permission question.
+        if let popup = Browsers.browser(for: event.window), popup.isPopup {
+            if popup.websitePopup, let combo = KeyCombo(event: event) {
+                if combo == ShortcutStore.shared.key(for: "file.newTab") { popup.newTab(); return true }
+                if combo == ShortcutStore.shared.key(for: "file.newPrivateTab") { popup.newShyTab(); return true }
+            }
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if event.keyCode == 53, flags.isEmpty, popup.asking != nil {
+                popup.cancelCapture()  // the screen's question too
+                return true
+            }
             guard event.shortcutCharacters == "w", flags == .command else { return false }
             popup.window?.performClose(nil)
             return true
@@ -1281,14 +1299,15 @@ struct ContentView: View {
         guard !ShortcutStore.shared.recording else { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let key = event.shortcutCharacters
-        let controlTab = event.keyCode == 48 && flags.contains(.control)
-            && flags.isDisjoint(with: [.command, .option])
+        // ⌃Tab, or the key Settings › Shortcuts gave the switcher instead,
+        // and whether ⇧ sends it back.
+        let recent = ShortcutStore.shared.recentSwitch(event)
 
         // While the tab switcher is up, ⌃ and the arrows move through it and
         // ⌃Tab goes on below; any other key puts it away, and Escape does
-        // nothing else.
-        if browser.tabSwitcher.active, !controlTab {
-            if flags.contains(.control), flags.isDisjoint(with: [.command, .option]) {
+        // nothing else. ⌃ is whatever the switcher's key is held with.
+        if browser.tabSwitcher.active, recent == nil {
+            if ShortcutStore.shared.recentOnly(flags) {
                 let direction: TabSwitcher.Direction? = switch event.keyCode {
                 case 123: .left
                 case 124: .right
@@ -1402,16 +1421,19 @@ struct ContentView: View {
         //
         // While an address is being typed, the list under the field is what
         // there is to move through, and Return takes whatever the walk landed on.
-        if event.keyCode == 48, !flags.contains(.command), !flags.contains(.option) {
-            if flags.contains(.control) {
-                if canSwitchTabs(event) {
-                    // A Tab held down doesn't race through them.
-                    if !event.isARepeat { browser.switchTabs(backwards: flags.contains(.shift)) }
-                    return true
-                }
-                browser.step(flags.contains(.shift) ? -1 : 1)
+        //
+        // The switcher's key can be another (Settings › Shortcuts, as in
+        // Arc); ⌃Tab is then whatever command has it, or the page's.
+        if let backwards = recent {
+            if canSwitchTabs(event) {
+                // A key held down doesn't race through them.
+                if !event.isARepeat { browser.switchTabs(backwards: backwards) }
                 return true
             }
+            browser.step(backwards ? -1 : 1)
+            return true
+        }
+        if event.keyCode == 48, !flags.contains(.command), !flags.contains(.option), !flags.contains(.control) {
             if browser.editingTab != nil { return true }
             // "red" then Tab: Reddit, in the field (SiteSearch.swift).
             if browser.fieldShowing, !flags.contains(.shift), browser.lockSiteOffer() { return true }
@@ -1483,13 +1505,13 @@ struct ContentView: View {
         // types. On AZERTY and many other layouts the top row types &, é, "…
         // unless shift is held, so matching the character left these
         // shortcuts dead there; the shortcut belongs to the key, as it does
-        // in every other browser. The ninth is the last tab, however many.
-        // Only tabs on screen count: not those folded away in a group.
+        // in every other browser. The ninth is the last tab or folded group;
+        // a folded group counts once, under its heading.
         if !shifted, let number = ContentView.digits[event.keyCode] {
             if number == 0 {
                 browser.resetZoom()
             } else {
-                browser.select(index: number == 9 ? browser.shownTabs.count - 1 : number - 1)
+                browser.select(index: number == 9 ? browser.tabShortcutTargets.count - 1 : number - 1)
             }
             return true
         }
@@ -1519,10 +1541,12 @@ struct ContentView: View {
             browser.toggleDusk()
         case "n" where shifted:
             browser.newShyTab()
+        // Shown, or brought forward if open: never a second one, and never
+        // closed by the key that opened it — ⌘W does that, as for any tab.
         case "y" where !shifted:
-            browser.recalling.toggle()
+            browser.recalling = true
         case "j" where shifted:
-            browser.hoarding.toggle()
+            browser.hoarding = true
         case "v" where shifted:
             // In a text field this key is paste without formatting — a Google
             // Doc, a form, the address field. It only means Paste and Go when
@@ -1564,7 +1588,7 @@ struct ContentView: View {
         case "b" where shifted:
             browser.bookmarkCurrent()
         case "," where !shifted:
-            browser.tuning.toggle()
+            browser.tuning = true
         case "h" where shifted:
             browser.toggleHiding()
         case "u" where shifted:
@@ -1641,7 +1665,7 @@ private struct UpdateMenuItem: View {
         case .ready:
             Button(L10n.text("App.0207")) { updater.relaunch() }
         case .offered:
-            Button(updater.fetchingDisk ? L10n.text("App.0208") : L10n.text("App.0209")) { updater.openDisk() }
+            Button(updater.fetchingDisk ? L10n.text("App.0206") : L10n.text("App.0209")) { updater.openDisk() }
                 .disabled(updater.fetchingDisk)
         }
     }

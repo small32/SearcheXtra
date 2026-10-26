@@ -58,6 +58,16 @@ struct KeyCombo: Codable, Hashable {
             + (KeyCombo.symbols[key] ?? key.uppercased())
     }
 
+    /// `combo` pressed against the switcher's `key`: nil when it isn't that
+    /// key, true when it is with ⇧ added (back through the switcher).
+    static func recentSwitch(_ combo: KeyCombo, key: KeyCombo?) -> Bool? {
+        guard let key else { return nil }
+        if combo == key { return false }
+        var unshifted = combo
+        unshifted.shift = false
+        return combo.shift && !key.shift && unshifted == key ? true : nil
+    }
+
     private var isFunctionKey: Bool { key.count > 1 && key.hasPrefix("f") && Int(key.dropFirst()) != nil }
 
     /// A key alone, or with only ⇧, is typing — never a shortcut.
@@ -91,8 +101,10 @@ struct KeyCombo: Codable, Hashable {
     }
 
     /// macOS's own, the ones every text field relies on, and the ones Search
-    /// keeps for itself: ⌘1–⌘9 for tabs, Tab and Escape
-    /// with anything. Not ours to give, and so never taken from the Mac.
+    /// keeps for itself: ⌘1–⌘9 for tabs, Tab alone, with ⇧ or with ⌘, and
+    /// Escape with anything. Not ours to give, and so never taken from the
+    /// Mac. Tab with ⌃ or ⌥ is a key like another: ⌃Tab is the recent-tabs
+    /// switcher's until it is given to something else, as in Arc.
     static func isReserved(_ combo: KeyCombo) -> Bool {
         let system: Set<KeyCombo> = [
             KeyCombo("q"), KeyCombo("q", option: true), KeyCombo("q", control: true),
@@ -103,7 +115,8 @@ struct KeyCombo: Codable, Hashable {
             KeyCombo("space"), KeyCombo("space", command: false, control: true),
             KeyCombo("space", option: true), KeyCombo("space", command: false, option: true, control: true),
         ]
-        if system.contains(combo) || combo.key == "tab" || combo.key == "escape" { return true }
+        if system.contains(combo) || combo.key == "escape" { return true }
+        if combo.key == "tab", combo.command || !(combo.control || combo.option) { return true }
         let digit = combo.key.count == 1 && ("1"..."9").contains(combo.key)
         return digit && !combo.option && !combo.shift && combo.command && !combo.control
     }
@@ -127,10 +140,10 @@ struct Command: Identifiable {
             case .file: return L10n.text("section.file")
             case .edit: return L10n.text("section.edit")
             case .view: return L10n.text("section.view")
-            case .spaces: return L10n.text("section.spaces")
-            case .tabs: return L10n.text("section.tabs")
-            case .bookmarks: return L10n.text("section.bookmarks")
-            case .history: return L10n.text("section.history")
+            case .spaces: return L10n.text("Settings.0774")
+            case .tabs: return L10n.text("App.0145")
+            case .bookmarks: return L10n.text("App.0170")
+            case .history: return L10n.text("App.0175")
             }
         }
     }
@@ -154,61 +167,70 @@ struct Command: Identifiable {
 
     /// The same commands, keys and order as the menus (see App.swift).
     static let all: [Command] = [
-        Command("app.settings", L10n.text("Shortcuts.0874"), .app, KeyCombo(",")) { $0.tuning.toggle() },
-        Command("app.welcome", L10n.text("Shortcuts.0875"), .app, nil) { $0.welcoming = true },
-        Command("app.passwords", L10n.text("Shortcuts.0876"), .app, KeyCombo("l", option: true)) { $0.managing = true },
+        Command("app.settings", L10n.text("App.0182"), .app, KeyCombo(",")) { $0.tuning = true },
+        Command("app.welcome", L10n.text("App.0183"), .app, nil) { $0.welcoming = true },
+        Command("app.passwords", L10n.text("App.0184"), .app, KeyCombo("l", option: true)) { $0.managing = true },
 
-        Command("file.newWindow", L10n.text("Shortcuts.0877"), .file, KeyCombo("n")) { _ in Browsers.newWindow() },
-        Command("file.newTab", L10n.text("Shortcuts.0878"), .file, KeyCombo("t")) { $0.newTab() },
-        Command("file.newPrivateTab", L10n.text("Shortcuts.0879"), .file, KeyCombo("n", shift: true)) { $0.newShyTab() },
-        Command("file.reopen", L10n.text("Shortcuts.0880"), .file, KeyCombo("t", shift: true)) { $0.reopen() },
-        Command("file.openAddress", L10n.text("Shortcuts.0881"), .file, KeyCombo("l")) { $0.edit() },
-        Command("file.closeTab", L10n.text("Shortcuts.0882"), .file, KeyCombo("w")) { $0.closeFront() },
+        Command("file.newWindow", L10n.text("App.0114"), .file, KeyCombo("n")) { _ in Browsers.newWindow() },
+        Command("file.newTab", L10n.text("App.0115"), .file, KeyCombo("t")) { $0.newTab() },
+        Command("file.newPrivateTab", L10n.text("App.0116"), .file, KeyCombo("n", shift: true)) { $0.newShyTab() },
+        Command("file.reopen", L10n.text("Browser.0337"), .file, KeyCombo("t", shift: true)) { $0.reopen() },
+        Command("file.openAddress", L10n.text("App.0117"), .file, KeyCombo("l")) { $0.edit() },
+        Command("file.closeTab", L10n.text("App.0119"), .file, KeyCombo("w")) { $0.closeFront() },
         Command("file.closeWindow", L10n.text("upstream.closeWindow"), .file, KeyCombo("w", shift: true)) { $0.closeWindow() },
-        Command("file.import", L10n.text("Shortcuts.0883"), .file, nil) { $0.bringingIn = "" },
-        Command("file.share", L10n.text("Shortcuts.0884"), .file, nil) { $0.share() },
+        Command("file.import", L10n.text("App.0118"), .file, nil) { $0.bringingIn = "" },
+        Command("file.share", L10n.text("App.0120"), .file, nil) { $0.share() },
         Command("file.exportPDF", L10n.text("command.exportPDF"), .file, nil) { $0.exportPDF() },
-        Command("file.print", L10n.text("Shortcuts.0885"), .file, KeyCombo("p")) { $0.printPage() },
+        Command("file.print", L10n.text("App.0121"), .file, KeyCombo("p")) { $0.printPage() },
 
-        Command("edit.find", L10n.text("Shortcuts.0886"), .edit, KeyCombo("f")) { $0.openFind() },
-        Command("edit.findNext", L10n.text("Shortcuts.0887"), .edit, KeyCombo("g")) { $0.look(forward: true) },
-        Command("edit.findPrevious", L10n.text("Shortcuts.0888"), .edit, KeyCombo("g", shift: true)) { $0.look(forward: false) },
+        Command("edit.find", L10n.text("App.0122"), .edit, KeyCombo("f")) { $0.openFind() },
+        Command("edit.findNext", L10n.text("App.0123"), .edit, KeyCombo("g")) { $0.look(forward: true) },
+        Command("edit.findPrevious", L10n.text("App.0124"), .edit, KeyCombo("g", shift: true)) { $0.look(forward: false) },
+        Command("edit.copyCleanLink", L10n.text("upstream.copyCleanLink"), .edit, KeyCombo("c", shift: true, option: true)) { $0.copyCleanLink() },
 
-        Command("view.sidebar", L10n.text("Shortcuts.0889"), .view, KeyCombo("s", shift: true)) { $0.toggleSidebar() },
+        Command("view.sidebar", L10n.text("App.0125"), .view, KeyCombo("s", shift: true)) { $0.toggleSidebar() },
         Command("view.fold", L10n.text("Shortcuts.0890"), .view, KeyCombo("s")) { $0.toggleFold() },
-        Command("view.reload", L10n.text("Shortcuts.0891"), .view, KeyCombo("r")) { $0.reload() },
-        Command("view.reloadOrigin", L10n.text("Shortcuts.0892"), .view, KeyCombo("r", option: true)) { $0.reload(fromOrigin: true) },
-        Command("view.reader", L10n.text("Shortcuts.0893"), .view, KeyCombo("r", shift: true)) { $0.toggleReader() },
-        Command("view.float", L10n.text("Shortcuts.0894"), .view, KeyCombo("p", shift: true)) { $0.toggleFloat() },
+        Command("view.reload", L10n.text("App.0131"), .view, KeyCombo("r")) { $0.reload() },
+        Command("view.reloadOrigin", L10n.text("App.0132"), .view, KeyCombo("r", option: true)) { $0.reload(fromOrigin: true) },
+        Command("view.reader", L10n.text("App.0133"), .view, KeyCombo("r", shift: true)) { $0.toggleReader() },
+        Command("view.float", L10n.text("App.0134"), .view, KeyCombo("p", shift: true)) { $0.toggleFloat() },
+        Command("view.sitePanel", L10n.text("upstream.merge.03fa46a625"), .view, nil) { $0.toggleSitePanel() },
         Command("view.dusk", L10n.text("appearance.darkenSite"), .view, KeyCombo("d", shift: true)) { $0.toggleDusk() },
         Command("view.duskPause", L10n.text("appearance.pauseDarkening"), .view, KeyCombo("d", shift: true, option: true)) { $0.pauseDusk() },
-        Command("view.hide", L10n.text("Shortcuts.0897"), .view, KeyCombo("h", shift: true)) { $0.toggleHiding() },
-        Command("view.hidden", L10n.text("Shortcuts.0898"), .view, KeyCombo("u", shift: true)) { $0.reviewing.toggle() },
-        Command("view.zoomIn", L10n.text("Shortcuts.0899"), .view, KeyCombo("+")) { $0.zoom(by: 1.1) },
-        Command("view.zoomOut", L10n.text("Shortcuts.0900"), .view, KeyCombo("-")) { $0.zoom(by: 1 / 1.1) },
-        Command("view.actualSize", L10n.text("Shortcuts.0901"), .view, KeyCombo("0")) { $0.resetZoom() },
-        Command("view.inspector", L10n.text("Shortcuts.0902"), .view, KeyCombo("i", option: true)) { $0.toggleInspector() },
-        Command("view.console", L10n.text("Shortcuts.0903"), .view, KeyCombo("j", option: true)) { $0.showConsole() },
-        Command("view.inspect", L10n.text("Shortcuts.0904"), .view, KeyCombo("c", option: true)) { $0.inspectElement() },
+        Command("view.hide", L10n.text("App.0137"), .view, KeyCombo("h", shift: true)) { $0.toggleHiding() },
+        Command("view.hidden", L10n.text("App.0138"), .view, KeyCombo("u", shift: true)) { $0.reviewing.toggle() },
+        Command("view.zoomIn", L10n.text("App.0139"), .view, KeyCombo("+")) { $0.zoom(by: 1.1) },
+        Command("view.zoomOut", L10n.text("App.0140"), .view, KeyCombo("-")) { $0.zoom(by: 1 / 1.1) },
+        Command("view.actualSize", L10n.text("App.0141"), .view, KeyCombo("0")) { $0.resetZoom() },
+        Command("view.inspector", L10n.text("App.0142"), .view, KeyCombo("i", option: true)) { $0.toggleInspector() },
+        Command("view.console", L10n.text("App.0143"), .view, KeyCombo("j", option: true)) { $0.showConsole() },
+        Command("view.inspect", L10n.text("App.0144"), .view, KeyCombo("c", option: true)) { $0.inspectElement() },
 
-        Command("tabs.back", L10n.text("Shortcuts.0905"), .tabs, KeyCombo("[")) { $0.back() },
-        Command("tabs.forward", L10n.text("Shortcuts.0906"), .tabs, KeyCombo("]")) { $0.forward() },
-        Command("tabs.next", L10n.text("Shortcuts.0907"), .tabs, KeyCombo("]", shift: true)) { $0.step(1) },
-        Command("tabs.previous", L10n.text("Shortcuts.0908"), .tabs, KeyCombo("[", shift: true)) { $0.step(-1) },
-        Command("tabs.search", L10n.text("Shortcuts.0909"), .tabs, KeyCombo("k")) { browser in
+        Command("tabs.back", L10n.text("App.0146"), .tabs, KeyCombo("[")) { $0.back() },
+        Command("tabs.forward", L10n.text("App.0147"), .tabs, KeyCombo("]")) { $0.forward() },
+        Command("tabs.next", L10n.text("App.0148"), .tabs, KeyCombo("]", shift: true)) { $0.step(1) },
+        // ⌃Tab's switcher, most recently used first, on a key of your own
+        // (Arc lets you move it). Held, its ⌃, ⌥ or ⌘ keeps the switcher up;
+        // with ⇧ too it walks back. No menu line: the key is read before the
+        // menus (see ContentView.take and ShortcutStore.recentSwitch).
+        Command(Command.recentTabs, L10n.text("upstream.merge.28caf67332"), .tabs, KeyCombo("tab", command: false, control: true)) {
+            $0.switchTabs(backwards: false)
+        },
+        Command("tabs.previous", L10n.text("App.0149"), .tabs, KeyCombo("[", shift: true)) { $0.step(-1) },
+        Command("tabs.search", L10n.text("App.0150"), .tabs, KeyCombo("k")) { browser in
             if browser.editing, !browser.offers.isEmpty { browser.stepSummon() } else { browser.summon() }
         },
         // ⌥⌘N, Chrome's on the Mac: ⌃⌘S is the Mac's own Show Sidebar, and
         // sits beside ⌘S, which folds the tabs away.
-        Command("tabs.split", L10n.text("Shortcuts.0910"), .tabs, KeyCombo("n", option: true)) { browser in
+        Command("tabs.split", L10n.text("App.0151"), .tabs, KeyCombo("n", option: true)) { browser in
             guard browser.prefs.splitView else { return }
             browser.startSplit()
         },
-        Command("tabs.focusLeftPane", L10n.text("Shortcuts.0911"), .tabs, KeyCombo("left", control: true)) { browser in
+        Command("tabs.focusLeftPane", L10n.text("App.0152"), .tabs, KeyCombo("left", control: true)) { browser in
             guard browser.prefs.splitView else { return }
             browser.focusPane(onLeft: true)
         },
-        Command("tabs.focusRightPane", L10n.text("Shortcuts.0912"), .tabs, KeyCombo("right", control: true)) { browser in
+        Command("tabs.focusRightPane", L10n.text("App.0153"), .tabs, KeyCombo("right", control: true)) { browser in
             guard browser.prefs.splitView else { return }
             browser.focusPane(onLeft: false)
         },
@@ -216,36 +238,36 @@ struct Command: Identifiable {
             guard browser.prefs.splitView else { return }
             browser.focusOtherPane()
         },
-        Command("tabs.swapSplit", L10n.text("Shortcuts.0914"), .tabs, nil) { browser in
+        Command("tabs.swapSplit", L10n.text("App.0154"), .tabs, nil) { browser in
             guard browser.prefs.splitView else { return }
             browser.swapSplit()
         },
-        Command("tabs.separateSplit", L10n.text("Shortcuts.0915"), .tabs, nil) { browser in
+        Command("tabs.separateSplit", L10n.text("App.0155"), .tabs, nil) { browser in
             guard browser.prefs.splitView, let tab = browser.active else { return }
             browser.detachSplit(tab)
         },
-        Command("tabs.rename", L10n.text("Shortcuts.0916"), .tabs, nil) { browser in
+        Command("tabs.rename", L10n.text("App.0163"), .tabs, nil) { browser in
             if let tab = browser.active { browser.beginTabRename(tab) }
         },
-        Command("tabs.duplicate", L10n.text("Shortcuts.0917"), .tabs, KeyCombo("d")) { $0.duplicate() },
-        Command("tabs.copyAddress", L10n.text("Shortcuts.0918"), .tabs, KeyCombo("c", shift: true)) { $0.copyAddress() },
-        Command("tabs.copyMarkdown", L10n.text("Shortcuts.0919"), .tabs, nil) { $0.copyMarkdownLink() },
-        Command("tabs.pasteAndGo", L10n.text("Shortcuts.0920"), .tabs, KeyCombo("v", shift: true)) { $0.pasteAndGo() },
-        Command("tabs.closeOthers", L10n.text("Shortcuts.0921"), .tabs, nil) { browser in
+        Command("tabs.duplicate", L10n.text("App.0164"), .tabs, KeyCombo("d")) { $0.duplicate() },
+        Command("tabs.copyAddress", L10n.text("App.0165"), .tabs, KeyCombo("c", shift: true)) { $0.copyAddress() },
+        Command("tabs.copyMarkdown", L10n.text("App.0166"), .tabs, nil) { $0.copyMarkdownLink() },
+        Command("tabs.pasteAndGo", L10n.text("App.0167"), .tabs, KeyCombo("v", shift: true)) { $0.pasteAndGo() },
+        Command("tabs.closeOthers", L10n.text("App.0168"), .tabs, nil) { browser in
             if let tab = browser.active { browser.closeOthers(but: tab) }
         },
-        Command("tabs.mute", L10n.text("Shortcuts.0922"), .tabs, KeyCombo("m", shift: true)) { $0.pauseMedia() },
+        Command("tabs.mute", L10n.text("App.0169"), .tabs, KeyCombo("m", shift: true)) { $0.pauseMedia() },
 
-        Command("bookmarks.add", L10n.text("Shortcuts.0923"), .bookmarks, KeyCombo("b", shift: true)) { $0.bookmarkCurrent() },
-        Command("bookmarks.show", L10n.text("Shortcuts.0924"), .bookmarks, nil) { $0.bookmarking = true },
-        Command("bookmarks.bar", L10n.text("Shortcuts.0925"), .bookmarks, nil) { browser in
+        Command("bookmarks.add", L10n.text("App.0172"), .bookmarks, KeyCombo("b", shift: true)) { $0.bookmarkCurrent() },
+        Command("bookmarks.show", L10n.text("App.0173"), .bookmarks, nil) { $0.bookmarking = true },
+        Command("bookmarks.bar", L10n.text("App.0174"), .bookmarks, nil) { browser in
             withAnimation(Motion.glide) { browser.prefs.bookmarksBar.toggle() }
         },
 
-        Command("history.show", L10n.text("Shortcuts.0926"), .history, KeyCombo("y")) { $0.recalling.toggle() },
-        Command("history.downloads", L10n.text("Shortcuts.0927"), .history, KeyCombo("j", shift: true)) { $0.hoarding.toggle() },
-        Command("history.clearData", L10n.text("Shortcuts.0928"), .history, KeyCombo("delete", shift: true)) { $0.recallMode = .clearing },
-        Command("history.clear", L10n.text("Shortcuts.0929"), .history, nil) { $0.clearHistory() },
+        Command("history.show", L10n.text("App.0178"), .history, KeyCombo("y")) { $0.recalling = true },
+        Command("history.downloads", L10n.text("App.0179"), .history, KeyCombo("j", shift: true)) { $0.hoarding = true },
+        Command("history.clearData", L10n.text("App.0180"), .history, KeyCombo("delete", shift: true)) { $0.recallMode = .clearing },
+        Command("history.clear", L10n.text("App.0181"), .history, nil) { $0.clearHistory() },
     ] + (1...9).map { number in
         Command("spaces.\(number)", L10n.text("shortcuts.space", String(number)), .spaces,
                 KeyCombo(String(number), command: false, control: true)) { browser in
@@ -294,6 +316,30 @@ final class ShortcutStore: ObservableObject {
     }
 
     func isChanged(_ id: String) -> Bool { changed[id] != nil }
+
+    /// A press of the recent-tabs switcher's key, and whether it walks back:
+    /// its key as set, or the same with ⇧ added. Nil for any other key.
+    func recentSwitch(_ event: NSEvent) -> Bool? {
+        guard event.type == .keyDown, let combo = KeyCombo(event: event) else { return nil }
+        return KeyCombo.recentSwitch(combo, key: key(for: Command.recentTabs))
+    }
+
+    /// The modifiers its key is held with — ⌃ for ⌃Tab — which keep the
+    /// switcher up until one is let go of.
+    var recentHold: NSEvent.ModifierFlags {
+        key(for: Command.recentTabs)?.flags.intersection([.command, .option, .control]) ?? .control
+    }
+
+    /// Whether the switcher's modifiers are all still down.
+    func recentHeld(_ flags: NSEvent.ModifierFlags) -> Bool {
+        flags.intersection(.deviceIndependentFlagsMask).isSuperset(of: recentHold)
+    }
+
+    /// Exactly the switcher's modifiers held, ⇧ aside: the arrows and the
+    /// card keys move through it then.
+    func recentOnly(_ flags: NSEvent.ModifierFlags) -> Bool {
+        flags.intersection([.command, .option, .control]) == recentHold
+    }
     var anyChanged: Bool { !changed.isEmpty }
 
     /// Changed commands, and Space keys which have no menu to handle their defaults.
@@ -447,6 +493,9 @@ extension View {
 }
 
 extension Command {
+    /// The recent-tabs switcher's id (⌃Tab unless changed).
+    static let recentTabs = "tabs.recent"
+
     /// Split View's commands: with it off, not listed, and their keys go on
     /// to the page.
     static let split: Set<String> = ["tabs.split", "tabs.focusLeftPane", "tabs.focusRightPane", "tabs.focusOtherPane",

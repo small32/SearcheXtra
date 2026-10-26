@@ -49,6 +49,29 @@ final class BookmarkIconTests: XCTestCase {
         await icons.fetch(for: url)
         XCTAssertEqual(BookmarkIconProtocol.count("/path/page"), 1)
     }
+
+    func testUnvisitedBookmarksOnOneHostKeepTheirOwnAppIcons() async throws {
+        guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
+        _ = NSApplication.shared
+        BookmarkIconProtocol.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [BookmarkIconProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let icons = Favicons(session: session)
+        let site = "https://\(UUID().uuidString.lowercased()).example"
+        let firstURL = try XCTUnwrap(URL(string: site + "/one/page"))
+        let secondURL = try XCTUnwrap(URL(string: site + "/two/page"))
+        await icons.fetch(for: firstURL)
+        let first = try XCTUnwrap(icons.cached(for: firstURL))
+        await icons.fetch(for: secondURL)
+        let second = try XCTUnwrap(icons.cached(for: secondURL))
+        XCTAssertFalse(first === second, "Two applications on a host must not inherit each other's declared icon")
+        XCTAssertTrue(icons.cached(for: firstURL) === first)
+        XCTAssertEqual(BookmarkIconProtocol.count("/one/icon.png"), 1)
+        XCTAssertEqual(BookmarkIconProtocol.count("/two/icon.png"), 1)
+    }
+
 }
 
 private final class BookmarkIconProtocol: URLProtocol {
@@ -62,10 +85,13 @@ private final class BookmarkIconProtocol: URLProtocol {
     override func startLoading() {
         guard let url = request.url else { return }
         Self.lock.lock(); Self.requests[url.path, default: 0] += 1; Self.lock.unlock()
-        let image = url.path == "/custom/icon.png"
+        let image = url.path.hasSuffix("/icon.png")
+        let application = url.path.hasPrefix("/one/") ? "one" : url.path.hasPrefix("/two/") ? "two" : nil
+        let iconPath = application.map { "/\($0)/icon.png" } ?? "/custom/icon.png"
+        let html = "<title>Bookmark fixture</title><link rel='icon' href='\(iconPath)' sizes='64x64'>"
         let data = image
             ? Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGMQaPjwH4QZYAwAU3QJ/a65wk8AAAAASUVORK5CYII=")!
-            : Data(#"<title>Bookmark fixture</title><link rel='icon' href='/custom/icon.png' sizes='64x64'>"#.utf8)
+            : Data(html.utf8)
         let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": image ? "image/png" : "text/html; charset=utf-8"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: data)

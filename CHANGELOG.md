@@ -1,5 +1,31 @@
 # SearcheXtra 更新日志
 
+## 2.2.5 — 2026-10-26
+
+### 简体中文
+
+合并上游更新代码，并修复了一些BUG。
+
+- 移植 Search 上游 `57912ad..76bd2c1` 的 macOS 更新，保留 SearcheXtra 的标签内地址编辑、超级拖拽、书签管理、中英双语及 MV2/MV3 用户脚本兼容。
+- 设置按功能分组，支持搜索并直接修改匹配项目；设置、书签、历史记录、下载等使用原生管理标签页，支持前进和后退。
+- 新增个人资料，分别管理空间、Cookie、网站登录、历史记录和书签；默认个人资料沿用原有数据，密码和扩展等应用级数据共用。
+- 改善固定标签拖动、标签组定位、快捷键提示、网站图标、阅读主题与 Markdown 复制，加入按需本地网页翻译和可选 Apple Passwords 配对。
+- 修复自动填充与通行密钥的站点校验、文件页面恢复、会话保存、屏幕共享授权及后台媒体处理；新增清理链接与按系统能力提供的隐私选项。
+- 改善扩展模块加载、网页编码、站点授权、重定向与无痕侧边面板，保留扩展启动清理顺序和默认关闭的用户脚本授权。
+- 不引入上游 AI 功能或独立浮动地址输入框；原有开关和用户选择继续保留。本轮仅维护 macOS。
+
+### English
+
+Merged upstream updates and fixed some bugs.
+
+- Port macOS updates from Search upstream `57912ad..76bd2c1`, retaining SearcheXtra's embedded tab address editor, super drag, bookmark management, bilingual interface, and MV2/MV3 user-script compatibility.
+- Group settings by function with searchable, editable results. Settings, bookmarks, history, downloads, and other native management pages open in tabs with Back and Forward navigation.
+- Add profiles with separate spaces, cookies, website sign-ins, history, and bookmarks. Existing data stays in the default profile; passwords, extensions, and other application-level data remain shared.
+- Improve pinned-tab dragging, tab-group placement, shortcut hints, site icons, reader themes, and Markdown copying. Add on-demand local webpage translation and optional Apple Passwords pairing.
+- Fix site checks for autofill and passkeys, local-file restoration, session saving, screen-sharing consent, and background media handling. Add clean-link copying and privacy controls where supported by the system.
+- Improve extension module loading, page encoding, site permissions, redirects, and private side panels, retaining startup-cleanup ordering and user-script access that is off by default.
+- Exclude upstream AI features and floating address input. Preserve existing switches and user choices. This update maintains macOS only.
+
 ## 2.2.3 — 2026-10-25
 
 - 合并 Search 上游 `b2048a0..57912ad` 的 16 个提交，仅移植 macOS 代码。

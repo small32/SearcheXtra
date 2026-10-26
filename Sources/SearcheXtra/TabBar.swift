@@ -17,7 +17,7 @@ struct TabBar: View {
 
     /// Which tab is under the hand, where it started, and how far it has come.
     @State private var landing = false
-    @State private var groupFrames: [UUID: CGRect] = [:]
+    @State private var groupFrames: [UUID: GroupDropFrame] = [:]
     /// The plus only comes out when the pointer is in the row.
     @State private var nearby = false
     @State private var plussed = false
@@ -50,6 +50,8 @@ struct TabBar: View {
                     // The space on screen, first, when there are spaces.
                     // Above the tabs, for the name it shows over them a moment
                     // after a switch.
+                    // The profile, once there is more than one (see Profiles.swift).
+                    if Profiles.shared.several { ProfileBadge(browser: browser) }
                     if browser.prefs.usesSpaces { SpaceDot(browser: browser).zIndex(1) }
 
                     // The tabs, in a run of their own. While they fit, it is
@@ -234,18 +236,43 @@ struct TabBar: View {
             let row = space.id == browser.spaceID
                 ? Parked(tabs: browser.tabs, active: browser.activeID, splits: browser.splits)
                 : browser.parked[space.id] ?? Parked(tabs: [], active: nil)
-            let shown = rowTabs(row.tabs, splits: row.splits)
+            let groupsOn = browser.prefs.usesTabGroups
+            // Its groups as they were left, folded or not (see Parked.drawn):
+            // drawn flat, a folded group's tabs came out for the swipe.
+            let (groups, loose) = row.drawn(groupsOn: groupsOn, splitView: browser.prefs.splitView)
+            let pins = rowTabs(row.tabs, splits: row.splits).filter { $0.pin != nil }
+            let shown = groupsOn ? pins + groups.flatMap(\.tabs) + loose : rowTabs(row.tabs, splits: row.splits)
             let each = width(in: strip, tabs: shown, splits: row.splits)
-            // The neighbour draws no group headings, so its line only ever
-            // stands between its pins and its own loose tabs.
-            let line = TabBar.showsPinLine(shown)
+            let line = TabBar.showsPinLine(shown, groups: groups.count)
             let firstLoose = shown.firstIndex { $0.pin == nil }
             HStack(spacing: Metrics.tabGap) {
-                ForEach(Array(shown.enumerated()), id: \.element.id) { index, tab in
-                    if line, index == firstLoose { PinLine() }
-                    rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
-                            width: each, room: strip - lights - 12,
-                            height: Metrics.strip, interactive: false, pill: pill)
+                if groupsOn {
+                    ForEach(pins) { tab in
+                        rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
+                                width: each, room: strip - lights - 12,
+                                height: Metrics.strip, interactive: false, pill: pill)
+                    }
+                    if line { PinLine() }
+                    ForEach(groups) { drawn in
+                        GroupHeading(browser: browser, group: drawn.group, horizontal: true)
+                        ForEach(drawn.tabs) { tab in
+                            rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
+                                    width: each, room: strip - lights - 12,
+                                    height: Metrics.strip, interactive: false, pill: pill)
+                        }
+                    }
+                    ForEach(loose) { tab in
+                        rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
+                                width: each, room: strip - lights - 12,
+                                height: Metrics.strip, interactive: false, pill: pill)
+                    }
+                } else {
+                    ForEach(Array(shown.enumerated()), id: \.element.id) { index, tab in
+                        if line, index == firstLoose { PinLine() }
+                        rowItem(tab, in: row.tabs, splits: row.splits, activeID: row.active,
+                                width: each, room: strip - lights - 12,
+                                height: Metrics.strip, interactive: false, pill: pill)
+                    }
                 }
             }
             .frame(height: Metrics.strip)
@@ -290,6 +317,7 @@ struct TabBar: View {
             }
             .modifier(Carried(index: index, count: count, step: step, vertical: false,
                               space: "strip", onDropTab: { source, point in drop(source, at: point) },
+                              groupDestination: { source, point in destination(source, at: point) },
                               outside: { browser.dragOut(tab) }, browser: browser, tab: tab) {
                 if browser.prefs.usesTabGroups && tab.pin == nil {
                     browser.move(tab, within: group, to: $0)
@@ -328,11 +356,14 @@ struct TabBar: View {
         }
     }
 
+    private func destination(_ tab: Tab, at point: CGPoint) -> GroupDropTarget? {
+        guard browser.prefs.usesTabGroups, tab.pin == nil else { return nil }
+        return GroupDropFrames.resolve(point, frames: groupFrames, groups: browser.tabGroups,
+                                       excluding: tab.id, vertical: false)
+    }
+
     private func drop(_ tab: Tab, at point: CGPoint) {
-        guard browser.prefs.usesTabGroups, tab.pin == nil else { return }
-        if let id = groupFrames.first(where: { $0.value.contains(point) })?.key {
-            browser.move(tab, toGroup: id)
-        }
+        if let target = destination(tab, at: point) { browser.move(tab, toGroup: target) }
     }
 
     /// How wide the run of tabs is: as wide as the tabs while they fit, as
@@ -372,7 +403,7 @@ struct TabBar: View {
         let extra = pairWidthExtra(in: looseTabs, base: each, splits: browser.splits)
         let headers = browser.prefs.usesTabGroups ? CGFloat(browser.tabGroups.count) : 0
         let headingWidth = browser.prefs.usesTabGroups
-            ? browser.tabGroups.reduce(CGFloat.zero) { $0 + GroupHeading.width(for: $1.name) } : 0
+            ? browser.tabGroups.reduce(CGFloat.zero) { $0 + GroupHeading.width(for: $1.name, numbered: browser.prefs.showsTabShortcuts && $1.collapsed) } : 0
         let shown = Int(pinned + loose + headers)
         var total = pinned * Metrics.pinWidth + loose * each + extra
             + headingWidth + CGFloat(max(0, shown - 1)) * Metrics.tabGap
@@ -414,7 +445,7 @@ struct TabBar: View {
             guard count > 0 else { return Metrics.tabWidth }
             let extra = pairWidthExtra(in: items, base: Metrics.tabMinWidth, splits: browser.splits)
             let spent = pinnedWidth(in: strip, tabs: displayed) + extra + edit
-                + browser.tabGroups.reduce(CGFloat.zero) { $0 + GroupHeading.width(for: $1.name) }
+                + browser.tabGroups.reduce(CGFloat.zero) { $0 + GroupHeading.width(for: $1.name, numbered: browser.prefs.showsTabShortcuts && $1.collapsed) }
                 + CGFloat(max(0, pins + items.count + browser.tabGroups.count - 1)) * Metrics.tabGap
                 + (pinLine ? PinLine.space : 0)
             return max(Metrics.tabMinWidth, min(Metrics.tabWidth, (room(in: strip) - spent) / CGFloat(count)))
@@ -523,10 +554,10 @@ struct Helm: View {
             let back = !tab.isBlank && tab.canGoBack
             let forward = !tab.isBlank && tab.canGoForward
             HStack(spacing: 4) {
-                Door(icon: "chevron.left", help: L10n.text("TabBar.1087")) { browser.back() }
+                Door(icon: "chevron.left", help: L10n.text("TabBar.1087"), held: { Rewind.menu(tab, back: true) }) { browser.back() }
                     .disabled(!back)
                     .opacity(back ? 1 : 0.3)
-                Door(icon: "chevron.right", help: L10n.text("TabBar.1088")) { browser.forward() }
+                Door(icon: "chevron.right", help: L10n.text("TabBar.1088"), held: { Rewind.menu(tab, back: false) }) { browser.forward() }
                     .disabled(!forward)
                     .opacity(forward ? 1 : 0.3)
                 // Reload, or stop while it is still coming.
@@ -536,12 +567,12 @@ struct Helm: View {
                 ) {
                     if tab.loading { tab.stop() } else { browser.reload() }
                 }
-                .disabled(tab.isBlank)
-                .opacity(tab.isBlank ? 0.3 : 1)
+                .disabled(!tab.isWeb)
+                .opacity(tab.isWeb ? 1 : 0.3)
                 // The menu's second item is the reason for it: ⌥⌘R has no
                 // button. Nothing to offer while the door is Stop.
                 .contextMenu {
-                    if !tab.loading && !tab.isBlank {
+                    if !tab.loading && tab.isWeb {
                         Button(L10n.text("App.0131")) { browser.reload() }
                             .shortcut("view.reload")
                         Button(L10n.text("App.0132")) { browser.reload(fromOrigin: true) }
@@ -591,7 +622,50 @@ private struct HistoryDoor: View {
     }
 }
 
+/// Back or Forward held: every page that way, nearest at the top, each with
+/// its site's mark, as Safari and Chrome list them. Picking one goes straight
+/// there, however many steps away. Read when the menu opens, so it is never
+/// a page behind.
+@MainActor
+enum Rewind {
+    static func menu(_ tab: Tab, back: Bool) -> NSMenu? {
+        let pages = tab.pages(back: back)
+        guard !pages.isEmpty else { return nil }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for page in pages {
+            let title = page.title.flatMap { $0.isEmpty ? nil : $0 } ?? page.url.host() ?? page.url.absoluteString
+            let item = Pick(title: title) { [weak tab] in tab?.go(to: page) }
+            item.toolTip = page.url.absoluteString
+            if let image = Favicons.shared.cached(for: page.url, shy: tab.shy)?.copy() as? NSImage {
+                image.size = NSSize(width: 16, height: 16)
+                item.image = image
+            } else {
+                item.image = NSImage(systemSymbolName: "globe", accessibilityDescription: nil)
+            }
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    /// A menu row that runs its own closure, its own target.
+    private final class Pick: NSMenuItem {
+        private let run: () -> Void
+
+        init(title: String, run: @escaping () -> Void) {
+            self.run = run
+            super.init(title: title, action: #selector(fire), keyEquivalent: "")
+            target = self
+        }
+
+        required init(coder: NSCoder) { fatalError() }
+
+        @objc private func fire() { run() }
+    }
+}
+
 private struct TabPill: View {
+    @Environment(\.tabShortcutNumbers) private var shortcutNumbers
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
     @ObservedObject var tab: Tab
@@ -604,6 +678,7 @@ private struct TabPill: View {
 
     @State private var hovering = false
     @State private var shake: CGFloat = 0
+    @State private var pressed = false
 
     private var editing: Bool { browser.editingTab == tab.id }
     private var pinned: Bool { tab.pin != nil && !editing }
@@ -616,6 +691,10 @@ private struct TabPill: View {
     /// A speaker to press at the end of the pill: the page plays sound, or
     /// was muted. The ring, while the page is still coming, goes first.
     private var speaker: Bool { !editing && !tab.loading && (tab.noisy || tab.muted) }
+    /// Where the page is, said on the tab you're on (Settings › Tabs › Show
+    /// the address on the tab you're on).
+    private var rest: AtRest? { live && !editing ? AtRest.said(tab.restAddress, always: prefs.showsAddress) : nil }
+    private var atRest: Bool { rest != nil }
 
     /// A pinned tab is a square, an edited one is a field, everything else is
     /// its share of what is left.
@@ -630,6 +709,8 @@ private struct TabPill: View {
                 Group {
                     if browser.editingPin == tab.id {
                         PinField(browser: browser, tab: tab)
+                    } else if let number = shortcutNumbers[tab.id] {
+                        TabShortcutNumber(number: number)
                     } else if tab.loading {
                         // Its page on the way, as a tab's ring says; the
                         // letter or icon comes back once it is there.
@@ -661,7 +742,9 @@ private struct TabPill: View {
             }
         }
         .modifier(Shake(travel: shake))
+        .modifier(Give(pressed: pressed && prefs.tabsGive))
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .modifier(Pressing(down: $pressed, enabled: prefs.tabsGive))
         // Active tabs edit immediately; other tabs switch on the first click.
         .modifier(OneClick(double: false, enabled: !editing) {
             guard !editing, NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty else { return }
@@ -700,6 +783,8 @@ private struct TabPill: View {
                         .frame(width: 15, height: 15)
                         .background(Palette.ink.opacity(0.07), in: Circle())
                         .transition(.opacity)
+                } else if let number = shortcutNumbers[tab.id] {
+                    TabShortcutNumber(number: number)
                 } else if tab.loading {
                     Ring()
                 } else {
@@ -751,14 +836,17 @@ private struct TabPill: View {
                 }
                 // A window the page asked for was refused (BlockedPopups).
                 PopupSign(browser: browser, tab: tab, colour: colour)
-                Text(tab.label)
-                    .font(.system(size: 12.5))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .foregroundStyle(colour)
+                // The page is translated (Translate.swift).
+                TranslateSign(tab: tab, colour: colour)
+                TitleAtRest(label: tab.label, rest: rest, shown: atRest, hovering: hovering,
+                            size: 12.5, colour: colour, roomy: false)
             }
 
             Spacer(minLength: 2)
+
+            if !editing, let number = shortcutNumbers[tab.id] {
+                TabShortcutNumber(number: number)
+            }
 
             // The speaker, which can be pressed, is at the end of the pill on
             // its own, and one place in under the pointer, beside the cross
@@ -810,6 +898,7 @@ private struct TabPill: View {
         .frame(width: span, alignment: .leading)
         .animation(Motion.quick, value: speaker)
         .animation(Motion.quick, value: tab.blockedPopups.isEmpty)
+        .animation(Motion.quick, value: tab.translation == nil)
     }
 
     @ViewBuilder
@@ -882,16 +971,27 @@ struct Carried: ViewModifier {
     var onDrop: ((CGPoint) -> Void)? = nil
     /// A paired item can be picked up from either half; report that source.
     var onDropTab: ((Tab, CGPoint) -> Void)? = nil
+    var groupDestination: ((Tab, CGPoint) -> GroupDropTarget?)? = nil
     /// Let go outside the window: true when the tab was taken elsewhere —
     /// another window, or a new one (see Browser.dragOut).
     var outside: (() -> Bool)? = nil
     var browser: Browser? = nil
     var tab: Tab? = nil
+    /// Carried over another block that would take it — the pins, for a
+    /// tab; the tabs, for a pinned row — at this point in the row's space:
+    /// true while that block shows where it would land, and the row then
+    /// holds its place rather than moving along its own.
+    var cross: ((CGPoint) -> Bool)? = nil
+    /// Let go (nil: the drag was called off): true when that block took it.
+    var land: ((CGPoint?) -> Bool)? = nil
+    /// Over that block: faint, so the place it opened shows through.
+    var faded = false
     let move: (Int) -> Void
 
     @State private var held = false
     @State private var from = 0
     @State private var travel: CGFloat = 0
+    @State private var reordered = false
 
     func body(content: Content) -> some View {
         // What it has travelled, less the ground its new place has already
@@ -899,6 +999,15 @@ struct Carried: ViewModifier {
         let shift = held ? travel - CGFloat(index - from) * step : 0
         return content
             .offset(x: vertical ? 0 : shift, y: vertical ? shift : 0)
+            .background {
+                if let browser, let tab, browser.prefs.usesTabGroups, let group = browser.group(of: tab) {
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: GroupDropFrames.self,
+                            value: [tab.id: GroupDropFrame(group: group, tab: tab.id,
+                                                         rect: geometry.frame(in: .named(space)))])
+                    }
+                }
+            }
             // Under the hand exactly. Its place in the row springs when it
             // passes another tab, and the offset springs back the same way —
             // until the next move of the hand cuts the offset's spring short
@@ -907,6 +1016,7 @@ struct Carried: ViewModifier {
             .transaction { if held { $0.animation = nil } }
             .zIndex(held ? 1 : 0)
             .shadow(color: .black.opacity(held ? 0.14 : 0), radius: 12, y: 4)
+            .opacity(held && faded ? 0.4 : 1)
             // Selection starts on press, without taking this drag away.
             .simultaneousGesture(
                 DragGesture(minimumDistance: 5, coordinateSpace: .named(space))
@@ -917,11 +1027,21 @@ struct Carried: ViewModifier {
                             from = index
                         }
                         travel = vertical ? value.translation.height : value.translation.width
+                        // Asked every move, so the block it left lets go
+                        // of it as soon as it is elsewhere.
+                        let crossed = cross?(value.location) == true
                         if let browser, let tab, browser.prefs.splitView,
                            TabDrag.shared.update(browser: browser, tab: tab,
                                                  translation: value.translation) { return }
+                        if crossed { return }
+                        // A tab of a group, or one over a group, lands where
+                        // it is let go (see GroupDropFrames.resolve) rather
+                        // than moving along the row as it goes.
+                        if let browser, let tab, browser.prefs.usesTabGroups, tab.pin == nil,
+                           browser.group(of: tab) != nil || groupDestination?(tab, value.location) != nil { return }
                         let target = min(max(0, from + Int((travel / step).rounded())), count - 1)
                         if target != index {
+                            reordered = true
                             withAnimation(Motion.settle) { move(target) }
                         }
                     }
@@ -930,36 +1050,48 @@ struct Carried: ViewModifier {
                         if let browser, let tab, browser.prefs.splitView {
                             let finished = TabDrag.shared.finish(browser: browser, tab: tab)
                             let source = finished.source
-                            switch finished.drop {
-                            case .stage(let target, let onLeft):
-                                browser.pair(source, with: target, onLeft: onLeft)
-                            case .strip(let target):
-                                browser.dropTabIntoStrip(source, before: target)
-                                if let onDropTab { onDropTab(source, value.location) }
-                                else if source.id == tab.id { onDrop?(value.location) }
-                            case .outside:
-                                if !browser.dragOut(source, at: finished.point) {
-                                    if let onDropTab { onDropTab(source, value.location) }
-                                    else if source.id == tab.id { onDrop?(value.location) }
+                            // Let go over the pins, or out of them: theirs,
+                            // before anything else here.
+                            let cancelled: Bool
+                            if case .cancelled = finished.drop { cancelled = true } else { cancelled = false }
+                            if land?(cancelled ? nil : value.location) != true {
+                                switch finished.drop {
+                                case .stage(let target, let onLeft):
+                                    browser.pair(source, with: target, onLeft: onLeft)
+                                case .strip(let target):
+                                    if let destination = groupDestination?(source, value.location) {
+                                        // Resolve before detaching: the old pair still owns its frame.
+                                        browser.move(source, toGroup: destination, detaching: true)
+                                    } else {
+                                        browser.dropTabIntoStrip(source, before: target)
+                                    }
+                                case .outside:
+                                    if !browser.dragOut(source, at: finished.point) {
+                                        if let onDropTab { onDropTab(source, value.location) }
+                                        else if source.id == tab.id { onDrop?(value.location) }
+                                    }
+                                case .cancelled:
+                                    if reordered { move(from) }
                                 }
-                            case .cancelled:
-                                move(from)
                             }
-                        } else if outside?() != true {
+                        } else if land?(value.location) != true, outside?() != true {
                             if let onDropTab, let tab { onDropTab(tab, value.location) }
                             else { onDrop?(value.location) }
                         }
                         withAnimation(Motion.settle) {
                             held = false
                             travel = 0
+                            reordered = false
                         }
                     }
             )
             .onReceive(TabDrag.shared.$cancelledID) { id in
                 guard id == tab?.id, held else { return }
-                move(from)
+                _ = land?(nil)
+                if reordered { move(from) }
                 held = false
                 travel = 0
+                reordered = false
             }
     }
 }
@@ -1237,10 +1369,10 @@ struct TabMenu: View {
         let rows = browser.prefs.showsPinRows
         if tab.pin == nil {
             Button(L10n.text("TabBar.1095")) { browser.pin(tab) }
-                .disabled(tab.isBlank || tab.shy)
+                .disabled(!tab.isWeb || tab.shy)
             if rows {
                 Button(L10n.text("TabBar.1096")) { browser.pin(tab, listed: true) }
-                    .disabled(tab.isBlank || tab.shy)
+                    .disabled(!tab.isWeb || tab.shy)
             }
         } else {
             if rows {
@@ -1283,6 +1415,13 @@ struct TabMenu: View {
             .help(L10n.text("TabBar.1104"))
         }
         if browser.prefs.splitView {
+            // Right-clicked among tabs picked in the column: those two side
+            // by side. More than two can't be, so it is there but off.
+            let picked = browser.selectedTabIDs.contains(tab.id) ? browser.visibleSelectedTabCount : 1
+            if picked > 1 && !browser.pickedTabsArePaired {
+                Button(L10n.text("upstream.tabs.splitPicked")) { browser.pairPickedTabs(focus: tab) }
+                    .disabled(browser.pickedPair == nil)
+            }
             if browser.split(for: tab) != nil {
                 Button(L10n.text("TabBar.1105")) {
                     browser.focusPane(tab)
@@ -1293,7 +1432,7 @@ struct TabMenu: View {
                     browser.focusPane(tab)
                     browser.closeSplit()
                 }
-            } else {
+            } else if picked == 1 {
                 // Beside the page on screen; on that page itself, an empty
                 // page beside it.
                 Button(L10n.text("TabBar.1108")) { browser.openInSplit(tab) }
@@ -1302,7 +1441,7 @@ struct TabMenu: View {
         }
         if tab.pin == nil, !tab.bench {
             // Another window, or a new one (see Browser.moveToWindow).
-            let others = Browsers.all.filter { $0 !== browser && $0.isOpen && $0.extensionPopup == nil }
+            let others = Browsers.all.filter { $0 !== browser && $0.isOpen && !$0.isPopup && $0.profileID == browser.profileID }
             if others.isEmpty {
                 Button(L10n.text("TabBar.1109")) { browser.moveToWindow(tab, nil) }
                     .disabled(browser.tabs.count < 2)
@@ -1323,7 +1462,7 @@ struct TabMenu: View {
             browser.select(tab)
             browser.duplicate()
         }
-        .disabled(tab.isBlank)
+        .disabled(!tab.isWeb)
         // Site information is an explicit action, separate from address editing.
         Button(L10n.text("TabBar.1114")) {
             if browser.activeID != tab.id { browser.select(tab) }
@@ -1335,12 +1474,21 @@ struct TabMenu: View {
             browser.select(tab)
             browser.copyAddress()
         }
-        .disabled(tab.isBlank)
+        .disabled(!tab.isWeb)
         Button(L10n.text("TabBar.1116")) {
             browser.select(tab)
             browser.copyMarkdownLink()
         }
-        .disabled(tab.isBlank)
+        .disabled(!tab.isWeb)
+        Button(L10n.text("upstream.copyCleanLink")) {
+            browser.select(tab)
+            browser.copyCleanLink()
+        }
+        .disabled(!tab.isWeb)
+        if browser.prefs.sitesInPanel {
+            Button(L10n.text("upstream.openInSidePanel")) { browser.openInSidePanel(tab) }
+                .disabled(!tab.isWeb || tab.shy)
+        }
         Button(tab.muted ? L10n.text("TabBar.1117") : L10n.text("TabBar.1118")) { tab.toggleMute() }
         // Its page let go of now, as it would be after half an hour unseen:
         // the row keeps its title and picture, and it loads again when gone
@@ -1367,11 +1515,31 @@ struct TabPress: ViewModifier {
     let enabled: Bool
     let active: Bool
     @Binding var selected: Bool
+    /// Told when the button goes down on the tab and comes back up, whatever
+    /// the press goes on to do, for the tab to give under it (see Give).
+    var pressing: Binding<Bool>? = nil
     let act: () -> Void
 
+    /// How far the hand may go before the press gives way to the row's
+    /// drag, which starts at 5. A long press that never gave way (as this
+    /// was first written, with no limit) kept the press to itself: the drag
+    /// that carries a row or a pin waited for it to fail, which it only did
+    /// at the release, so nothing moved under the hand — the row jumped to
+    /// its place on letting go, and a pin held still a moment before
+    /// letting go wasn't moved at all.
+    static let travel: CGFloat = 4
+
     func body(content: Content) -> some View {
-        content.onLongPressGesture(minimumDuration: .infinity, maximumDistance: .infinity, pressing: { down in
+        content.onLongPressGesture(minimumDuration: .infinity, maximumDistance: TabPress.travel, pressing: { down in
+            pressing?.wrappedValue = down
             if !down {
+                // Given way to a drag, the button still down: what the press
+                // did stands until the release, so the release can't take
+                // it for a fresh click on the tab now on screen.
+                if NSEvent.pressedMouseButtons & 1 != 0 {
+                    TabPress.untilRelease { selected = false }
+                    return
+                }
                 // The row's release handler must see which press selected it.
                 DispatchQueue.main.async { selected = false }
                 return
@@ -1380,6 +1548,51 @@ struct TabPress: ViewModifier {
             selected = !active
             if selected { act() }
         }, perform: {})
+    }
+
+    /// Once, at the left button's release.
+    private static func untilRelease(_ act: @escaping () -> Void) {
+        var monitor: Any?
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { event in
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            DispatchQueue.main.async(execute: act)
+            return event
+        }
+    }
+}
+
+/// Only whether the button is down on the view, by TabPress's means, for a
+/// tab whose click answers on release: the strip's pills.
+/// Only while tabs give (Settings › Tabs): otherwise the pill carries no
+/// gesture more than it did.
+struct Pressing: ViewModifier {
+    @Binding var down: Bool
+    var enabled = true
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.onLongPressGesture(minimumDuration: .infinity, maximumDistance: .infinity,
+                                       pressing: { down = $0 }, perform: {})
+        } else {
+            content
+        }
+    }
+}
+
+/// A tab gives a little under the button and springs back when it is let
+/// go, the life Arc's tabs have when clicked. Going down is quick, so the
+/// click is answered at once; coming back is the settle spring. Only the
+/// scale is animated, so the selection the press makes isn't slowed with
+/// it. Nothing moves with Reduce Motion on.
+struct Give: ViewModifier {
+    let pressed: Bool
+
+    func body(content: Content) -> some View {
+        content.animation(pressed ? Motion.quick : Motion.settle) {
+            $0.scaleEffect(pressed && !Motion.reduced ? Motion.give : 1)
+        }
     }
 }
 
@@ -1401,6 +1614,10 @@ struct OneClick: ViewModifier {
     var enabled = true
     let act: () -> Void
 
+    /// One gesture whose count changes, not two in turn: a pin becomes
+    /// the one on screen as the button goes down (TabPress), and swapping
+    /// one tap for the other then made the square anew under the hand, which
+    /// dropped the drag that had picked it up.
     func body(content: Content) -> some View {
         content.gesture(
             TapGesture(count: double ? 2 : 1).onEnded { act() },

@@ -31,7 +31,6 @@ struct ExtensionsPage: View {
                                 .foregroundStyle(Palette.ink)
                             Spacer(minLength: 8)
                             Pill(L10n.text("ExtensionsUI.0481")) {
-                                browser.tuning = false
                                 browser.open(Browser.webStore, foreground: true)
                             }
                         }
@@ -68,9 +67,8 @@ struct ExtensionsPage: View {
                 Card {
                     Line(L10n.text("ExtensionsUI.0485"), L10n.text("ExtensionsUI.0486")) {
                         Pill(L10n.text("ExtensionsUI.0487")) {
-                            browser.tuning = false
                             browser.bringingExtensions = true
-                            browser.bringingIn = ""
+                            browser.lead(to: InternalPage(.importing))
                         }
                     }
                 }
@@ -160,7 +158,7 @@ struct StoreOffer: View {
     }
 }
 
-/// Settings › Tabs › New tab page: what a new tab opens to, while an
+/// Settings › Browsing › Searching › Home page: what a new tab opens to, while an
 /// extension offers a page for it. Search's own page with the address field
 /// ready, or the page of an extension that asked to take its place, and
 /// the way back from one that did. With nothing offered there is nothing to
@@ -180,7 +178,8 @@ struct NewTabPageLine: View {
             let askers = extensions.newTabAskers
             let current = extensions.newTabPageID
             if !askers.isEmpty {
-                Line(L10n.text("upstream.newTab.page"), detail(askers, current)) {
+                Rule(inset: SettingsPanel.textInset)
+                SettingRow(icon: "house", title: L10n.text("upstream.newTab.page"), detail: detail(askers, current)) {
                     Picker("", selection: Binding(
                         get: { current ?? "" },
                         set: { extensions.setNewTabPage($0.isEmpty ? nil : $0) }
@@ -193,7 +192,6 @@ struct NewTabPageLine: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                 }
-                Rule()
             }
         }
 

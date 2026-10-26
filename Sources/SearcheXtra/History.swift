@@ -77,6 +77,7 @@ final class History: ObservableObject {
     private var recentCache: [Trace]?
     private var saving: DispatchWorkItem?
     private let file: URL
+    private var retired = false
     private static let capacity = 2_000
     /// Visits counted at most: far more than anyone makes, and room to add.
     static let mostVisits = 1_000_000_000
@@ -89,6 +90,19 @@ final class History: ObservableObject {
     init(file: URL = Store.file("history.json")) {
         self.file = file
         load()
+    }
+
+    convenience init(file: String) { self.init(file: Store.file(file)) }
+
+    /// A deleted profile must not write a queued history save back to disk.
+    func retire() {
+        retired = true
+        saving?.cancel()
+        saving = nil
+        visits = [:]
+        pageText = [:]
+        visitedHosts = []
+        Disk.remove(file)
     }
 
     /// URL identity ignores fragments, normalizes only the scheme and host,
@@ -301,6 +315,8 @@ final class History: ObservableObject {
     }
 
     func forget(_ key: String) {
+        // Its page's icon is a trace of the visit too.
+        if let url = visits[key].flatMap({ URL(string: $0.url) }) { Favicons.shared.forget(url) }
         visits[key] = nil
         forgetText(for: key)
         save()
@@ -373,10 +389,17 @@ final class History: ObservableObject {
     /// What the field should draw greyed out after the caret: the rest of the
     /// best match, or nothing if it doesn't carry on from what was typed.
     func completion(for typed: String, among options: [Suggestion]) -> String? {
-        guard !typed.isEmpty, typed.count >= 2 else { return nil }
-        for option in options {
+        guard !typed.isEmpty else { return nil }
+        // One letter finishes only the top row, and only when it is the
+        // front door of a site you have been to: "x" becomes x.com, as in
+        // Safari and Chrome (#696). A room inside a site, a name the app
+        // merely knows, or a lower row waits for a second letter.
+        let single = typed.count == 1
+        if single, let first = options.first?.kind, first != .visited { return nil }
+        for option in single ? Array(options.prefix(1)) : options {
             for (key, target) in History.endings(of: option) {
                 guard key.count >= typed.count else { continue }
+                if single, key.contains("/") || key.contains("?") || key.contains("#") { continue }
                 let prefix = String(key.prefix(typed.count))
                 guard prefix.caseInsensitiveCompare(typed) == .orderedSame else { continue }
                 let rest = String(key.dropFirst(typed.count))
@@ -540,7 +563,7 @@ final class History: ObservableObject {
     /// Coalesced: a busy minute of browsing writes the file once, not thirty
     /// times, and never on the main thread.
     private func save() {
-        guard saving == nil else { return }
+        guard saving == nil, !retired else { return }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             saving = nil
@@ -552,13 +575,14 @@ final class History: ObservableObject {
 
     /// A pending visit or Clear History must reach disk before the app quits.
     func flush() {
-        guard let saving else { return }
+        guard !retired, let saving else { return }
         saving.cancel()
         self.saving = nil
         write(now: true)
     }
 
     private func write(now: Bool = false) {
+        guard !retired else { return }
         // The file's existing limit also bounds the live history and the
         // address matcher. Sort only when pruning, rather than on every save.
         if visits.count > Self.capacity {

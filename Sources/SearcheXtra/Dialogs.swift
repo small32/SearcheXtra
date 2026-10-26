@@ -112,7 +112,8 @@ extension Browser {
     /// in Safari and Chrome: over the tab in front, a prompt() asking for a
     /// password would pass for that page's. A tab closed first gets the
     /// answer a dismissed dialog gives.
-    func ask(from webView: WKWebView, show: @escaping () -> Void, drop: @escaping () -> Void) {
+    @discardableResult
+    func ask(from webView: WKWebView, show: @escaping () -> Void, drop: @escaping () -> Void) -> HeldQuestion? {
         let known = tabs + parkedTabs
         // Questions from tabs that have gone some other way than close(_:).
         for id in heldDialogs.keys where !known.contains(where: { $0.id == id }) {
@@ -120,9 +121,11 @@ extension Browser {
         }
         guard let tab = known.first(where: { $0.built === webView }), tab.id != activeID else {
             show()
-            return
+            return nil
         }
-        heldDialogs[tab.id, default: []].append(HeldQuestion(show: show, drop: drop))
+        let question = HeldQuestion(show: show, drop: drop)
+        heldDialogs[tab.id, default: []].append(question)
+        return question
     }
 
     func webView(
@@ -152,8 +155,8 @@ extension Browser {
         }
         ask(from: webView, show: {
             let alert = Dialogs.alert(from: frame, saying: message)
-            alert.addButton(withTitle: L10n.text("Dialogs.0377"))
-            alert.addButton(withTitle: L10n.text("Dialogs.0378"))
+            alert.addButton(withTitle: L10n.text("Dialogs.0376"))
+            alert.addButton(withTitle: L10n.text("App.0212"))
             Dialogs.show(alert, over: webView) { answer in
                 completionHandler(answer == .alertFirstButtonReturn)
             }
@@ -174,8 +177,8 @@ extension Browser {
         }
         ask(from: webView, show: {
             let alert = Dialogs.alert(from: frame, saying: prompt)
-            alert.addButton(withTitle: L10n.text("Dialogs.0379"))
-            alert.addButton(withTitle: L10n.text("Dialogs.0380"))
+            alert.addButton(withTitle: L10n.text("Dialogs.0376"))
+            alert.addButton(withTitle: L10n.text("App.0212"))
             let field = NSTextField(string: defaultText ?? "")
             field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
             alert.accessoryView = field
@@ -200,7 +203,7 @@ extension Browser {
         // shows one — it would be a window on the screen of whoever is
         // working beside it — and is answered as cancelled.
         if Store.testing {
-            Dialogs.askedInTest.append("Choose a file (\(frame.securityOrigin.host))")
+            Dialogs.askedInTest.append(L10n.text("upstream.merge.157b0d9c25", String(describing: frame.securityOrigin.host)))
             return completionHandler(nil)
         }
         ask(from: webView, show: {
@@ -327,7 +330,7 @@ extension Browser {
             alert.informativeText += L10n.text("Dialogs.0389")
         }
         alert.addButton(withTitle: L10n.text("Dialogs.0390"))
-        alert.addButton(withTitle: L10n.text("Dialogs.0391"))
+        alert.addButton(withTitle: L10n.text("App.0212"))
 
         let box = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 56))
         let name = NSTextField(frame: NSRect(x: 0, y: 32, width: 260, height: 24))
@@ -359,6 +362,7 @@ extension Browser {
     /// tab shows white until somebody thinks to reload. Saying so, with the
     /// one thing worth offering, is what the failure view is for.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        cancelDisplay(for: webView)
         guard let tab = tab(for: webView) else { return }
         dropQuestions(for: tab.id)
         // In front of you: straight back, a reload beats a white page with a

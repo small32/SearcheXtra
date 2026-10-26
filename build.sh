@@ -208,11 +208,30 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <string>Websites you visit can ask to use your microphone. SearcheXtra asks you the first time each site does and keeps your answer; Settings › Privacy forgets them.</string>
   <key>NSLocationUsageDescription</key>
   <string>Websites you visit can ask for your location. SearcheXtra asks you each time a site does, unless you choose Always allow for it; Settings › Privacy forgets those choices.</string>
+  <key>NSLocationWhenInUseUsageDescription</key>
+  <string>Websites you visit can ask for your location. SearcheXtra asks you each time a site does, unless you choose Always allow for it; Settings › Privacy forgets those choices.</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Files you download are saved to your Downloads folder.</string>
 </dict>
 </plist>
 PLIST
+
+# The app's own permission explanations follow the selected interface language.
+mkdir -p "$APP/Contents/Resources/en.lproj" "$APP/Contents/Resources/zh-Hans.lproj"
+cat > "$APP/Contents/Resources/en.lproj/InfoPlist.strings" <<'STRINGS'
+"NSCameraUsageDescription" = "Websites you visit can ask to use your camera. SearcheXtra asks for each site's permission; Settings > Privacy forgets your choices.";
+"NSMicrophoneUsageDescription" = "Websites you visit can ask to use your microphone. SearcheXtra asks for each site's permission; Settings > Privacy forgets your choices.";
+"NSLocationUsageDescription" = "Websites you visit can ask for your location. SearcheXtra asks each time unless you allow the site; Settings > Privacy forgets your choices.";
+"NSLocationWhenInUseUsageDescription" = "Websites you visit can ask for your location. SearcheXtra asks each time unless you allow the site; Settings > Privacy forgets your choices.";
+"NSDownloadsFolderUsageDescription" = "Files you download are saved to your Downloads folder.";
+STRINGS
+cat > "$APP/Contents/Resources/zh-Hans.lproj/InfoPlist.strings" <<'STRINGS'
+"NSCameraUsageDescription" = "访问的网站可能请求使用摄像头。SearcheXtra 会单独询问各网站的权限，可在设置的隐私页面清除选择。";
+"NSMicrophoneUsageDescription" = "访问的网站可能请求使用麦克风。SearcheXtra 会单独询问各网站的权限，可在设置的隐私页面清除选择。";
+"NSLocationUsageDescription" = "访问的网站可能请求你的位置。除非已允许该网站，SearcheXtra 会每次询问，可在设置的隐私页面清除选择。";
+"NSLocationWhenInUseUsageDescription" = "访问的网站可能请求你的位置。除非已允许该网站，SearcheXtra 会每次询问，可在设置的隐私页面清除选择。";
+"NSDownloadsFolderUsageDescription" = "下载的文件将保存到下载文件夹。";
+STRINGS
 
 # Signing. A Developer ID certificate, when there is one, with the hardened
 # runtime Gatekeeper insists on for anything notarised; otherwise ad-hoc,

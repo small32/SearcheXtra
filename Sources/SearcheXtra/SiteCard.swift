@@ -222,7 +222,7 @@ struct SiteCard: View {
         if let host = url.host(), !host.isEmpty {
             return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
         }
-        if url.isFileURL { return L10n.text("SiteCard.0952") }
+        if url.isFileURL { return L10n.text("section.file") }
         return url.scheme ?? url.absoluteString
     }
 
@@ -239,7 +239,7 @@ struct SiteCard: View {
             Row(L10n.text("site.data"), submenu: true) { section = 1 }
             Row(L10n.text("site.settings"), submenu: true) { section = 2 }
             Row(L10n.text("site.close")) { close() }
-            Row(L10n.text("TabBar.1115"), keys: "⇧⌘C") { after { browser.copyAddress() } }
+            Row(L10n.text("App.0165"), keys: "⇧⌘C") { after { browser.copyAddress() } }
             Separator()
             Row(L10n.text("App.0121"), keys: "⌘P") { after { browser.printPage() } }
             zoom
@@ -438,7 +438,7 @@ struct SiteCard: View {
                     after { SiteCard.show(trust) }
                 }
             }
-            Row(L10n.text("SiteCard.0964")) { deeper = false }
+            Row(L10n.text("App.0146")) { deeper = false }
         }
     }
 
@@ -484,7 +484,7 @@ struct SiteCard: View {
             )
         case "http":
             return Safety(
-                symbol: "lock.open", title: L10n.text("SiteCard.0971"),
+                symbol: "lock.open", title: L10n.text("SiteCard.0965"),
                 detail: L10n.text("SiteCard.0972"),
                 tint: Palette.unsafe, trust: nil
             )

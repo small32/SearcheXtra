@@ -104,13 +104,13 @@ struct WelcomePanel: View {
                             .foregroundStyle(Palette.muted)
                     }
                     if importsPasswords {
-                        Choice(L10n.text("Welcome.1152"), L10n.text("Welcome.1153"), on: $wantsPasswords)
+                        Choice(L10n.text("Settings.0696"), L10n.text("Welcome.1153"), on: $wantsPasswords)
                     } else {
                         Text(L10n.text("import.passwordsUnsupported", (source ?? sources[0]).name))
                             .font(.system(size: 13)).foregroundStyle(Palette.muted)
                     }
-                    Choice(L10n.text("Welcome.1154"), L10n.text("Welcome.1155"), on: $wantsBookmarks)
-                    Choice(L10n.text("Welcome.1156"), L10n.text("Welcome.1157"), on: $wantsHistory)
+                    Choice(L10n.text("App.0170"), L10n.text("Welcome.1155"), on: $wantsBookmarks)
+                    Choice(L10n.text("App.0175"), L10n.text("Welcome.1157"), on: $wantsHistory)
                 }
 
                 HStack(spacing: 12) {
@@ -195,11 +195,20 @@ struct WelcomePanel: View {
                     .padding(.top, 6)
                 Key("⌘T", L10n.text("Welcome.1172"))
                 Key("⌘K", L10n.text("Welcome.1173"))
-                Key("⌘,", L10n.text("Welcome.1174"))
-                Key("⌃1", L10n.text("Welcome.1175"))
-                Key("⌥⌘N", L10n.text("Welcome.1176"))
-                Key("⌘O", L10n.text("Welcome.1177"))
-                Key("⌘L", L10n.text("upstream.engineSuggestionsWelcome"))
+                Key("⌘,", L10n.text("upstream.merge.c989f1ce3e"))
+                Key("⌃1", L10n.text("upstream.merge.9eaab3f001"))
+                Key("⌥⌘N", L10n.text("upstream.merge.9be6679138"))
+                Key("⌘O", "Links from other apps can open in a small window. Settings › Browsing.")
+                Key("⌘L", L10n.text("upstream.merge.61cf7aea5e"))
+                Key("⌘", L10n.text("upstream.merge.63ccb19a4d"))
+                Key("⌘1", L10n.text("upstream.merge.4e8531b6dc"))
+                Key("⇧⌘P", L10n.text("upstream.merge.a8fa7866a7"))
+                Key("⌃-click", L10n.text("upstream.merge.42a70c0815"))
+                Key("⌘Q", L10n.text("upstream.merge.477b4fccbf"))
+                Key("⌘,", L10n.text("upstream.merge.c753e8c4c9"))
+                if PageTranslator.available {
+                    Key("⌃-click", L10n.text("upstream.merge.2a06610b98"))
+                }
             }
         }
     }
@@ -217,7 +226,7 @@ struct WelcomePanel: View {
             }
             Spacer()
             if page > 0 {
-                Button(L10n.text("Welcome.1179")) { forward = false; page -= 1 }
+                Button(L10n.text("App.0146")) { forward = false; page -= 1 }
                     .buttonStyle(.plain)
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.muted)
@@ -255,7 +264,7 @@ struct WelcomePanel: View {
                     case .success(let found):
                         let kept = browser.keep(found)
                         ImportRecords.note(source.name, passwords: kept)
-                        lines.append(L10n.text("Welcome.1183", String(describing: kept)))
+                        lines.append(L10n.text("Welcome.1183", String(describing: kept)) + (found.undecrypted > 0 ? L10n.text("upstream.merge.7c65225fd8", String(describing: found.undecrypted)) : ""))
                     case .failure(Chromium.Trouble.noPassphrase):
                         lines.append(L10n.text("Welcome.1184"))
                     case .failure(Mozilla.Trouble.primaryPassword):

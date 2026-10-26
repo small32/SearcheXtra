@@ -32,25 +32,26 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 
 在 **设置 → 通用 → 起始页面** 中输入网址并保存，用于新窗口的起始页面；支持省略协议的网址，例如 `example.com`。选择“使用空白页”可恢复空白页面。更改立即生效，已打开和恢复会话的页面保持原样。新建标签页默认使用空白页，不受起始页面设置影响；若已启用自定义新标签页的扩展，则使用扩展页面。无痕标签页仍使用空白页。
 
-- **地址与搜索合一。** 输入网址直接打开，输入文字使用搜索引擎。地址补全来自本机历史记录，按下回车前不会发送输入内容。
+- **地址与搜索合一。** 点击当前标签页即可在标签内输入网址或搜索词。地址补全来自本机历史记录；可选的搜索引擎输入建议默认关闭，开启后会向所选引擎发送适合搜索的输入，无痕标签页不发送。
 - **标签页与固定标签页。** 常用页面可以固定，显示为字母或网站图标。上次会话的标签页会恢复，切换到对应标签页时才创建网页视图。`⌘K` 按名称查找已打开的标签页。
-- **分屏浏览。** 在“设置 → 标签页”中启用分屏，将标签页拖到页面边缘，或选择“标签页 → 拆分当前页面”。拖动分隔线调整宽度，带边框的页面接收操作指令。分屏组合和宽度随空间保存，重启后可以恢复。
+- **分屏浏览。** 在“设置 → 外观”中启用分屏，将标签页拖到页面边缘，或选择“标签页 → 拆分当前页面”。拖动分隔线调整宽度，带边框的页面接收操作指令。分屏组合和宽度随空间保存，重启后可以恢复。
 - **标签管理与休眠。** 可选择新标签页位置、休眠时间和闲置自动关闭时间；支持多选标签页并复制网址、跨空间共享固定页，以及让指定网站保持唤醒。自动关闭默认停用，固定页、无痕页和有未提交输入的网页会保留。
 - **网页深色与刷新率。** 可将没有深色主题的网页自动转为深色，并按网站停用；120Hz 可选择从不、接通电源时或始终启用。
 - **网页 PDF。** 从文件菜单导出当前网页的完整 PDF。
-- **阅读模式。** `⇧⌘R` 提取文章正文，减少页面干扰。
+- **阅读模式。** `⇧⌘R` 提取文章正文，提供阅读主题、文章媒体和 Markdown 复制。macOS 15 起可按需使用 Apple 本地网页翻译；需要先下载相应语言，自动翻译可单独按语言设置。
 - **超级拖拽。** 在“设置 → 标签页 → 超级拖拽”中分别配置文字、链接和图片。参考 FlowMouse 的方向序列与兜底规则，支持后台搜索、打开位置、复制、收藏、保存图片及以图搜图；可导入 FlowMouse 的拖拽规则。详见[双语说明](docs/FLOW_DRAG.md)。
 - **隐藏网页元素。** 按下 `⇧⌘H` 后点击 Cookie 提示、订阅浮层或其他元素。隐藏规则按网站保存，下次访问时在页面绘制前生效。
 - **广告与跟踪拦截。** 在网络请求阶段拦截第三方跟踪器和广告网络。默认启用，也可以按网站关闭。
 - **画中画。** `⇧⌘P` 将视频放入悬浮窗口，切换应用时仍可观看。
-- **密码与钥匙串。** 登录成功后提示保存密码，点击登录字段时显示已保存账号。密码保存在 macOS 钥匙串中，由系统加密；支持从 Chrome、Arc、Dia、Brave 或 Edge 导入。系统通行密钥功能需要相应的签名和授权配置。
+- **密码与钥匙串。** 登录成功后提示保存密码，点击登录字段时显示已保存账号。密码保存在 macOS 钥匙串中，由系统加密；支持从 Chrome、Arc、Dia、Brave 或 Edge 导入。macOS 15.4 起可选择启用 Apple Passwords 配对集成，默认关闭，使用非官方兼容协议。系统通行密钥功能需要相应的签名和授权配置。
 - **浅色、深色与跟随系统。** 浏览器界面和网页可以随外观设置切换。
-- **书签、历史记录与下载。** 各自提供独立面板，支持搜索和快捷键打开。
+- **设置、书签、历史记录与下载。** 在原生管理标签页中打开，可通过前进、后退返回；设置支持 `⌘F` 搜索，相关控件集中显示并可直接调整。
 - **书签管理器。** 设置提供独立入口，支持搜索、导入 HTML、编辑、删除和文件夹管理，并可按名称排序。支持全选、批量删除、拖动调整顺序及拖入文件夹；多选拖动保留原有顺序。
 - **Chrome 扩展。** 在“设置 → 扩展”中粘贴 Chrome 网上应用店链接，或打开扩展页面后点击添加。扩展运行在 WebKit 的扩展引擎上，浏览器补充部分 Chrome API。常用扩展可以固定，也可以加载本地未打包扩展，修改后点击重新载入。此功能需要 macOS 15.4 或更新版本，兼容情况取决于扩展使用的 API。
 - **MV3 用户脚本。** 声明用户脚本权限的扩展，在“扩展管理 → 详情”中提供默认关闭的“允许用户脚本”开关。基于 WebKit 提供脚本注册、独立执行环境和消息通信；授权后请刷新网页。MV2 继续使用原有扩展加载方式。支持范围见[用户脚本说明](docs/USER_SCRIPTS.md)。
 - **扩展侧边栏。** 支持扩展的侧边面板，面板位于网页旁，可拖动边缘调整宽度。新标签页设置可在空白页和已安装扩展提供的页面之间选择。
-- **多窗口与空间。** 可以创建多个窗口，并使用空间管理不同的标签页集合。
+- **多窗口、空间与个人资料。** 可以创建多个窗口，并使用空间管理不同的标签页集合。在“设置 → 空间”中创建个人资料，分别保存空间、Cookie、网站登录、历史记录和书签；密码、扩展、应用设置、下载与网站图标共用。原有数据保留在默认个人资料中。
+- **链接与隐私。** 提供清理跟踪参数后复制链接的操作；系统 WebKit 支持时，还提供全局隐私控制信号和加载链接时清理点击标识的选项。
 - **版本更新。** 本分支的安装包从 [GitHub Releases](https://github.com/small32/SearcheXtra/releases) 下载更新。macOS 更新检查已使用本仓库的 GitHub Release，并按版本号比较；临时签名构建通过发布页下载后替换应用。
 
 ## 功能边界
@@ -76,7 +77,7 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 
 ## 常用快捷键
 
-在 **设置 → 标签页** 中可启用“紧凑书签栏”，缩小书签、图标与文字的间距。“书签栏打开方式”可选择“默认”（当前标签页）、“新建后台标签页”或“新建前台标签页”，也适用于书签栏文件夹中的书签。设置立即生效并保存在本机；中键点击始终在后台新建标签页，不切换当前页面。
+在 **设置 → 书签管理器** 中可启用“紧凑书签栏”，缩小书签、图标与文字的间距，同时调整文件夹图标和网站图标的显示。“书签栏打开方式”可选择“默认”（当前标签页）、“新建后台标签页”或“新建前台标签页”，也适用于书签栏文件夹中的书签。设置立即生效并保存在本机；中键点击始终在后台新建标签页，不切换当前页面。
 
 书签栏、文件夹下拉菜单和书签管理器自动加载并缓存网页图标，包括尚未访问过的书签。“书签显示网站图标”默认开启，关闭后隐藏图标。
 
@@ -224,22 +225,23 @@ SearcheXtra keeps the interface focused on tabs and pages. Tabs can appear acros
 
 Set **Settings → General → Start page** to choose the page for new windows. Addresses such as `example.com` work without a scheme. Choose Use blank page to restore the blank start page. Changes take effect immediately without replacing open or restored pages. New tabs default to a blank page independently of this setting, or to an enabled new-tab extension's page. Private new tabs remain blank.
 
-- **Addresses and search:** URLs open directly; other text uses the search engine. Address suggestions come from local history. Input is not sent before you press Return.
+- **Addresses and search:** Click the selected tab to enter a URL or search within the tab. Address suggestions come from local history. Optional search-engine suggestions are off by default; when enabled, suitable search input is sent to the selected engine, except in private tabs.
 - **Tabs and pins:** Pin frequently used pages as letters or site icons. Session tabs are restored, with web views created when selected. `⌘K` finds open tabs by name.
-- **Split view:** Enable it in Settings → Tabs, then drag a tab to a page edge or choose Tabs → Split Current Page. Resize with the divider. Commands target the outlined pane. Split pairs and widths are saved with their spaces and restored after restarting.
-- **Reader mode:** `⇧⌘R` extracts the article body.
+- **Split view:** Enable it in Settings → Appearance, then drag a tab to a page edge or choose Tabs → Split Current Page. Resize with the divider. Commands target the outlined pane. Split pairs and widths are saved with their spaces and restored after restarting.
+- **Reader mode:** `⇧⌘R` extracts the article body, with reading themes, article media, and Markdown copying. On macOS 15 or later, on-demand webpage translation uses Apple's local translation framework after downloading the required languages; automatic translation can be configured per language.
 - **Hide page elements:** Press `⇧⌘H`, then click a cookie notice, subscription overlay, or other element. Rules are saved per site and applied before rendering on later visits.
 - **Ad and tracker blocking:** Blocks third-party trackers and ad networks during network requests. Enabled by default, with per-site controls.
 - **Picture in picture:** `⇧⌘P` puts video in a floating window that remains visible while switching apps.
-- **Passwords and Keychain:** Offers to save passwords after login and shows saved accounts when a login field is selected. macOS Keychain encrypts and stores passwords. Import is supported from Chrome, Arc, Dia, Brave, and Edge. System passkey features require appropriate signing and entitlements.
+- **Passwords and Keychain:** Offers to save passwords after login and shows saved accounts when a login field is selected. macOS Keychain encrypts and stores passwords. Import is supported from Chrome, Arc, Dia, Brave, and Edge. Optional Apple Passwords pairing is available on macOS 15.4 or later, is off by default, and uses an unofficial compatibility protocol. System passkey features require appropriate signing and entitlements.
 - **Appearance:** Light, dark, and system appearance settings apply to the browser and webpages.
-- **Bookmarks, history, and downloads:** Dedicated panels with search and keyboard shortcuts.
+- **Settings, bookmarks, history, and downloads:** Native management tabs support Back and Forward navigation. Use `⌘F` in Settings to find and adjust matching controls directly.
 - **Super drag:** Configure text, link and image drags in Settings → Tabs → Super drag. FlowMouse-style direction sequences and fallback rules support background search, tab positions, clipboard actions, bookmarks, image saving and reverse image search. FlowMouse drag rules can be imported. See the [bilingual guide](docs/FLOW_DRAG.md).
 - **Bookmark manager:** Available from Settings, with search, HTML import, editing, deletion, folder management, and sorting by name. Supports select all, bulk deletion, drag reordering, and dropping items into folders. Multi-item dragging preserves the original order.
 - **Chrome extensions:** Install from a Chrome Web Store URL or its listing, pin frequently used extensions, or load an unpacked local extension and reload it after editing. On macOS, extensions use WebKit's extension engine with additional Chrome API compatibility. Support depends on the APIs an extension uses.
 - **MV3 user scripts:** Extensions declaring user-script permissions have an “Allow user scripts” switch under Manage extensions → Details, off by default. The WebKit implementation provides script registration, separate execution worlds, and messaging. Refresh webpages after granting access. MV2 retains its existing loading path. See the [user-script support details](docs/USER_SCRIPTS.md).
 - **Extension side panels:** Supported extension panels open beside the webpage with a draggable width. New-tab settings let you choose a blank page or a page provided by an installed extension.
-- **Windows and spaces:** Open multiple windows and organize sets of tabs into spaces.
+- **Windows, spaces, and profiles:** Open multiple windows and organize tabs in spaces. Create profiles in Settings → Spaces to separate spaces, cookies, website sign-ins, history, and bookmarks. Passwords, extensions, application settings, downloads, and site icons are shared. Existing data stays in the default profile.
+- **Links and privacy:** Copy links with tracking parameters removed. When supported by the system WebKit, additional controls send Global Privacy Control signals and remove click identifiers during navigation.
 - **Updates:** Download this fork's packages from [GitHub Releases](https://github.com/small32/SearcheXtra/releases). The macOS updater checks this repository’s GitHub releases and compares version numbers. Ad-hoc-signed builds download the update from the release page for manual application replacement.
 
 Ad blocking, element hiding, reader mode, picture in picture, and password management are built in; extensions supplement these features. The browser has no account, cloud sync, or cloud browsing-data storage. It does not collect telemetry, usage analytics, or send crash reports to a server. Network traffic primarily comes from webpages, favicons, extension downloads, and update checks.
@@ -257,7 +259,7 @@ Ad blocking, element hiding, reader mode, picture in picture, and password manag
 
 ### Bookmarks and macOS shortcuts
 
-In **Settings → Tabs**, Compact bookmarks bar reduces spacing between bookmarks, icons, and text. Bookmarks bar opening behavior can be Default (current tab), New background tab, or New foreground tab, including bookmarks inside folders. Settings take effect immediately and are saved locally. Middle-click always opens a background tab and keeps the current page selected.
+In **Settings → Bookmark Manager**, Compact bookmarks bar reduces spacing between bookmarks, icons, and text. Folder and website icons can also be shown or hidden there. Bookmarks bar opening behavior can be Default (current tab), New background tab, or New foreground tab, including bookmarks inside folders. Settings take effect immediately and are saved locally. Middle-click always opens a background tab and keeps the current page selected.
 
 The bookmarks bar, folder dropdowns, and bookmark manager automatically load and cache website icons, including bookmarks whose pages have not been visited. Show bookmark website icons is enabled by default; turning it off hides the icons.
 

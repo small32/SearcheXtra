@@ -32,27 +32,25 @@ enum WhatsNew {
     /// Every switch worth meeting, oldest last. The card shows this
     /// version's, and the older ones still off.
     static let toggles: [Toggle] = [
-        Toggle(title: L10n.text("WhatsNew.1191"), detail: L10n.text("WhatsNew.1192"),
+        Toggle(title: L10n.text("Settings.0780"), detail: L10n.text("WhatsNew.1192"),
                since: "1.0.5", get: { $0.splitView }, set: { $0.splitView = $1 }),
-        Toggle(title: L10n.text("WhatsNew.1193"), detail: L10n.text("WhatsNew.1194"),
+        Toggle(title: L10n.text("Settings.0770"), detail: L10n.text("WhatsNew.1194"),
                since: "1.0.5", get: { $0.searchesSites }, set: { $0.searchesSites = $1 }),
-        Toggle(title: L10n.text("WhatsNew.1195"), detail: L10n.text("WhatsNew.1196"),
+        Toggle(title: L10n.text("Settings.0772"), detail: L10n.text("WhatsNew.1196"),
                since: "1.0.5", get: { $0.startsFresh }, set: { $0.startsFresh = $1 }),
 
-        Toggle(title: L10n.text("WhatsNew.1197"), detail: L10n.text("WhatsNew.1198"),
-               since: "1.0.4", get: { $0.usesTabGroups }, set: { $0.usesTabGroups = $1 }),
         Toggle(title: L10n.text("WhatsNew.1199"), detail: L10n.text("WhatsNew.1200"),
                since: "1.0.4", get: { $0.sidebar && $0.sidePosition == .right },
                set: { prefs, on in
                    if on { prefs.sidebar = true }
                    prefs.sidePosition = on ? .right : .left
                }),
-        Toggle(title: L10n.text("WhatsNew.1201"), detail: L10n.text("WhatsNew.1202"),
+        Toggle(title: L10n.text("Settings.0738"), detail: L10n.text("WhatsNew.1202"),
                since: "1.0.4", get: { $0.waitsForPlay }, set: { $0.waitsForPlay = $1 }),
-        Toggle(title: L10n.text("WhatsNew.1203"), detail: L10n.text("WhatsNew.1204"),
+        Toggle(title: L10n.text("Settings.0804"), detail: L10n.text("WhatsNew.1204"),
                since: "1.0.4", get: { $0.alwaysShowsDownloads }, set: { $0.alwaysShowsDownloads = $1 }),
 
-        Toggle(title: L10n.text("WhatsNew.1205"), detail: L10n.text("WhatsNew.1206"),
+        Toggle(title: L10n.text("Settings.0774"), detail: L10n.text("WhatsNew.1206"),
                since: "1.0.1", get: { $0.usesSpaces }, set: { $0.usesSpaces = $1 }),
         Toggle(title: L10n.text("WhatsNew.1207"), detail: L10n.text("WhatsNew.1208"),
                since: "1.0.1", get: { $0.sidebar && $0.sideHides },
@@ -62,11 +60,11 @@ enum WhatsNew {
                }),
         Toggle(title: L10n.text("WhatsNew.1209"), detail: L10n.text("WhatsNew.1210"),
                since: "1.0.2", get: { $0.bookmarksBar }, set: { $0.bookmarksBar = $1 }),
-        Toggle(title: L10n.text("WhatsNew.1211"), detail: L10n.text("WhatsNew.1212"),
-               since: "1.0.2", get: { $0.floatsAway }, set: { $0.floatsAway = $1 }),
-        Toggle(title: L10n.text("WhatsNew.1213"), detail: L10n.text("WhatsNew.1214"),
-               since: "1.0.2", get: { $0.fastPages != .never }, set: { $0.fastPages = $1 ? .always : .never }),
-        Toggle(title: L10n.text("WhatsNew.1215"), detail: L10n.text("WhatsNew.1216"),
+        Toggle(title: L10n.text("Settings.0742"), detail: L10n.text("WhatsNew.1212"),
+               since: "1.0.2", get: { $0.floatsAway }, set: { prefs, on in if on { prefs.floatOwn = .tabsOrApps } else { prefs.floatsAway = false } }),
+        Toggle(title: L10n.text("Settings.0732"), detail: L10n.text("WhatsNew.1214"),
+               since: "1.0.2", get: { $0.fastPages != .never }, set: { $0.fastPages = $1 ? .onPower : .never }),
+        Toggle(title: L10n.text("Settings.0730"), detail: L10n.text("WhatsNew.1216"),
                since: "1.0.3", get: { $0.autoScroll }, set: { $0.autoScroll = $1 }),
     ]
 
@@ -179,7 +177,7 @@ enum WhatsNew {
             ]
         ),
         Notes(
-            version: "1.0.2", date: L10n.text("WhatsNew.1253"),
+            version: "1.0.2", date: L10n.text("WhatsNew.1242"),
             headline: L10n.text("WhatsNew.1254"),
             new: [
                 L10n.text("WhatsNew.1255"),
@@ -211,7 +209,7 @@ enum WhatsNew {
             ]
         ),
         Notes(
-            version: "1.0", date: L10n.text("WhatsNew.1270"),
+            version: "1.0", date: L10n.text("WhatsNew.1263"),
             headline: L10n.text("WhatsNew.1271"),
             new: [
                 L10n.text("WhatsNew.1272"),
@@ -264,7 +262,7 @@ struct WhatsNewCard: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                Pill(L10n.text("WhatsNew.1281"), filled: true, action: close)
+                Pill(L10n.text("site.close"), filled: true, action: close)
             }
         }
         .onAppear {
@@ -313,7 +311,7 @@ struct ReleaseNotesPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .textSelection(.enabled)
             }
-            .frame(maxHeight: 480)
+            .listHeight(480)
         }
     }
 

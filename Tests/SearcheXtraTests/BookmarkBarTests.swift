@@ -90,13 +90,15 @@ final class BookmarkBarTests: XCTestCase {
             browser.visit(original)
             let source = browser.active!
             browser.bookmarking = true
+            let manager = browser.active!
+            XCTAssertEqual(manager.page?.kind, .bookmarks)
             browser.bookmarksOpen = true
             let url = URL(string: "http://127.0.0.1:1/bookmark")!
             browser.pickBookmark(url, inNewTab: true)
-            XCTAssertEqual(browser.tabs.count, 2)
-            XCTAssertEqual(browser.activeID, source.id)
+            XCTAssertEqual(browser.tabs.count, 3)
+            XCTAssertEqual(browser.activeID, manager.id)
             XCTAssertEqual(source.address, original)
-            XCTAssertEqual(browser.tabs.first { $0.id != source.id }?.pending, url)
+            XCTAssertEqual(browser.tabs.first { $0.id != source.id && $0.id != manager.id }?.pending, url)
             XCTAssertTrue(browser.bookmarking)
             XCTAssertTrue(browser.bookmarksOpen)
         }

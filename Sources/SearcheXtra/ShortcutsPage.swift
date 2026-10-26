@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Settings › Shortcuts: every menu command with its key, a card to a menu,
+/// Settings › Keyboard & Mouse › Shortcuts: every menu command with its key, a card to a menu,
 /// narrowed by name or key. Click a key and press the new one; right-click
 /// to clear it or put the default back.
 struct ShortcutsPage: View {
@@ -25,17 +25,11 @@ struct ShortcutsPage: View {
             || key.localizedCaseInsensitiveContains(words.replacingOccurrences(of: " ", with: ""))
     }
 
-    private var showsPeek: Bool {
-        let words = hunt.trimmingCharacters(in: .whitespaces)
-        return prefs.peeksLinks && (words.isEmpty || L10n.text("links.peekShortcut").localizedCaseInsensitiveContains(words)
-            || prefs.peekClick.title.localizedCaseInsensitiveContains(words))
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Hunt(text: $hunt, prompt: L10n.text("ShortcutsPage.0930"), focus: $hunting)
             let found = Command.all.filter(shown)
-            if found.isEmpty && !showsPeek { Nothing(L10n.text("ShortcutsPage.0931")) }
+            if found.isEmpty { Nothing(L10n.text("ShortcutsPage.0931")) }
             ForEach(Command.Section.allCases, id: \.self) { section in
                 let commands = found.filter { $0.section == section }
                 if !commands.isEmpty {
@@ -56,23 +50,6 @@ struct ShortcutsPage: View {
                         }
                     }
                 }
-                }
-            }
-            if showsPeek {
-                Card {
-                    Line(L10n.text("links.peekShortcut")) {
-                        Picker(L10n.text("links.peekShortcut"), selection: $prefs.peekClick) {
-                            ForEach(PeekClick.allCases, id: \.self) { choice in
-                                Text(choice.title).tag(choice)
-                            }
-                        }
-                        .labelsHidden()
-                        .fixedSize()
-                    }
-                    .contextMenu {
-                        Button(L10n.text("ShortcutsPage.0933")) { prefs.peekClick = .shift }
-                            .disabled(prefs.peekClick == .shift)
-                    }
                 }
             }
             if #available(macOS 15.4, *) { extensionCommands }
@@ -99,7 +76,7 @@ extension ShortcutsPage {
         }
         if !commands.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
-                Caption(L10n.text("ShortcutsPage.0935"))
+                Caption(L10n.text("Settings.0695"))
                 Card {
                     ForEach(Array(commands.enumerated()), id: \.element.id) { index, item in
                         if index > 0 { Rule() }
@@ -107,9 +84,9 @@ extension ShortcutsPage {
                             KeyBox(browser: browser, store: store, id: item.id)
                         }
                         .contextMenu {
-                            Button(L10n.text("ShortcutsPage.0936")) { store.clear(item.id) }
+                            Button(L10n.text("ShortcutsPage.0932")) { store.clear(item.id) }
                                 .disabled(store.key(for: item.id) == nil)
-                            Button(L10n.text("ShortcutsPage.0937")) { store.reset(item.id) }
+                            Button(L10n.text("ShortcutsPage.0933")) { store.reset(item.id) }
                                 .disabled(!store.isChanged(item.id))
                         }
                     }
@@ -187,10 +164,14 @@ private struct KeyBox: View {
         guard let combo = KeyCombo(event: event) else { return }
         guard combo.isUsable else { return say(L10n.text("ShortcutsPage.0941")) }
         guard !KeyCombo.isReserved(combo) else { return say(L10n.text("ShortcutsPage.0942")) }
+        // The switcher stays up while its key's ⌃, ⌥ or ⌘ is held, and
+        // takes the tab picked when it is let go of: a key needs one.
+        guard id != Command.recentTabs || combo.control || combo.option || combo.command
+        else { return say(L10n.text("upstream.merge.1752d76c7d")) }
         // An extension's command takes a key as its manifest would: one
         // that types a character, not an arrow or a function key.
         guard !id.hasPrefix("ext:") || combo.key.count == 1 else { return say(L10n.text("ShortcutsPage.0943")) }
-        guard !id.hasPrefix("ext:") || !KeyCombo.isBrowserOnly(combo) else { return say(L10n.text("ShortcutsPage.0944")) }
+        guard !id.hasPrefix("ext:") || !KeyCombo.isBrowserOnly(combo) else { return say(L10n.text("ShortcutsPage.0943")) }
         if store.owner(of: combo, except: id) != nil, taking != combo {
             taking = combo
             return

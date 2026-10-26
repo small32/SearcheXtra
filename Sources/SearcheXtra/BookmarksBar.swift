@@ -124,6 +124,9 @@ struct BookmarkContextMenu: View {
         if let node, let text = node.url, let url = URL(string: text) {
             Button(L10n.text("bookmarks.context.open")) { close(); browser.visitBookmarkBar(url) }
             Button(L10n.text("bookmarks.context.openTab")) { close(); browser.openBookmarkInBackground(url) }
+            if browser.prefs.splitView {
+                Button(L10n.text("bookmarks.context.openSplit")) { close(); browser.openInSplit(url) }
+            }
             Divider()
         }
         Button(L10n.text("bookmarks.context.addPage")) { close(); bookmarks.askNewBookmark(in: parent) }
@@ -156,6 +159,17 @@ struct BookmarkContextMenu: View {
             Divider()
             Button(L10n.text("bookmarks.context.cut")) { close(); bookmarks.copy(node, cut: true) }
             Button(L10n.text("bookmarks.context.copy")) { close(); bookmarks.copy(node) }
+            let targets = Bookmarks.folders(bookmarks.roots).filter { !Bookmarks.holds($0.node.id, node) }
+            if !targets.isEmpty {
+                Menu(L10n.text("bookmarks.context.moveTo")) {
+                    ForEach(targets, id: \.node.id) { target in
+                        Button(String(repeating: "   ", count: target.depth) + target.node.title) {
+                            close()
+                            bookmarks.move(node.id, into: target.node.id)
+                        }
+                    }
+                }
+            }
         }
         Button(L10n.text("bookmarks.context.paste")) { close(); bookmarks.paste(into: parent) }.disabled(!bookmarks.canPaste)
         if let node {
