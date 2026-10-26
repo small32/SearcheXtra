@@ -327,7 +327,7 @@ struct SettingsPanel: View {
         case .extensions:
             ExtensionsPage(browser: browser)
         case .flowDrag:
-            Button("← " + L10n.text("Settings.0693")) { page = .tabs }.buttonStyle(.plain)
+            Button("← " + L10n.text("Settings.0693")) { self.page = .tabs }.buttonStyle(.plain)
             FlowDragSettingsPage(browser: browser)
         default:
             groups(of: page)
@@ -963,10 +963,8 @@ struct SettingsPanel: View {
 
     private var aboutHeader: some View {
         HStack(spacing: 14) {
-            Logomark()
-                .fill(Palette.ink, style: FillStyle(eoFill: true))
-                .aspectRatio(Logomark.canvas.width / Logomark.canvas.height, contentMode: .fit)
-                .frame(height: 34)
+            AppLogo()
+                .frame(width: 40, height: 40)
             VStack(alignment: .leading, spacing: 3) {
                 Text("SearcheXtra")
                     .font(.system(size: 15, weight: .semibold))
