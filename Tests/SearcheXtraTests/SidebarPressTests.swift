@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
-@testable import SearcheXtraeXtra
+@testable import SearcheXtra
 
 @MainActor
 final class SidebarPressTests: XCTestCase {
