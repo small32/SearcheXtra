@@ -5554,7 +5554,7 @@
   "profiles.deleteDetail": {"en":"Its windows close, its spaces go with their tabs and pins, and its cookies, sign-ins, history and bookmarks are erased from this Mac.","zh-Hans":"将关闭此配置的窗口，删除其空间、标签页和固定标签，并清除这台 Mac 上对应的 Cookie、登录状态、历史记录和书签。"},
   "bookmarks.upstream.emptyName": {"en":"Without a name, the bookmarks bar shows its icon alone.","zh-Hans":"不填写名称时，书签栏只显示图标。"},
   "bookmarks.upstream.editAddress": {"en":"Edit Address","zh-Hans":"编辑网址"},
-  "bookmarks.invalidPage": {"en":"SearcheXtraeXtra can’t open “{0}” as a page. Cancel keeps the address the bookmark has.","zh-Hans":"SearcheXtra 无法将“{0}”作为网页打开。取消将保留书签原来的网址。"},
+  "bookmarks.invalidPage": {"en":"SearcheXtra can’t open “{0}” as a page. Cancel keeps the address the bookmark has.","zh-Hans":"SearcheXtra 无法将“{0}”作为网页打开。取消将保留书签原来的网址。"},
   "import.undecrypted": {"en":" — {0} couldn't be decrypted with {1}'s key","zh-Hans":" — 有 {0} 个密码无法使用 {1} 的密钥解密"},
   "applePasswords.name": {"en":"Apple Passwords","zh-Hans":"Apple 密码"},
   "applePasswords.connectNamed": {"en":"Connect Apple Passwords…","zh-Hans":"连接 Apple 密码…"},
