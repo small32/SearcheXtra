@@ -13,7 +13,8 @@ while IFS= read -r test_class; do
   [[ "$test_class" == ExtensionScriptCatTests ]] && continue
   echo "=== $test_class ==="
   probe="interface-$(printf '%s' "$test_class" | tr '[:upper:]' '[:lower:]')-$$"
-  if ! SEARCH_PROBE="$probe" swift test "${flags[@]}" --skip-build --filter "SearcheXtraTests\.$test_class/"; then
+  if ! SEARCH_PROBE="$probe" python3 Tests/run-macos-test-class.py "$test_class" \
+    swift test "${flags[@]}" --skip-build --filter "SearcheXtraTests\.$test_class/"; then
     failed+=("$test_class")
   fi
 done <<< "$classes"

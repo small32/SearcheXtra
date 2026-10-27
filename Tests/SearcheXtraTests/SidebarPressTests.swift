@@ -14,6 +14,7 @@ final class SidebarPressTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
+        trace("START \(name)")
         Pins.load()
         previousPins = Pins.bySpace
         previousSession = Session.read(space: Space.firstID)
@@ -41,7 +42,20 @@ final class SidebarPressTests: XCTestCase {
             Session.write(now: true, space: Space.firstID, previousSession)
         }
         previousSession = nil
+        trace("END \(name)")
         try await super.tearDown()
+    }
+
+    private func trace(_ message: String) {
+        guard let path = ProcessInfo.processInfo.environment["SEARCH_NATIVE_TEST_TRACE"] else { return }
+        let data = Data((message + "\n").utf8)
+        if let file = FileHandle(forWritingAtPath: path) {
+            defer { try? file.close() }
+            _ = try? file.seekToEnd()
+            try? file.write(contentsOf: data)
+        } else {
+            try? data.write(to: URL(fileURLWithPath: path))
+        }
     }
 
     override class func setUp() {
