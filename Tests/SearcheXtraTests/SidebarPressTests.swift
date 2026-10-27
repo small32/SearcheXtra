@@ -372,12 +372,9 @@ final class SidebarPressTests: XCTestCase {
         let second = browser.tabs[1]
         let window = makeStripWindow(browser)
         try await settle()
-        let point = pillPoint(1)
-        // AppKit may track this click until release, as it does for the
-        // address field. Queue the release before synchronous dispatch.
-        NSApp.postEvent(try event(.leftMouseUp, at: point, in: window), atStart: false)
-        window.sendEvent(try event(.leftMouseDown, at: point, in: window))
-        try await settle()
+        XCTAssertNil(browser.editingTab)
+        try await send(.leftMouseDown, at: pillPoint(1), in: window)
+        try await send(.leftMouseUp, at: pillPoint(1), in: window)
         XCTAssertEqual(browser.activeID, second.id, "Watching the press for the pill to give must leave its click alone")
     }
 
