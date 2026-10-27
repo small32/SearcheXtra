@@ -70,17 +70,8 @@ enum NewTabPlace: String {
 }
 
 /// Which edge the tab column sits on when tabs are arranged in a sidebar.
-enum SidebarPosition: String, CaseIterable, Identifiable {
+enum SidebarPosition: String {
     case left, right
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .left: return L10n.text("Prefs.0638")
-        case .right: return L10n.text("Prefs.0639")
-        }
-    }
 }
 
 enum BookmarkBarOpening: String, CaseIterable, Identifiable {
@@ -151,8 +142,19 @@ final class Preferences: ObservableObject {
     @Published var roomyTabs: Bool {
         didSet { store.set(roomyTabs, forKey: "sidebar.roomy") }
     }
+    /// The column as icons only: each tab its site's mark, no titles, a
+    /// fixed narrow width, and nothing that grows under the pointer (idea
+    /// 413). Off unless asked for; Settings › Appearance › Tabs, Icons only.
+    @Published var sideIcons: Bool {
+        didSet { store.set(sideIcons, forKey: "sidebar.icons") }
+    }
+    /// Whether the column is showing as icons now: down a side, and asked for.
+    var iconColumn: Bool { sidebar && sideIcons }
+    /// The column's width as drawn: fixed with icons only, pulled by its
+    /// edge otherwise (the width pulled is kept for when titles come back).
+    var columnWidth: CGFloat { iconColumn ? Metrics.iconColumn : sideWidth }
     /// One tab's line in the column, and the size its title is set in.
-    var sideRow: CGFloat { roomyTabs ? 36 : 28 }
+    var sideRow: CGFloat { iconColumn ? Metrics.iconTile : roomyTabs ? 36 : 28 }
     var sideTitle: CGFloat { roomyTabs ? 14 : 12.5 }
     /// How wide the column is. Pulled by its edge, and remembered.
     @Published var sideWidth: CGFloat {
@@ -232,6 +234,11 @@ final class Preferences: ObservableObject {
     /// Off unless asked for.
     @Published var newTabAfterLast: Bool {
         didSet { store.set(newTabAfterLast, forKey: "tabs.newAfterLast") }
+    }
+    /// Closing the tab on screen goes back to the one viewed before it
+    /// rather than the neighbour (see Browser.close). Off unless asked for.
+    @Published var closeGoesBack: Bool {
+        didSet { store.set(closeGoesBack, forKey: "tabs.closeGoesBack") }
     }
     /// Where a new tab goes in the row. Next unless asked for.
     @Published var newTabPlace: NewTabPlace {
@@ -484,10 +491,6 @@ final class Preferences: ObservableObject {
         didSet { store.set(waitsForPlay, forKey: Preferences.waitsKey) }
     }
     nonisolated static let waitsKey = "media.click"
-    /// Translate Page in the page's right-click menu, on this Mac only
-    /// (Translate.swift).
-    /// Kept in user defaults; existing choices are preserved.
-    @Published var translatesPages = true
     /// The languages whose pages are translated as they open, chosen from
     /// the translated sign's menu (never from a private tab). None at first.
     @Published var translateAlways: Set<String> {
@@ -591,7 +594,12 @@ final class Preferences: ObservableObject {
         didSet { store.set(commandBar, forKey: "commandbar") }
     }
 
+    @Published var floatingNewTab: Bool {
+        didSet { store.set(floatingNewTab, forKey: "newtab.floating") }
+    }
+
     init() {
+        floatingNewTab = store.bool(forKey: "newtab.floating")
         pinNumberGoesBack = store.object(forKey: "pins.numberBack") as? Bool ?? true
         sitesInPanel = store.object(forKey: "panel.sites") as? Bool ?? true
         usesTabGroups = store.bool(forKey: "tabs.groups")
@@ -630,6 +638,7 @@ final class Preferences: ObservableObject {
         sidePosition = store.string(forKey: "sidebar.position").flatMap(SidebarPosition.init) ?? .left
         sideHides = store.bool(forKey: "sidebar.hides")
         roomyTabs = store.bool(forKey: "sidebar.roomy")
+        sideIcons = store.bool(forKey: "sidebar.icons")
         let width = store.object(forKey: "sidebar.width") as? Double ?? Double(Metrics.side)
         sideWidth = min(Metrics.sideMax, max(Metrics.sideMin, CGFloat(width)))
         cards = store.object(forKey: "layout.cards") as? Bool ?? true
@@ -647,6 +656,7 @@ final class Preferences: ObservableObject {
         sleepPace = SleepPace.chosen
         lazyTabs = store.bool(forKey: "tabs.lazy")
         newTabAfterLast = store.bool(forKey: "tabs.newAfterLast")
+        closeGoesBack = store.bool(forKey: "tabs.closeGoesBack")
         newTabPlace = store.string(forKey: "tabs.newPlace").flatMap(NewTabPlace.init(rawValue:)) ?? .next
         startsFresh = store.bool(forKey: Preferences.freshKey)
         confirmsQuit = store.bool(forKey: Preferences.confirmQuitKey)

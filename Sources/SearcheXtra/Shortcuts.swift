@@ -172,7 +172,7 @@ struct Command: Identifiable {
         Command("app.passwords", L10n.text("App.0184"), .app, KeyCombo("l", option: true)) { $0.managing = true },
 
         Command("file.newWindow", L10n.text("App.0114"), .file, KeyCombo("n")) { _ in Browsers.newWindow() },
-        Command("file.newTab", L10n.text("App.0115"), .file, KeyCombo("t")) { $0.newTab() },
+        Command("file.newTab", L10n.text("App.0115"), .file, KeyCombo("t")) { $0.launch() },
         Command("file.newPrivateTab", L10n.text("App.0116"), .file, KeyCombo("n", shift: true)) { $0.newShyTab() },
         Command("file.reopen", L10n.text("Browser.0337"), .file, KeyCombo("t", shift: true)) { $0.reopen() },
         Command("file.openAddress", L10n.text("App.0117"), .file, KeyCombo("l")) { $0.edit() },
@@ -180,6 +180,7 @@ struct Command: Identifiable {
         Command("file.closeWindow", L10n.text("upstream.closeWindow"), .file, KeyCombo("w", shift: true)) { $0.closeWindow() },
         Command("file.import", L10n.text("App.0118"), .file, nil) { $0.bringingIn = "" },
         Command("file.share", L10n.text("App.0120"), .file, nil) { $0.share() },
+        Command("file.savePage", L10n.text("upstream.88017ad.dd6300a9ca"), .file, nil) { $0.savePage() },
         Command("file.exportPDF", L10n.text("command.exportPDF"), .file, nil) { $0.exportPDF() },
         Command("file.print", L10n.text("App.0121"), .file, KeyCombo("p")) { $0.printPage() },
 
@@ -190,6 +191,10 @@ struct Command: Identifiable {
 
         Command("view.sidebar", L10n.text("App.0125"), .view, KeyCombo("s", shift: true)) { $0.toggleSidebar() },
         Command("view.fold", L10n.text("Shortcuts.0890"), .view, KeyCombo("s")) { $0.toggleFold() },
+        // Every tab group of the space at once, as Arc's folders (⌥⌘[ and ⌥⌘],
+        // beside ⌘[ and ⌘], which go back and forward).
+        Command("view.foldGroups", L10n.text("upstream.groups.foldAll"), .view, KeyCombo("[", option: true)) { $0.foldAllGroups(true) },
+        Command("view.unfoldGroups", L10n.text("upstream.groups.unfoldAll"), .view, KeyCombo("]", option: true)) { $0.foldAllGroups(false) },
         Command("view.reload", L10n.text("App.0131"), .view, KeyCombo("r")) { $0.reload() },
         Command("view.reloadOrigin", L10n.text("App.0132"), .view, KeyCombo("r", option: true)) { $0.reload(fromOrigin: true) },
         Command("view.reader", L10n.text("App.0133"), .view, KeyCombo("r", shift: true)) { $0.toggleReader() },

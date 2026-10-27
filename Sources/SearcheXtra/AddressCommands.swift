@@ -49,7 +49,7 @@ enum AddressCommand: CaseIterable, Equatable {
     func run(on browser: Browser) {
         switch self {
         case .settings: browser.tuning = true
-        case .newTab: browser.newTab()
+        case .newTab: browser.launch()
         case .newPrivateTab: browser.newShyTab()
         case .newSpace: browser.makingSpace = true
         case .bookmarks: browser.bookmarking = true

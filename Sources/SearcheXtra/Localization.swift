@@ -81,17 +81,8 @@ final class LanguageSettings: ObservableObject {
         selection = saved
     }
     func restart() {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/sh")
-        task.arguments = ["-c", "sleep 1; /usr/bin/open -n \"$1\"", "search-relaunch", Bundle.main.bundlePath]
-        if Store.testing {
-            // Relaunch probes inside their own world, including native menu language.
-            task.arguments = ["-c", "sleep 1; /usr/bin/open -n --env \"SEARCH_PROBE=$2\" \"$1\" --args -AppleLanguages \"$3\"",
-                              "search-relaunch", Bundle.main.bundlePath, Store.world ?? "test",
-                              "(\"\(InterfaceLanguage.resolve(selection))\")"]
-        }
-        task.environment = ProcessInfo.processInfo.environment
-        do { try task.run(); NSApp.terminate(nil) }
-        catch { NSSound.beep() }
+        // Use the updater's exit-aware relaunch, retaining the probe's menu language.
+        Updater.shared.relaunch(arguments: Store.testing
+            ? ["-AppleLanguages", "(\"\(InterfaceLanguage.resolve(selection))\")"] : [])
     }
 }

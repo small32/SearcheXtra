@@ -1,7 +1,5 @@
 {
   "upstream.closeWindow": {"en":"Close Window","zh-Hans":"关闭窗口"},
-  "upstream.keychainRefused": {"en":"The keychain refused it","zh-Hans":"钥匙串拒绝了访问"},
-  "upstream.engineSuggestionsWelcome": {"en":"Suggestions from your search engine as you type — off until you turn them on in Settings › Browsing.","zh-Hans":"输入时显示搜索引擎建议，可在“设置 → 浏览”中开启，默认关闭。"},
   "extensions.private.detail": {"en":"Each extension stays out of private tabs until you allow it in its details in the extension manager. One you allow can tell which tabs are private, but may still keep what you visit in them.","zh-Hans":"每个扩展默认无法访问无痕标签页，需在扩展管理器的详情中单独允许。获准的扩展可以识别无痕标签页，也可能保存其中的浏览记录。"},
   "extensions.private.allowed": {"en":"allowed in private tabs","zh-Hans":"已允许访问无痕标签页"},
   "extensions.private.unsupported": {"en":"Private Tabs Aren’t Supported","zh-Hans":"不支持无痕标签页"},
@@ -9,10 +7,6 @@
   "extensions.private.accessibility": {"en":"Allow {0} in private tabs","zh-Hans":"允许 {0} 访问无痕标签页"},
   "extensions.private.help": {"en":"Private tabs opened before any extension was allowed need reopening. Turned off, a script already running in one stops only when the page reloads.","zh-Hans":"在首次允许扩展前打开的无痕标签页需要重新打开。关闭权限后，已在运行的脚本会在页面重新加载后停止。"},
   "suggestions.title": {"en":"Suggestions from your search engine","zh-Hans":"搜索引擎输入建议"},
-  "suggestions.customDetail": {"en":"Your engine’s suggestions under the address field. A custom engine has none to give, so nothing is sent","zh-Hans":"在地址输入框下显示搜索引擎提供的建议。自定义搜索引擎不提供建议，因此不会发送输入内容。"},
-  "suggestions.detail": {"en":"What you type in the address field is sent to {0} as you type, and its suggestions show under it. Never from a private tab, and never an address","zh-Hans":"输入时将搜索词发送给 {0}，并在输入框下显示建议。无痕标签页和网址输入不会发送。"},
-  "pins.peek.title": {"en":"Pins stay on their site","zh-Hans":"固定标签页保留在原网站"},
-  "pins.peek.detail": {"en":"A link from a pinned tab to another site opens in a panel over it, keeping the pin on its page. Links within the site open as usual, and ⌘W returns the pin to its original page.","zh-Hans":"固定标签页中的跨网站链接会在预览面板中打开，固定页保留当前网页。站内链接照常打开，⌘W 则返回固定时的网址。"},
   "popups.blocked": {"en":"Pop-up blocked","zh-Hans":"已拦截弹出窗口"},
   "popups.blockedCount": {"en":"{0} pop-ups blocked","zh-Hans":"已拦截 {0} 个弹出窗口"},
   "popups.open": {"en":"Open {0}","zh-Hans":"打开 {0}"},
@@ -22,7 +16,6 @@
   "popups.savedHelp": {"en":"Settings › Privacy lists the sites you allow","zh-Hans":"可在“设置 → 隐私”中管理已允许的网站"},
   "popups.allowedHelp": {"en":"Can open pop-ups without a click","zh-Hans":"无需点击即可打开弹出窗口"},
   "popups.remove": {"en":"Remove","zh-Hans":"移除"},
-  "sync.peek.title": {"en":"Peek at a link with {0}","zh-Hans":"使用 {0} 预览链接"},
   "sync.peek.shift": {"en":"Shift-click","zh-Hans":"Shift 点按"},
   "sync.peek.optionShift": {"en":"Option-Shift-click","zh-Hans":"Option-Shift 点按"},
   "sync.peek.optionCommand": {"en":"Option-Command-click","zh-Hans":"Option-Command 点按"},
@@ -32,20 +25,11 @@
   "sync.tabs.week": {"en":"After a week","zh-Hans":"1 周后"},
   "sync.tabs.month": {"en":"After a month","zh-Hans":"1 个月后"},
   "sync.settings.dark": {"en":"Darken pages that stay light","zh-Hans":"将浅色网页转为深色"},
-  "sync.settings.dark.detail": {"en":"Sites with a dark look of their own already follow it; the rest are darkened too. ⇧⌘D for the site you're on, ⌥⇧⌘D to pause everywhere","zh-Hans":"保留网站自身的深色主题，其余浅色网页自动转为深色。⇧⌘D 切换当前网站，⌥⇧⌘D 暂停所有网站。"},
   "sync.settings.cards": {"en":"The page as a card","zh-Hans":"卡片式网页"},
-  "sync.settings.cards.detail": {"en":"A little room around the page, with rounded corners. Off, the page reaches the window's edges","zh-Hans":"在网页四周保留间距并显示圆角；关闭后网页延伸至窗口边缘。"},
   "sync.settings.roomy": {"en":"Roomier tabs","zh-Hans":"宽松标签页"},
-  "sync.settings.roomy.detail": {"en":"Taller rows and larger titles in the sidebar","zh-Hans":"增大侧边栏标签页的行高和标题字号。"},
-  "sync.settings.fast.detail": {"en":"Animations and scrolling in pages at up to 120 frames a second on a screen that can, instead of 60 as in Safari. Uses more battery, so On power keeps it to when the Mac is plugged in","zh-Hans":"在支持的屏幕上以最高 120 帧显示网页动画和滚动。耗电量较高，可选择仅在接通电源时启用。"},
-  "sync.settings.sleep.detail": {"en":"A tab left alone lets its page go and comes back where you left it. Pinned tabs, sound, calls and anything typed stay awake.","zh-Hans":"闲置标签页会释放网页内存，切换回来时恢复。当前空间的固定页、播放声音、通话和有未提交输入的网页保持唤醒。"},
-  "sync.settings.sleepPace": {"en":"How soon tabs sleep","zh-Hans":"标签页休眠时间"},
   "sync.settings.tabLife": {"en":"Close tabs you leave alone","zh-Hans":"自动关闭闲置标签页"},
-  "sync.settings.tabLife.detail": {"en":"Counted from when you last left the tab, while SearcheXtra is quit too. Pin a tab, name it or put it in a group to keep it; private tabs, sound, calls and anything typed stay. ⇧⌘T and History bring one back.","zh-Hans":"从上次离开标签页时计时，退出浏览器期间也计入。固定、命名或分组的标签页，以及无痕页、播放声音、通话或有未提交输入的网页会保留。可用 ⇧⌘T 或历史记录恢复。"},
   "sync.settings.keepAwake": {"en":"Keep selected sites awake","zh-Hans":"允许指定网站保持唤醒"},
-  "sync.settings.keepAwake.detail": {"en":"Adds Keep This Site Awake to the site card. Chosen sites use more memory: they neither sleep nor close automatically, even under memory pressure. Private choices last only in that tab.","zh-Hans":"在网站信息中显示“保持此网站唤醒”。指定网站不会自动休眠或关闭，包括内存不足时，因此会占用更多内存。无痕模式下的选择仅对当前标签页有效。"},
   "sync.settings.afterLast": {"en":"Leave a new tab when the last tab closes","zh-Hans":"关闭最后一个普通标签页后新建标签页"},
-  "sync.settings.afterLast.detail": {"en":"Close the last tab that isn't pinned and a new tab takes its place, ready for an address. Otherwise you land on a pinned tab.","zh-Hans":"关闭最后一个未固定的标签页后打开新的空白标签页；关闭此选项则切换至固定标签页。"},
   "sync.settings.newPlace": {"en":"New tab position","zh-Hans":"新标签页位置"},
   "sync.settings.newPlace.detail": {"en":"After current puts a link beside the tab you're on, and ⌘T's new tab at the end. Pins stay first; a link from a group stays in it.","zh-Hans":"“当前标签页之后”会将链接放在当前页旁，⌘T 打开的标签页放在末尾。固定页保持在前，分组中的链接保留在原组。"},
   "sync.settings.next": {"en":"After current","zh-Hans":"当前标签页之后"},
@@ -54,11 +38,7 @@
   "sync.settings.bottom": {"en":"Bottom","zh-Hans":"最下方"},
   "sync.settings.rightmost": {"en":"Rightmost","zh-Hans":"最右侧"},
   "sync.settings.sharedPins": {"en":"Pins in every space","zh-Hans":"跨空间共享固定标签页"},
-  "sync.settings.sharedPins.detail": {"en":"Keep a pin in every space: right-click it and choose Keep in Every Space. Each space signs in to it the way that space does.","zh-Hans":"右键点击固定标签页，选择“保留在所有空间中”。各空间仍使用自身的登录状态。"},
-  "sync.settings.pinsHome": {"en":"Pins go back home","zh-Hans":"固定标签页返回原网址"},
-  "sync.settings.pinsHome.detail": {"en":"As in Arc: a pinned tab closed with ⌘W, or left open when SearcheXtra quits, comes back at the page it was pinned at rather than wherever you went from there.","zh-Hans":"使用 ⌘W 关闭固定标签页或退出浏览器后，再次打开时回到固定时的网址。"},
   "sync.settings.switcherKeys": {"en":"Keys in the tab switcher","zh-Hans":"标签切换器快捷操作"},
-  "sync.settings.switcherKeys.detail": {"en":"With ⌃ still held in the ⌃Tab switcher, ⌃W closes the tab picked, ⌃R reloads it, ⌃M mutes it, and ⌃O takes a small window into your tabs.","zh-Hans":"在 ⌃Tab 切换器中继续按住 ⌃，使用 ⌃W 关闭所选标签页、⌃R 刷新、⌃M 静音，或用 ⌃O 将小窗口移入标签页。"},
   "passwords.count": {"en":"{0} passwords","zh-Hans":"{0} 个密码"},
   "passwords.removeCount": {"en":"Remove {0} Passwords?","zh-Hans":"删除 {0} 个密码？"},
   "passwords.removeAll.detail": {"en":"Only passwords saved by SearcheXtra will be removed from your keychain. Passwords in other apps, browsers and password managers are kept. This cannot be undone.","zh-Hans":"只会从钥匙串中删除 SearcheXtra 保存的密码，其他应用、浏览器和密码管理器中的密码会保留。此操作无法撤销。"},
@@ -82,7 +62,6 @@
   "sleep.pace.sooner.detail": {"en":"After ten minutes away.","zh-Hans":"闲置十分钟后休眠。"},
   "sleep.pinNotifications": {"en":"pinned, and its site may send notifications","zh-Hans":"固定标签页，且网站获准发送通知"},
   "sleep.siteKeptAwake": {"en":"kept awake for this site","zh-Hans":"此网站已设置为保持唤醒"},
-  "bookmarks.emptyName.detail": {"en":"Without a name, the bookmarks bar shows only the website icon.","zh-Hans":"名称留空时，书签栏仅显示网站图标。"},
   "import.passwordsUnsupported": {"en":"Passwords from {0} are not supported yet.","zh-Hans":"暂不支持导入 {0} 的密码。"},
   "import.chooseFolderHelp": {"en":"Choose a browser's data folder below to allow SearcheXtra to read it.","zh-Hans":"请在下方选择浏览器数据文件夹，以允许 SearcheXtra 读取。"},
   "import.chooseFolder": {"en":"Choose folder…","zh-Hans":"选择文件夹…"},
@@ -155,7 +134,6 @@
   "bookmarks.context.openTab": {"en":"Open in new tab","zh-Hans":"在新标签页中打开"},
   "bookmarks.context.openOneWindow": {"en":"Open in new window","zh-Hans":"在新窗口中打开"},
   "bookmarks.context.openOnePrivate": {"en":"Open in private window","zh-Hans":"在无痕窗口中打开"},
-  "bookmarks.context.edit": {"en":"Edit bookmark…","zh-Hans":"修改书签…"},
   "flowDrag.engine.google_translate": {"en":"Google Translate","zh-Hans":"Google 翻译"},
   "flowDrag.engine.bing_translate": {"en":"Bing Translate","zh-Hans":"Bing 翻译"},
   "flowDrag.engine.yahoo": {"en":"Yahoo!","zh-Hans":"Yahoo!"},
@@ -690,33 +668,9 @@
     "en": "Don't allow",
     "zh-Hans": "不允许"
   },
-  "App.0196": {
-    "en": "Update the password for {0} on {1}?",
-    "zh-Hans": "更新 {0} 上 {1} 的密码？"
-  },
-  "App.0197": {
-    "en": "Save this password for {0}?",
-    "zh-Hans": "保存 {0} 的密码？"
-  },
-  "App.0198": {
-    "en": "Save the password for {0} on {1}?",
-    "zh-Hans": "保存 {0} 上 {1} 的密码？"
-  },
-  "App.0199": {
-    "en": "Update",
-    "zh-Hans": "更新"
-  },
   "App.0200": {
     "en": "Save",
     "zh-Hans": "保存"
-  },
-  "App.0201": {
-    "en": "Not now",
-    "zh-Hans": "暂不"
-  },
-  "App.0202": {
-    "en": "Never here",
-    "zh-Hans": "此网站不再询问"
   },
   "App.0203": {
     "en": "Checking for Updates…",
@@ -737,10 +691,6 @@
   "App.0207": {
     "en": "Restart to Update",
     "zh-Hans": "重新启动以更新"
-  },
-  "App.0208": {
-    "en": "Downloading Update…",
-    "zh-Hans": "正在下载更新…"
   },
   "App.0209": {
     "en": "Download Update…",
@@ -801,10 +751,6 @@
   "Bookmarks.0223": {
     "en": "Rename Bookmark",
     "zh-Hans": "重命名书签"
-  },
-  "Bookmarks.0224": {
-    "en": "Rename",
-    "zh-Hans": "重命名"
   },
   "Bookmarks.0225": {
     "en": "Open",
@@ -910,14 +856,6 @@
     "en": "Bring in from",
     "zh-Hans": "导入来源"
   },
-  "Bookmarks.0251": {
-    "en": "Bring in…",
-    "zh-Hans": "导入…"
-  },
-  "Bookmarks.0252": {
-    "en": "File…",
-    "zh-Hans": "文件…"
-  },
   "Bookmarks.0253": {
     "en": "New Folder…",
     "zh-Hans": "新建文件夹…"
@@ -938,10 +876,6 @@
     "en": "Show in Folder",
     "zh-Hans": "在文件夹中显示"
   },
-  "Bookmarks.0258": {
-    "en": "Open",
-    "zh-Hans": "打开"
-  },
   "Bookmarks.0259": {
     "en": "Show in Folder",
     "zh-Hans": "在文件夹中显示"
@@ -951,10 +885,6 @@
     "zh-Hans": "顶层"
   },
   "Bookmarks.0261": {
-    "en": "Bookmarks",
-    "zh-Hans": "书签"
-  },
-  "Bookmarks.0262": {
     "en": "Bookmarks",
     "zh-Hans": "书签"
   },
@@ -1014,10 +944,6 @@
     "en": "{0} new bookmarks from {1}, {2} already here",
     "zh-Hans": "从 {0} 新增 {1} 个书签，{2} 个已存在"
   },
-  "Browser.0277": {
-    "en": "Cancelling…",
-    "zh-Hans": "正在取消…"
-  },
   "Browser.0278": {
     "en": "Search unavailable",
     "zh-Hans": "无法查找"
@@ -1074,10 +1000,6 @@
     "en": "Couldn't find the sign-in fields anymore",
     "zh-Hans": "无法找到登录输入框"
   },
-  "Browser.0292": {
-    "en": "The keychain refused it",
-    "zh-Hans": "钥匙串拒绝了此操作"
-  },
   "Browser.0293": {
     "en": "Kept for {0}",
     "zh-Hans": "已为 {0} 保存"
@@ -1085,10 +1007,6 @@
   "Browser.0294": {
     "en": "copy the password for {0}",
     "zh-Hans": "复制 {0} 的密码"
-  },
-  "Browser.0295": {
-    "en": "The keychain refused it",
-    "zh-Hans": "钥匙串拒绝了此操作"
   },
   "Browser.0296": {
     "en": "Password copied",
@@ -1322,10 +1240,6 @@
     "en": "Open",
     "zh-Hans": "打开"
   },
-  "Browser.0354": {
-    "en": "Cancel",
-    "zh-Hans": "取消"
-  },
   "Browser.0355": {
     "en": "This page",
     "zh-Hans": "此页面"
@@ -1338,15 +1252,7 @@
     "en": "camera",
     "zh-Hans": "摄像头"
   },
-  "Browser.0358": {
-    "en": "microphone",
-    "zh-Hans": "麦克风"
-  },
   "Browser.0359": {
-    "en": "camera and microphone",
-    "zh-Hans": "摄像头和麦克风"
-  },
-  "Browser.0360": {
     "en": "camera and microphone",
     "zh-Hans": "摄像头和麦克风"
   },
@@ -1382,19 +1288,7 @@
     "en": "Download finished",
     "zh-Hans": "下载完成"
   },
-  "Browser.0369": {
-    "en": "Saved {0}",
-    "zh-Hans": "已保存 {0}"
-  },
   "Browser.0370": {
-    "en": "Download failed",
-    "zh-Hans": "下载失败"
-  },
-  "Browser.0371": {
-    "en": "Saved {0}",
-    "zh-Hans": "已保存 {0}"
-  },
-  "Browser.0372": {
     "en": "Download failed",
     "zh-Hans": "下载失败"
   },
@@ -1413,22 +1307,6 @@
   "Dialogs.0376": {
     "en": "OK",
     "zh-Hans": "好"
-  },
-  "Dialogs.0377": {
-    "en": "OK",
-    "zh-Hans": "好"
-  },
-  "Dialogs.0378": {
-    "en": "Cancel",
-    "zh-Hans": "取消"
-  },
-  "Dialogs.0379": {
-    "en": "OK",
-    "zh-Hans": "好"
-  },
-  "Dialogs.0380": {
-    "en": "Cancel",
-    "zh-Hans": "取消"
   },
   "Dialogs.0381": {
     "en": "Choose a file for this page",
@@ -1469,10 +1347,6 @@
   "Dialogs.0390": {
     "en": "Sign In",
     "zh-Hans": "登录"
-  },
-  "Dialogs.0391": {
-    "en": "Cancel",
-    "zh-Hans": "取消"
   },
   "Dialogs.0392": {
     "en": "Name",
@@ -1561,14 +1435,6 @@
   "Extensions.0413": {
     "en": "{0} is installed, but WebKit couldn't start it",
     "zh-Hans": "{0} 已安装，但 WebKit 无法启动它"
-  },
-  "Extensions.0414": {
-    "en": "Show “{0}” in new tabs?",
-    "zh-Hans": "在新标签页中显示“{0}”？"
-  },
-  "Extensions.0415": {
-    "en": "It asked to replace the new tab page. You can change this later in Settings › Extensions.",
-    "zh-Hans": "此扩展请求替换新标签页。以后可在“设置 › 扩展”中更改。"
   },
   "Extensions.0416": {
     "en": "Keep It",
@@ -1762,10 +1628,6 @@
     "en": "Pin to Toolbar",
     "zh-Hans": "固定到工具栏"
   },
-  "Extensions.0464": {
-    "en": "Options…",
-    "zh-Hans": "选项…"
-  },
   "Extensions.0465": {
     "en": "Reload",
     "zh-Hans": "重新载入"
@@ -1801,10 +1663,6 @@
   "Extensions.0473": {
     "en": "Load Unpacked…",
     "zh-Hans": "加载解压后的扩展…"
-  },
-  "Extensions.0474": {
-    "en": "Manage Extensions…",
-    "zh-Hans": "管理扩展…"
   },
   "Extensions.0475": {
     "en": "Reload from its folder",
@@ -1858,18 +1716,6 @@
     "en": "Bring them over…",
     "zh-Hans": "导入扩展…"
   },
-  "ExtensionsUI.0488": {
-    "en": "Allow on private tabs",
-    "zh-Hans": "允许在无痕标签页中使用"
-  },
-  "ExtensionsUI.0489": {
-    "en": "Off by default - a private tab keeps nothing, extensions included",
-    "zh-Hans": "默认关闭。无痕标签页不会保留数据，扩展也不例外"
-  },
-  "ExtensionsUI.0490": {
-    "en": "No extensions yet.",
-    "zh-Hans": "暂无扩展。"
-  },
   "ExtensionsUI.0491": {
     "en": "Load an unpacked extension",
     "zh-Hans": "加载解压后的扩展"
@@ -1882,29 +1728,9 @@
     "en": "Choose…",
     "zh-Hans": "选择…"
   },
-  "ExtensionsUI.0494": {
-    "en": "Can record your screen — macOS asks what to share each time",
-    "zh-Hans": "可录制屏幕；macOS 每次都会询问共享范围"
-  },
   "ExtensionsUI.0495": {
     "en": "Remove",
     "zh-Hans": "移除"
-  },
-  "ExtensionsUI.0496": {
-    "en": "Unpin",
-    "zh-Hans": "取消固定"
-  },
-  "ExtensionsUI.0497": {
-    "en": "Pin to Toolbar",
-    "zh-Hans": "固定到工具栏"
-  },
-  "ExtensionsUI.0498": {
-    "en": "Stop in New Tabs",
-    "zh-Hans": "不在新标签页中显示"
-  },
-  "ExtensionsUI.0499": {
-    "en": "Show in New Tabs",
-    "zh-Hans": "在新标签页中显示"
   },
   "ExtensionsUI.0500": {
     "en": "Reload",
@@ -1917,30 +1743,6 @@
   "ExtensionsUI.0502": {
     "en": "Remove",
     "zh-Hans": "移除"
-  },
-  "ExtensionsUI.0503": {
-    "en": "From “{0}”",
-    "zh-Hans": "来自“{0}”"
-  },
-  "ExtensionsUI.0504": {
-    "en": "From a folder",
-    "zh-Hans": "来自文件夹"
-  },
-  "ExtensionsUI.0505": {
-    "en": "Version {0}",
-    "zh-Hans": "版本 {0}"
-  },
-  "ExtensionsUI.0506": {
-    "en": "Chrome Web Store",
-    "zh-Hans": "Chrome 应用商店"
-  },
-  "ExtensionsUI.0507": {
-    "en": "couldn't start",
-    "zh-Hans": "无法启动"
-  },
-  "ExtensionsUI.0508": {
-    "en": "shows in new tabs",
-    "zh-Hans": "显示在新标签页中"
   },
   "ExtensionsUI.0509": {
     "en": "Adding…",
@@ -2238,10 +2040,6 @@
     "en": "Spaces and pinned tabs",
     "zh-Hans": "空间和固定标签页"
   },
-  "ImportPanel.0583": {
-    "en": "{0}, {1} pinned — each a space here, its pinned tabs asleep in it, the favourites as pins",
-    "zh-Hans": "{0} 个空间、{1} 个固定标签页；导入后各空间独立保留，固定标签页处于休眠状态，收藏夹作为固定项"
-  },
   "ImportPanel.0584": {
     "en": "Extensions",
     "zh-Hans": "扩展"
@@ -2249,10 +2047,6 @@
   "ImportPanel.0585": {
     "en": "{0} found — installed fresh from the Chrome Web Store, you say yes to each one",
     "zh-Hans": "找到 {0} 个扩展，将从 Chrome 应用商店重新安装，每个都需确认"
-  },
-  "ImportPanel.0586": {
-    "en": "{0} is on this Mac, but nothing of it was found in {1}.",
-    "zh-Hans": "此 Mac 上有 {0}，但在 {1} 中未找到可导入的数据。"
   },
   "ImportPanel.0587": {
     "en": " ({0} skipped: no address)",
@@ -2710,10 +2504,6 @@
     "en": "Settings",
     "zh-Hans": "设置"
   },
-  "Settings.0701": {
-    "en": "Done   esc",
-    "zh-Hans": "完成   esc"
-  },
   "Settings.0702": {
     "en": "Open links from other apps",
     "zh-Hans": "打开其他应用中的链接"
@@ -2721,10 +2511,6 @@
   "Settings.0703": {
     "en": "SearcheXtra is the default browser on this Mac",
     "zh-Hans": "SearcheXtra 已是此 Mac 的默认浏览器"
-  },
-  "Settings.0704": {
-    "en": "Mail, Slack and the rest still send links elsewhere",
-    "zh-Hans": "邮件、Slack 等应用的链接仍在其他浏览器中打开"
   },
   "Settings.0705": {
     "en": "Make default",
@@ -2738,18 +2524,6 @@
     "en": "macOS didn't change it",
     "zh-Hans": "macOS 未更改默认浏览器"
   },
-  "Settings.0708": {
-    "en": "Bring things over",
-    "zh-Hans": "导入浏览器数据"
-  },
-  "Settings.0709": {
-    "en": "Bookmarks, history, passwords and extensions from another browser on this Mac, or from a file it exported",
-    "zh-Hans": "从此 Mac 上的其他浏览器或其导出的文件中导入书签、历史记录、密码和扩展"
-  },
-  "Settings.0710": {
-    "en": "Bring Things Over…",
-    "zh-Hans": "导入浏览器数据…"
-  },
   "Settings.0711": {
     "en": "Search with",
     "zh-Hans": "搜索引擎"
@@ -2758,49 +2532,17 @@
     "en": "Site shortcuts",
     "zh-Hans": "网站搜索快捷词"
   },
-  "Settings.0713": {
-    "en": "Add",
-    "zh-Hans": "添加"
-  },
-  "Settings.0714": {
-    "en": "Cancel",
-    "zh-Hans": "取消"
-  },
-  "Settings.0715": {
-    "en": "Save",
-    "zh-Hans": "保存"
-  },
   "Settings.0716": {
     "en": "Appearance",
     "zh-Hans": "外观"
-  },
-  "Settings.0717": {
-    "en": "Light, dark, or whatever the Mac is doing — pages follow it too",
-    "zh-Hans": "选择浅色、深色或跟随系统，网页也会采用相同外观"
   },
   "Settings.0718": {
     "en": "Page zoom",
     "zh-Hans": "页面缩放"
   },
-  "Settings.0719": {
-    "en": "Where every site starts. ⌘+ and ⌘− are still remembered for each site.",
-    "zh-Hans": "网站的默认缩放比例。通过 ⌘+ 和 ⌘− 设置的比例仍会按网站单独保存。"
-  },
   "Settings.0720": {
     "en": "Correct spelling as you type",
     "zh-Hans": "输入时自动纠正拼写"
-  },
-  "Settings.0721": {
-    "en": "macOS's autocorrect inside pages — the one that capitalises for you",
-    "zh-Hans": "在网页中使用 macOS 的自动纠正功能，包括自动大写"
-  },
-  "Settings.0722": {
-    "en": "Peek at a link with a shift-click",
-    "zh-Hans": "按住 Shift 单击预览链接"
-  },
-  "Settings.0723": {
-    "en": "Its page opens in a panel over the one you're reading. Escape puts it away; the other button keeps it as a tab",
-    "zh-Hans": "在当前页面上方打开预览面板。按 Esc 关闭，也可将预览保留为标签页"
   },
   "Settings.0724": {
     "en": "Open links from other apps in a small window",
@@ -2814,85 +2556,37 @@
     "en": "Address bar commands",
     "zh-Hans": "地址栏命令"
   },
-  "Settings.0727": {
-    "en": "A word like \"settings\" or \"new tab\", typed alone in the address field, goes there instead of searching for it",
-    "zh-Hans": "在地址栏单独输入“设置”或“新建标签页”等命令即可执行"
-  },
   "Settings.0728": {
     "en": "Show where links go",
     "zh-Hans": "显示链接地址"
-  },
-  "Settings.0729": {
-    "en": "Point at a link and its address shows at the bottom of the page",
-    "zh-Hans": "将指针移到链接上时，在页面底部显示目标地址"
   },
   "Settings.0730": {
     "en": "Scroll with the middle button",
     "zh-Hans": "使用鼠标中键滚动"
   },
-  "Settings.0731": {
-    "en": "Click the wheel on a page, then move the mouse up or down to scroll, as on Windows. Click again to stop",
-    "zh-Hans": "在页面中单击滚轮，再上下移动鼠标即可滚动。再次单击停止"
-  },
   "Settings.0732": {
     "en": "Pages at 120 Hz",
     "zh-Hans": "以 120 Hz 刷新页面"
-  },
-  "Settings.0733": {
-    "en": "Animations and scrolling in pages at up to 120 frames a second on a screen that can, instead of 60 as in Safari. Uses more battery. Open tabs follow when reloaded",
-    "zh-Hans": "在支持的屏幕上，网页动画和滚动最高可达每秒 120 帧，会增加耗电。已打开的标签页重新载入后生效"
   },
   "Settings.0734": {
     "en": "Hold a swipe to pick from history",
     "zh-Hans": "滑动后按住以选择历史页面"
   },
-  "Settings.0735": {
-    "en": "Swipe back or forward and keep your fingers down: the pages that way appear, and moving up or down picks one to go to",
-    "zh-Hans": "向后或向前滑动后保持手指按住，显示该方向的历史页面；上下移动选择要打开的页面"
-  },
   "Settings.0736": {
     "en": "Flick the floating video to a corner",
     "zh-Hans": "滑动画中画窗口使其贴边"
-  },
-  "Settings.0737": {
-    "en": "Two fingers on it send it to the corner or edge they point at, instead of pushing it along; a strong swipe at the side of the screen it is against tucks it in there, a sliver left to bring it back by. Dragging still puts it anywhere",
-    "zh-Hans": "在画中画窗口上用双指滑动，可将其移至对应的屏幕边缘或角落。向贴近的边缘快速滑动可收起窗口，点击露出的边缘可恢复。仍可自由拖动"
   },
   "Settings.0738": {
     "en": "Videos wait for a click",
     "zh-Hans": "点击后才播放视频"
   },
-  "Settings.0739": {
-    "en": "Videos don't start by themselves, even without sound; they play when you press play. Tabs already open follow from their next page, or once reloaded",
-    "zh-Hans": "视频不会自动播放，即使已静音。点击播放才开始。已打开的标签页在下次导航或刷新后生效"
-  },
-  "Settings.0740": {
-    "en": "Float the video when you switch tabs",
-    "zh-Hans": "切换标签页时自动开启画中画"
-  },
-  "Settings.0741": {
-    "en": "A video playing on YouTube and the like comes out into its floating window when you go to another tab, and back when you return. ⇧⌘P still floats one by hand",
-    "zh-Hans": "切换标签页时，YouTube 等网站正在播放的视频会进入画中画；返回时恢复。也可按 ⇧⌘P 手动开启"
-  },
   "Settings.0742": {
     "en": "Float the video when you switch apps",
     "zh-Hans": "切换应用时自动开启画中画"
   },
-  "Settings.0743": {
-    "en": "A video playing on the site you're on comes out into its floating window as another app comes to the front, and goes back into its tab when you return",
-    "zh-Hans": "切换到其他应用时，当前网站正在播放的视频会进入画中画；返回时恢复到标签页"
-  },
   "Settings.0744": {
     "en": "Let a script drive SearcheXtra",
     "zh-Hans": "允许脚本控制 SearcheXtra"
-  },
-  "Settings.0745": {
-    "en": "A local socket for testing. Its tabs open beside yours with a flask on them and never take over — see ./bench",
-    "zh-Hans": "启用用于测试的本地套接字。脚本标签页带有烧瓶图标，与普通标签页并列显示。详见 ./bench"
-  },
-  "Settings.0746": {
-    "en": "A word before your search goes straight to that site, whatever engine you've picked — \"yt cats\" to YouTube",
-    "zh-Hans": "在搜索词前加上快捷词即可搜索指定网站，例如“yt cats”会在 YouTube 搜索"
   },
   "Settings.0747": {
     "en": "A word, then the site's search address with %s where the words go",
@@ -2922,30 +2616,6 @@
     "en": "Beside the window's buttons, before the tabs",
     "zh-Hans": "位于窗口按钮旁、标签页之前"
   },
-  "Settings.0754": {
-    "en": "Tabs in a sidebar",
-    "zh-Hans": "在侧边栏显示标签页"
-  },
-  "Settings.0755": {
-    "en": "Down the {0} instead of across the top. Pull its edge to make it wider; double-click the edge to reset.",
-    "zh-Hans": "在{0}竖排显示标签页。拖动边缘调整宽度，双击边缘恢复默认。"
-  },
-  "Settings.0756": {
-    "en": "Sidebar position",
-    "zh-Hans": "侧边栏位置"
-  },
-  "Settings.0757": {
-    "en": "Tabs down the {0} edge of the window",
-    "zh-Hans": "标签页显示在窗口{0}"
-  },
-  "Settings.0758": {
-    "en": "Hide the sidebar until the pointer reaches the edge",
-    "zh-Hans": "指针移至边缘时才显示侧边栏"
-  },
-  "Settings.0759": {
-    "en": "The page takes the whole window; push against its {0} edge for the tabs. ⌘S keeps them out.",
-    "zh-Hans": "页面占满窗口；将指针移至{0}边缘显示标签页。按 ⌘S 保持侧边栏展开。"
-  },
   "Settings.0760": {
     "en": "Tabs show",
     "zh-Hans": "标签页显示"
@@ -2958,85 +2628,41 @@
     "en": "Show the bookmarks bar",
     "zh-Hans": "显示书签栏"
   },
-  "Settings.0763": {
-    "en": "Your bookmarks in a row above the page, folders opening as menus. It folds away with the tabs",
-    "zh-Hans": "在页面上方显示书签，文件夹以菜单展开。书签栏会随标签栏一起收起"
-  },
   "Settings.0764": {
     "en": "Show how far you've read",
     "zh-Hans": "显示阅读进度"
-  },
-  "Settings.0765": {
-    "en": "The tab you're on fills with grey as you scroll down the page",
-    "zh-Hans": "向下滚动时，当前标签页逐渐填充灰色以显示进度"
   },
   "Settings.0766": {
     "en": "Sleep tabs you aren't using",
     "zh-Hans": "休眠闲置标签页"
   },
-  "Settings.0767": {
-    "en": "After half an hour away they come back where you left them. Pinned tabs, sound, calls and anything typed stay awake.",
-    "zh-Hans": "闲置半小时后休眠，再次打开时恢复原位置。固定标签页、音频、通话和有输入内容的页面保持活跃。"
-  },
   "Settings.0768": {
     "en": "Load background tabs when you go to them",
     "zh-Hans": "切换到后台标签页时才加载"
-  },
-  "Settings.0769": {
-    "en": "A link opened behind the page, with ⌘-click or the middle button, or a batch of links from another app, waits until you go to its tab. ⇧⌘-click still takes you there at once.",
-    "zh-Hans": "通过 ⌘ 单击、鼠标中键或其他应用批量打开的后台链接，会等到切换到对应标签页时才加载。⇧⌘ 单击仍会立即打开。"
   },
   "Settings.0770": {
     "en": "Search a site from the address field",
     "zh-Hans": "在地址栏搜索网站"
   },
-  "Settings.0771": {
-    "en": "Type the start of a site's name, like red or yout, then Tab, and what you type next searches that site. Sites you visit that offer a search join the list.",
-    "zh-Hans": "输入网站名称的开头，如 red 或 yout，再按 Tab，即可在该网站搜索。访问过且支持搜索的网站会加入列表。"
-  },
   "Settings.0772": {
     "en": "Start with a fresh window",
     "zh-Hans": "启动时打开全新窗口"
-  },
-  "Settings.0773": {
-    "en": "Each time SearcheXtra opens, your pinned tabs are there and last time's other tabs aren't.",
-    "zh-Hans": "每次启动 SearcheXtra 时保留固定标签页，不恢复上次的其他标签页。"
   },
   "Settings.0774": {
     "en": "Spaces",
     "zh-Hans": "空间"
   },
-  "Settings.0775": {
-    "en": "Separate sets of tabs, signed in where the others are or starting afresh, switched with ⌃1–⌃9, two fingers sideways over the column, or the space's icon. Mission Control's own ⌃1–⌃9, if you turned them on, take those keys first.",
-    "zh-Hans": "将标签页分为不同空间，可共享登录状态或独立登录。用 ⌃1–⌃9、在侧边栏双指横向滑动或点击空间图标切换。若启用了调度中心的同名快捷键，系统会优先处理。"
-  },
   "Settings.0776": {
     "en": "Tab groups",
     "zh-Hans": "标签页分组"
-  },
-  "Settings.0777": {
-    "en": "Named sections in the sidebar. Right-click a tab to start a group; click its heading to hide or show its tabs.",
-    "zh-Hans": "在侧边栏中按名称分组。右键点击标签页创建分组，点击组标题展开或收起。"
   },
   "Settings.0778": {
     "en": "Pinned rows",
     "zh-Hans": "以列表显示固定标签页"
   },
-  "Settings.0779": {
-    "en": "As in Arc: pins as squares for the sites you live in, pins as rows under them for pages you keep, and a line over the rest with Clear. Right-click a tab to pin it as a row.",
-    "zh-Hans": "类似 Arc：常用网站固定为方块，保留页面固定为下方列表，其余标签页上方显示“清除”。右键点击标签页可将其固定为列表项。"
-  },
   "Settings.0780": {
     "en": "Split View",
     "zh-Hans": "分屏浏览"
-  },
-  "Settings.0781": {
-    "en": "Show two tabs side by side. Drag a tab onto a page to pair them.",
-    "zh-Hans": "并排显示两个标签页。将标签页拖到页面上即可组合。"
-  },
-  "Settings.0782": {
-    "en": "{0} does the saving — it asked SearcheXtra not to offer",
-    "zh-Hans": "{0} 正在管理密码，已要求 SearcheXtra 停止询问保存"
   },
   "Settings.0783": {
     "en": "Asked once per site, never again for a site you refuse",
@@ -3062,21 +2688,9 @@
     "en": "Fill in sign-ins",
     "zh-Hans": "自动填充登录信息"
   },
-  "Settings.0789": {
-    "en": "Click a sign-in box and the accounts kept for the site hang from it",
-    "zh-Hans": "点击登录输入框时，显示此网站已保存的账户"
-  },
   "Settings.0790": {
     "en": "Offer passkeys",
     "zh-Hans": "启用通行密钥"
-  },
-  "Settings.0791": {
-    "en": "Needs an Apple entitlement this build doesn't have — off keeps sites to the password",
-    "zh-Hans": "当前构建缺少 Apple 所需的授权；关闭后网站仍使用密码登录"
-  },
-  "Settings.0792": {
-    "en": "macOS was told no — System Settings › Privacy & Security › Passkeys Access for Web Browsers",
-    "zh-Hans": "macOS 已拒绝访问；可在“系统设置 › 隐私与安全性 › 网页浏览器的通行密钥访问”中更改"
   },
   "Settings.0793": {
     "en": "Touch ID or an iCloud passkey, on sites that offer one",
@@ -3098,18 +2712,6 @@
     "en": "Every site can ask again",
     "zh-Hans": "所有网站均可再次询问"
   },
-  "Settings.0798": {
-    "en": "Bring yours in",
-    "zh-Hans": "导入密码"
-  },
-  "Settings.0799": {
-    "en": "From another browser on this Mac — nothing leaves it",
-    "zh-Hans": "从此 Mac 上的其他浏览器导入，数据不会离开本机"
-  },
-  "Settings.0800": {
-    "en": "Import…",
-    "zh-Hans": "导入…"
-  },
   "Settings.0801": {
     "en": "Save to",
     "zh-Hans": "保存位置"
@@ -3126,10 +2728,6 @@
     "en": "Always show the downloads button",
     "zh-Hans": "始终显示下载按钮"
   },
-  "Settings.0805": {
-    "en": "Beside the other buttons, even with nothing downloading. Off, it shows only while a file comes in",
-    "zh-Hans": "没有正在下载的文件时也显示下载按钮。关闭后仅在下载过程中显示"
-  },
   "Settings.0806": {
     "en": "Block ads and trackers",
     "zh-Hans": "拦截广告和跟踪器"
@@ -3137,10 +2735,6 @@
   "Settings.0807": {
     "en": "Third parties whose only job is to watch",
     "zh-Hans": "拦截用于跟踪浏览行为的第三方内容"
-  },
-  "Settings.0808": {
-    "en": "Nothing is being blocked until this clears — try again, or restart SearcheXtra",
-    "zh-Hans": "问题解决前不会拦截任何内容。请重试或重新启动 SearcheXtra"
   },
   "Settings.0809": {
     "en": "Try again",
@@ -3150,25 +2744,13 @@
     "en": "Block on {0}",
     "zh-Hans": "在 {0} 上拦截"
   },
-  "Settings.0811": {
-    "en": "Turn off here if the site breaks — the page reloads",
-    "zh-Hans": "若网站异常，可在此关闭拦截；页面会重新载入"
-  },
   "Settings.0812": {
     "en": "Prevent cross-site tracking",
     "zh-Hans": "阻止跨网站跟踪"
   },
-  "Settings.0813": {
-    "en": "As in Safari. Off, sites you rarely open keep their sign-ins, and trackers inside other sites can follow you across them again, as in Chrome. Private tabs keep it on",
-    "zh-Hans": "与 Safari 类似。关闭后，较少访问的网站会保留登录状态，第三方跟踪器也能跨网站跟踪。无痕标签页始终开启此功能"
-  },
   "Settings.0814": {
     "en": "Camera, microphone, location and notifications",
     "zh-Hans": "摄像头、麦克风、位置和通知"
-  },
-  "Settings.0815": {
-    "en": "What each site was allowed or refused, and the sites whose videos don't float",
-    "zh-Hans": "各网站的允许或拒绝记录，以及禁用画中画的网站"
   },
   "Settings.0816": {
     "en": "Forget choices",
@@ -3178,45 +2760,9 @@
     "en": "Let sites ask to send notifications",
     "zh-Hans": "允许网站请求发送通知"
   },
-  "Settings.0818": {
-    "en": "A site asks on a card over its page, and only one you allow reaches your Mac's notifications. Private tabs are never asked",
-    "zh-Hans": "网站会在页面上方请求权限，只有获准的网站才能发送 Mac 通知。无痕标签页不会询问"
-  },
-  "Settings.0819": {
-    "en": "History",
-    "zh-Hans": "历史记录"
-  },
   "Settings.0820": {
     "en": "Every address you have been to",
     "zh-Hans": "访问过的所有地址"
-  },
-  "Settings.0821": {
-    "en": "Clear",
-    "zh-Hans": "清除"
-  },
-  "Settings.0822": {
-    "en": "Cookies and sign-ins",
-    "zh-Hans": "Cookie 和登录状态"
-  },
-  "Settings.0823": {
-    "en": "Signs you out of every site",
-    "zh-Hans": "退出所有网站的登录"
-  },
-  "Settings.0824": {
-    "en": "Sign out of everything",
-    "zh-Hans": "退出所有网站"
-  },
-  "Settings.0825": {
-    "en": "Cache",
-    "zh-Hans": "缓存"
-  },
-  "Settings.0826": {
-    "en": "Only what was fetched to draw pages",
-    "zh-Hans": "仅用于显示页面的缓存内容"
-  },
-  "Settings.0827": {
-    "en": "Clear",
-    "zh-Hans": "清除"
   },
   "Settings.0828": {
     "en": "Based on Office Commun's Search · version {0}",
@@ -3225,10 +2771,6 @@
   "Settings.0829": {
     "en": "Install updates on its own",
     "zh-Hans": "自动安装更新"
-  },
-  "Settings.0830": {
-    "en": "Off, SearcheXtra still looks every hour and tells you, and installs only when you press Install",
-    "zh-Hans": "关闭后，SearcheXtra 仍会每小时检查并通知更新，点击“安装”后才会安装"
   },
   "Settings.0831": {
     "en": "Found something wrong?",
@@ -3254,53 +2796,9 @@
     "en": "What's New…",
     "zh-Hans": "更新内容…"
   },
-  "Settings.0837": {
-    "en": "Address",
-    "zh-Hans": "地址栏"
-  },
-  "Settings.0838": {
-    "en": "Switch tab",
-    "zh-Hans": "切换标签页"
-  },
-  "Settings.0839": {
-    "en": "New, close, reopen tab",
-    "zh-Hans": "新建、关闭、重新打开标签页"
-  },
-  "Settings.0840": {
-    "en": "Paste and go",
-    "zh-Hans": "粘贴并前往"
-  },
-  "Settings.0841": {
-    "en": "Copy address",
-    "zh-Hans": "复制地址"
-  },
-  "Settings.0842": {
-    "en": "Next tab, a tab by its place",
-    "zh-Hans": "切换到下一个标签页，或按位置切换"
-  },
-  "Settings.0843": {
-    "en": "Tabs in a sidebar",
-    "zh-Hans": "在侧边栏显示标签页"
-  },
-  "Settings.0844": {
-    "en": "Fold the sidebar away",
-    "zh-Hans": "收起侧边栏"
-  },
   "Settings.0845": {
     "en": "Reading mode",
     "zh-Hans": "阅读模式"
-  },
-  "Settings.0846": {
-    "en": "Hide something on this site",
-    "zh-Hans": "隐藏网站元素"
-  },
-  "Settings.0847": {
-    "en": "Float the video",
-    "zh-Hans": "画中画"
-  },
-  "Settings.0848": {
-    "en": "Clear browsing data",
-    "zh-Hans": "清除浏览数据"
   },
   "Settings.0849": {
     "en": "Updates",
@@ -3318,25 +2816,13 @@
     "en": "SearcheXtra {0} is out",
     "zh-Hans": "SearcheXtra {0} 已发布"
   },
-  "Settings.0853": {
-    "en": "Checked {0} — every hour on its own",
-    "zh-Hans": "检查时间：{0}；每小时自动检查"
-  },
   "Settings.0854": {
     "en": "Checked every hour on its own",
     "zh-Hans": "每小时自动检查"
   },
-  "Settings.0855": {
-    "en": "Quietly, in the background — nothing you have set is touched",
-    "zh-Hans": "在后台下载，不会更改已有设置"
-  },
   "Settings.0856": {
     "en": "It's there the next time you open SearcheXtra",
     "zh-Hans": "下次启动 SearcheXtra 时生效"
-  },
-  "Settings.0857": {
-    "en": "Download the update from GitHub Releases",
-    "zh-Hans": "从 GitHub Release 下载更新"
   },
   "Settings.0858": {
     "en": "Checked and put in place when you press Install",
@@ -3382,10 +2868,6 @@
     "en": "Can send notifications",
     "zh-Hans": "允许发送通知"
   },
-  "Settings.0869": {
-    "en": "Remove",
-    "zh-Hans": "移除"
-  },
   "Shield.0870": {
     "en": "Couldn't build the block list",
     "zh-Hans": "无法生成拦截列表"
@@ -3402,221 +2884,13 @@
     "en": "Space",
     "zh-Hans": "空格"
   },
-  "Shortcuts.0874": {
-    "en": "Settings…",
-    "zh-Hans": "设置…"
-  },
-  "Shortcuts.0875": {
-    "en": "Welcome…",
-    "zh-Hans": "欢迎使用…"
-  },
-  "Shortcuts.0876": {
-    "en": "Passwords…",
-    "zh-Hans": "密码…"
-  },
-  "Shortcuts.0877": {
-    "en": "New Window",
-    "zh-Hans": "新建窗口"
-  },
-  "Shortcuts.0878": {
-    "en": "New Tab",
-    "zh-Hans": "新建标签页"
-  },
-  "Shortcuts.0879": {
-    "en": "New Private Tab",
-    "zh-Hans": "新建无痕标签页"
-  },
-  "Shortcuts.0880": {
-    "en": "Reopen Closed Tab",
-    "zh-Hans": "重新打开关闭的标签页"
-  },
-  "Shortcuts.0881": {
-    "en": "Open Address…",
-    "zh-Hans": "打开地址…"
-  },
-  "Shortcuts.0882": {
-    "en": "Close Tab",
-    "zh-Hans": "关闭标签页"
-  },
-  "Shortcuts.0883": {
-    "en": "Bring Things Over…",
-    "zh-Hans": "导入浏览器数据…"
-  },
-  "Shortcuts.0884": {
-    "en": "Share…",
-    "zh-Hans": "共享…"
-  },
-  "Shortcuts.0885": {
-    "en": "Print…",
-    "zh-Hans": "打印…"
-  },
-  "Shortcuts.0886": {
-    "en": "Find on Page…",
-    "zh-Hans": "在页面中查找…"
-  },
-  "Shortcuts.0887": {
-    "en": "Find Next",
-    "zh-Hans": "查找下一个"
-  },
-  "Shortcuts.0888": {
-    "en": "Find Previous",
-    "zh-Hans": "查找上一个"
-  },
-  "Shortcuts.0889": {
-    "en": "Show Tabs in Sidebar",
-    "zh-Hans": "在侧边栏显示标签页"
-  },
   "Shortcuts.0890": {
     "en": "Hide Sidebar or Tab Bar",
     "zh-Hans": "隐藏侧边栏或标签栏"
   },
-  "Shortcuts.0891": {
-    "en": "Reload Page",
-    "zh-Hans": "重新载入页面"
-  },
-  "Shortcuts.0892": {
-    "en": "Reload Page From Origin",
-    "zh-Hans": "从源站重新载入页面"
-  },
-  "Shortcuts.0893": {
-    "en": "Reading Mode",
-    "zh-Hans": "阅读模式"
-  },
-  "Shortcuts.0894": {
-    "en": "Float Video",
-    "zh-Hans": "画中画"
-  },
-  "Shortcuts.0897": {
-    "en": "Hide Elements…",
-    "zh-Hans": "隐藏页面元素…"
-  },
-  "Shortcuts.0898": {
-    "en": "Hidden on This Site…",
-    "zh-Hans": "此网站隐藏的元素…"
-  },
-  "Shortcuts.0899": {
-    "en": "Zoom In",
-    "zh-Hans": "放大"
-  },
-  "Shortcuts.0900": {
-    "en": "Zoom Out",
-    "zh-Hans": "缩小"
-  },
-  "Shortcuts.0901": {
-    "en": "Actual Size",
-    "zh-Hans": "实际大小"
-  },
-  "Shortcuts.0902": {
-    "en": "Web Inspector",
-    "zh-Hans": "网页检查器"
-  },
-  "Shortcuts.0903": {
-    "en": "JavaScript Console",
-    "zh-Hans": "JavaScript 控制台"
-  },
-  "Shortcuts.0904": {
-    "en": "Inspect Element",
-    "zh-Hans": "检查元素"
-  },
-  "Shortcuts.0905": {
-    "en": "Back",
-    "zh-Hans": "后退"
-  },
-  "Shortcuts.0906": {
-    "en": "Forward",
-    "zh-Hans": "前进"
-  },
-  "Shortcuts.0907": {
-    "en": "Next Tab",
-    "zh-Hans": "下一个标签页"
-  },
-  "Shortcuts.0908": {
-    "en": "Previous Tab",
-    "zh-Hans": "上一个标签页"
-  },
-  "Shortcuts.0909": {
-    "en": "Search Tabs…",
-    "zh-Hans": "搜索标签页…"
-  },
-  "Shortcuts.0910": {
-    "en": "Split Current Page",
-    "zh-Hans": "拆分当前页面"
-  },
-  "Shortcuts.0911": {
-    "en": "Focus Left Page",
-    "zh-Hans": "切换到左侧页面"
-  },
-  "Shortcuts.0912": {
-    "en": "Focus Right Page",
-    "zh-Hans": "切换到右侧页面"
-  },
   "Shortcuts.0913": {
     "en": "Focus Other Page",
     "zh-Hans": "切换到另一侧页面"
-  },
-  "Shortcuts.0914": {
-    "en": "Swap Pages",
-    "zh-Hans": "交换页面"
-  },
-  "Shortcuts.0915": {
-    "en": "Separate Split Tabs",
-    "zh-Hans": "分离分屏标签页"
-  },
-  "Shortcuts.0916": {
-    "en": "Rename Tab",
-    "zh-Hans": "重命名标签页"
-  },
-  "Shortcuts.0917": {
-    "en": "Duplicate Tab",
-    "zh-Hans": "复制标签页"
-  },
-  "Shortcuts.0918": {
-    "en": "Copy Address",
-    "zh-Hans": "复制地址"
-  },
-  "Shortcuts.0919": {
-    "en": "Copy as Markdown Link",
-    "zh-Hans": "复制为 Markdown 链接"
-  },
-  "Shortcuts.0920": {
-    "en": "Paste and Go",
-    "zh-Hans": "粘贴并前往"
-  },
-  "Shortcuts.0921": {
-    "en": "Close Other Tabs",
-    "zh-Hans": "关闭其他标签页"
-  },
-  "Shortcuts.0922": {
-    "en": "Stop Sound in Tab",
-    "zh-Hans": "停止标签页声音"
-  },
-  "Shortcuts.0923": {
-    "en": "Add This Page",
-    "zh-Hans": "添加此页面"
-  },
-  "Shortcuts.0924": {
-    "en": "Show Bookmarks…",
-    "zh-Hans": "显示书签…"
-  },
-  "Shortcuts.0925": {
-    "en": "Show Bookmarks Bar",
-    "zh-Hans": "显示书签栏"
-  },
-  "Shortcuts.0926": {
-    "en": "Show History…",
-    "zh-Hans": "显示历史记录…"
-  },
-  "Shortcuts.0927": {
-    "en": "Downloads…",
-    "zh-Hans": "下载…"
-  },
-  "Shortcuts.0928": {
-    "en": "Clear Browsing Data…",
-    "zh-Hans": "清除浏览数据…"
-  },
-  "Shortcuts.0929": {
-    "en": "Clear History",
-    "zh-Hans": "清除历史记录"
   },
   "ShortcutsPage.0930": {
     "en": "Search commands or keys",
@@ -3637,18 +2911,6 @@
   "ShortcutsPage.0934": {
     "en": "Reset All to Defaults",
     "zh-Hans": "全部恢复默认"
-  },
-  "ShortcutsPage.0935": {
-    "en": "Extensions",
-    "zh-Hans": "扩展"
-  },
-  "ShortcutsPage.0936": {
-    "en": "Clear Shortcut",
-    "zh-Hans": "清除快捷键"
-  },
-  "ShortcutsPage.0937": {
-    "en": "Reset to Default",
-    "zh-Hans": "恢复默认"
   },
   "ShortcutsPage.0938": {
     "en": "Used by {0} — press again",
@@ -3671,10 +2933,6 @@
     "zh-Hans": "无法更改"
   },
   "ShortcutsPage.0943": {
-    "en": "Not for an extension",
-    "zh-Hans": "扩展不可使用此快捷键"
-  },
-  "ShortcutsPage.0944": {
     "en": "Not for an extension",
     "zh-Hans": "扩展不可使用此快捷键"
   },
@@ -3705,18 +2963,6 @@
   "Side.0951": {
     "en": "Mute Tab",
     "zh-Hans": "标签页静音"
-  },
-  "SiteCard.0952": {
-    "en": "File",
-    "zh-Hans": "文件"
-  },
-  "SiteCard.0953": {
-    "en": "Copy Address",
-    "zh-Hans": "复制地址"
-  },
-  "SiteCard.0954": {
-    "en": "Print…",
-    "zh-Hans": "打印…"
   },
   "SiteCard.0955": {
     "en": "Zoom",
@@ -3754,10 +3000,6 @@
     "en": "Show Certificate…",
     "zh-Hans": "显示证书…"
   },
-  "SiteCard.0964": {
-    "en": "Back",
-    "zh-Hans": "后退"
-  },
   "SiteCard.0965": {
     "en": "Connection is not secure",
     "zh-Hans": "连接不安全"
@@ -3781,10 +3023,6 @@
   "SiteCard.0970": {
     "en": "Your information (for example, passwords or credit card numbers) is private when it is sent to this site.",
     "zh-Hans": "你的信息（如密码或信用卡号）在发送到此网站时会受到加密保护。"
-  },
-  "SiteCard.0971": {
-    "en": "Connection is not secure",
-    "zh-Hans": "连接不安全"
   },
   "SiteCard.0972": {
     "en": "Don't enter passwords or credit card numbers here: anything sent to this site can be read on the way.",
@@ -3930,10 +3168,6 @@
     "en": "Violet",
     "zh-Hans": "紫色"
   },
-  "Spaces.1008": {
-    "en": "camera",
-    "zh-Hans": "摄像头"
-  },
   "Spaces.1009": {
     "en": "Work",
     "zh-Hans": "工作"
@@ -4033,10 +3267,6 @@
   "Spaces.1033": {
     "en": "{0} — ⌃1–⌃9, or two fingers {1} over the tabs, to switch",
     "zh-Hans": "{0} — 按 ⌃1–⌃9 或在标签栏上双指{1}滑动切换"
-  },
-  "Spaces.1034": {
-    "en": "New Space…",
-    "zh-Hans": "新建空间…"
   },
   "Spaces.1035": {
     "en": "Rename “{0}”…",
@@ -4494,33 +3724,17 @@
     "en": "No other browser found on this Mac — nothing to bring.",
     "zh-Hans": "此 Mac 上未找到其他浏览器，暂无可导入的数据。"
   },
-  "Welcome.1150": {
-    "en": "{0} is on this Mac, but nothing of it was found in {1}.",
-    "zh-Hans": "此 Mac 上有 {0}，但在 {1} 中未找到可导入的数据。"
-  },
   "Welcome.1151": {
     "en": "From {0}",
     "zh-Hans": "来自 {0}"
-  },
-  "Welcome.1152": {
-    "en": "Passwords",
-    "zh-Hans": "密码"
   },
   "Welcome.1153": {
     "en": "macOS will ask once for that browser's keychain key",
     "zh-Hans": "macOS 会请求一次访问该浏览器的钥匙串密钥"
   },
-  "Welcome.1154": {
-    "en": "Bookmarks",
-    "zh-Hans": "书签"
-  },
   "Welcome.1155": {
     "en": "Folders and all, behind the bookmark button",
     "zh-Hans": "包括文件夹，可通过书签按钮查看"
-  },
-  "Welcome.1156": {
-    "en": "History",
-    "zh-Hans": "历史记录"
   },
   "Welcome.1157": {
     "en": "The last few thousand places, for finishing addresses",
@@ -4590,26 +3804,6 @@
     "en": "Every open tab, by name.",
     "zh-Hans": "按名称查找已打开的标签页。"
   },
-  "Welcome.1174": {
-    "en": "Settings, including passwords and updates.",
-    "zh-Hans": "打开设置，包括密码和更新。"
-  },
-  "Welcome.1175": {
-    "en": "Spaces: separate tabs and sign-ins. Turn them on in Settings › Spaces.",
-    "zh-Hans": "空间可分别管理标签页和登录状态。在“设置 › 空间”中启用。"
-  },
-  "Welcome.1176": {
-    "en": "Split a page in two; ⌃⌘← and ⌃⌘→ go from one page to the other. Turn Split View on in Settings › Appearance.",
-    "zh-Hans": "分屏显示两个页面，用 ⌃⌘← 和 ⌃⌘→ 切换。在“设置 › 外观”中启用分屏浏览。"
-  },
-  "Welcome.1177": {
-    "en": "Links from other apps can open in a small window. Settings › Browsing.",
-    "zh-Hans": "其他应用的链接可在小窗口中打开。在“设置 › 浏览”中启用。"
-  },
-  "Welcome.1179": {
-    "en": "Back",
-    "zh-Hans": "后退"
-  },
   "Welcome.1180": {
     "en": "Skip",
     "zh-Hans": "跳过"
@@ -4646,37 +3840,17 @@
     "en": "{0} places",
     "zh-Hans": "{0} 条浏览记录"
   },
-  "WhatsNew.1191": {
-    "en": "Split View",
-    "zh-Hans": "分屏浏览"
-  },
   "WhatsNew.1192": {
     "en": "Two tabs side by side: drag a tab to the edge of a page, or press ⌥⌘N.",
     "zh-Hans": "并排显示两个标签页：拖动标签页到页面边缘，或按 ⌥⌘N。"
-  },
-  "WhatsNew.1193": {
-    "en": "Search a site from the address field",
-    "zh-Hans": "在地址栏搜索网站"
   },
   "WhatsNew.1194": {
     "en": "The start of a site's name, then Tab: red, Tab, and your words search Reddit.",
     "zh-Hans": "输入网站名称的开头再按 Tab，例如输入 red、按 Tab 后即可在 Reddit 搜索。"
   },
-  "WhatsNew.1195": {
-    "en": "Start with a fresh window",
-    "zh-Hans": "启动时打开全新窗口"
-  },
   "WhatsNew.1196": {
     "en": "Your pinned tabs, and none of last time's others.",
     "zh-Hans": "保留固定标签页，不恢复上次的其他标签页。"
-  },
-  "WhatsNew.1197": {
-    "en": "Tab groups",
-    "zh-Hans": "标签页分组"
-  },
-  "WhatsNew.1198": {
-    "en": "Named sections of tabs. Right-click a tab to start one.",
-    "zh-Hans": "为标签页创建命名分组，右键点击标签页即可开始。"
   },
   "WhatsNew.1199": {
     "en": "Sidebar on the right",
@@ -4686,25 +3860,13 @@
     "en": "The tabs down the right edge of the window.",
     "zh-Hans": "在窗口右侧竖排显示标签页。"
   },
-  "WhatsNew.1201": {
-    "en": "Videos wait for a click",
-    "zh-Hans": "点击后才播放视频"
-  },
   "WhatsNew.1202": {
     "en": "Videos don't start by themselves, even without sound.",
     "zh-Hans": "视频不会自动播放，即使已静音。"
   },
-  "WhatsNew.1203": {
-    "en": "Always show the downloads button",
-    "zh-Hans": "始终显示下载按钮"
-  },
   "WhatsNew.1204": {
     "en": "Your downloads one click away, beside the other buttons.",
     "zh-Hans": "在其他按钮旁显示下载按钮，一键查看下载。"
-  },
-  "WhatsNew.1205": {
-    "en": "Spaces",
-    "zh-Hans": "空间"
   },
   "WhatsNew.1206": {
     "en": "Separate sets of tabs, each with its own sign-ins. ⌃1–⌃9 to switch.",
@@ -4726,25 +3888,13 @@
     "en": "Your bookmarks in a row above the page.",
     "zh-Hans": "在页面上方显示书签栏。"
   },
-  "WhatsNew.1211": {
-    "en": "Float the video when you switch apps",
-    "zh-Hans": "切换应用时自动开启画中画"
-  },
   "WhatsNew.1212": {
     "en": "A playing video follows you out into a small window.",
     "zh-Hans": "切换应用时，正在播放的视频会进入画中画窗口。"
   },
-  "WhatsNew.1213": {
-    "en": "Pages at 120 Hz",
-    "zh-Hans": "以 120 Hz 刷新页面"
-  },
   "WhatsNew.1214": {
     "en": "Smoother scrolling and animations on screens that can. Uses more battery.",
     "zh-Hans": "在支持的屏幕上获得更流畅的滚动和动画，但会增加耗电。"
-  },
-  "WhatsNew.1215": {
-    "en": "Scroll with the middle button",
-    "zh-Hans": "使用鼠标中键滚动"
   },
   "WhatsNew.1216": {
     "en": "Click the wheel, then move the mouse to scroll, as on Windows.",
@@ -4894,10 +4044,6 @@
     "en": "Your extensions may each ask once more for their permissions at their next update.",
     "zh-Hans": "扩展下次更新时，可能会再次请求权限确认。"
   },
-  "WhatsNew.1253": {
-    "en": "24 September 2026",
-    "zh-Hans": "2026 年 9 月 24 日"
-  },
   "WhatsNew.1254": {
     "en": "Passkeys, password managers and Google.",
     "zh-Hans": "通行密钥、密码管理器及 Google 兼容性改进。"
@@ -4962,10 +4108,6 @@
     "en": "⌘1–⌘9 on every keyboard layout, Tab between a form's fields, dragging tabs, a double-click along the top to fill the screen, and the Mac's beep while typing.",
     "zh-Hans": "修复不同键盘布局下的 ⌘1–⌘9、表单 Tab 切换、拖动标签页、双击顶部填满屏幕，以及输入时的系统提示音问题。"
   },
-  "WhatsNew.1270": {
-    "en": "23 September 2026",
-    "zh-Hans": "2026 年 9 月 23 日"
-  },
   "WhatsNew.1271": {
     "en": "The first version. A browser for the Mac with nothing in the way.",
     "zh-Hans": "首个版本。为 Mac 打造的简洁浏览器。"
@@ -5006,10 +4148,6 @@
     "en": "Everything that's new…",
     "zh-Hans": "查看全部更新内容…"
   },
-  "WhatsNew.1281": {
-    "en": "Close",
-    "zh-Hans": "关闭"
-  },
   "WhatsNew.1282": {
     "en": "What's New",
     "zh-Hans": "更新内容"
@@ -5026,10 +4164,6 @@
     "en": "Fixed",
     "zh-Hans": "修复"
   },
-  "Windows.1286": {
-    "en": "New Tab",
-    "zh-Hans": "新建标签页"
-  },
   "Windows.1287": {
     "en": "Window",
     "zh-Hans": "窗口"
@@ -5045,10 +4179,6 @@
   "Browser.1290": {
     "en": "Saving passwords…",
     "zh-Hans": "正在保存密码…"
-  },
-  "ExtensionsUI.1291": {
-    "en": "{0} warning{1}",
-    "zh-Hans": "{0} 条警告{1}"
   },
   "ImportPanel.1292": {
     "en": "Counting…",
@@ -5213,18 +4343,6 @@
   "section.view": {
     "en": "View",
     "zh-Hans": "显示"
-  },
-  "section.tabs": {
-    "en": "Tabs",
-    "zh-Hans": "标签页"
-  },
-  "section.bookmarks": {
-    "en": "Bookmarks",
-    "zh-Hans": "书签"
-  },
-  "section.history": {
-    "en": "History",
-    "zh-Hans": "历史记录"
   },
   "import.newSpace": {
     "en": "new space",
@@ -5525,14 +4643,6 @@
   "extensions.userScripts.disabled": {
     "en": "User scripts are disabled. Enable Allow user scripts in this extension's details.",
     "zh-Hans": "用户脚本已停用。请在此扩展的详情中开启“允许用户脚本”。"
-  },
-  "updates.github.title": {
-    "en": "Updates from GitHub",
-    "zh-Hans": "从 GitHub 更新"
-  },
-  "updates.github.detail": {
-    "en": "Download the latest SearcheXtra release and replace the application",
-    "zh-Hans": "下载最新版 SearcheXtra 并替换应用"
   },
   "upstream.extensions.noTab": {"en":"No tab with that id.","zh-Hans":"没有对应的标签页。"},
   "upstream.extensions.cannotMoveTab": {"en":"That tab can't be moved to another window.","zh-Hans":"无法将该标签页移动到另一个窗口。"},
@@ -5848,7 +4958,6 @@
   "upstream.settings.279aee48f5": {"en":"pinned rows","zh-Hans":"行式固定标签"},
   "upstream.settings.b9b2f1866a": {"en":"pins keep their site","zh-Hans":"固定标签保留原网站"},
   "bookmarks.context.openSplit": {"en":"Open in Split View","zh-Hans":"在拆分视图中打开"},
-  "bookmarks.context.moveTo": {"en":"Move to","zh-Hans":"移动到"},
   "upstream.merge.2a729670ed": {"en":"Apple Passwords didn't hand that password over","zh-Hans":"Apple“密码”未提供该密码"},
   "upstream.merge.7c65225fd8": {"en":" ({0} couldn't be decrypted)","zh-Hans":"（{0} 项无法解密）"},
   "upstream.merge.fd459cf9de": {"en":"Clean link copied","zh-Hans":"已复制干净链接"},
@@ -5879,5 +4988,133 @@
   "upstream.merge.477b4fccbf": {"en":"SearcheXtra can ask before it quits. Settings › General.","zh-Hans":"可在“设置 → 通用”中开启退出前确认。"},
   "upstream.merge.c753e8c4c9": {"en":"Passwords from Apple's Passwords app under the sign-in box — off until you turn it on in Settings › Passwords.","zh-Hans":"在登录框下显示 Apple“密码”账号，默认关闭，可在“设置 → 密码”中开启。"},
   "upstream.merge.2a06610b98": {"en":"Translate a page into your language, on this Mac — nothing is sent anywhere. Right-click the page › Translate Page.","zh-Hans":"右键网页选择“翻译网页”，即可在此 Mac 上翻译，不会将网页发送到其他服务。"},
-  "upstream.settings.startPage.short": {"en":"Fresh windows open here; new tabs stay blank unless an extension replaces them.","zh-Hans":"新窗口打开此页面；新标签默认空白，或使用已选择的新标签扩展。"}
+  "upstream.settings.startPage.short": {"en":"Fresh windows open here; new tabs stay blank unless an extension replaces them.","zh-Hans":"新窗口打开此页面；新标签默认空白，或使用已选择的新标签扩展。"},
+  "upstream.appleOffer.title": {
+    "en": "Use your Apple passwords?",
+    "zh-Hans": "使用 Apple 密码？"
+  },
+  "upstream.appleOffer.help": {
+    "en": "Turns on Apple Passwords and pairs with a code from your Mac. Settings › Passwords turns it off.",
+    "zh-Hans": "启用 Apple 密码，并使用 Mac 上的配对码连接。可在“设置 → 密码”中关闭。"
+  },
+  "upstream.appleOffer.never": {
+    "en": "Don't offer again",
+    "zh-Hans": "不再提示"
+  },
+  "upstream.groups.foldAll": {
+    "en": "Fold All Groups",
+    "zh-Hans": "折叠所有标签组"
+  },
+  "upstream.groups.unfoldAll": {
+    "en": "Unfold All Groups",
+    "zh-Hans": "展开所有标签组"
+  },
+  "upstream.88017ad.dd6300a9ca": {
+    "en": "Save Page As…",
+    "zh-Hans": "网页另存为…"
+  },
+  "upstream.88017ad.05ef638984": {
+    "en": "Closed Group",
+    "zh-Hans": "已关闭的标签组"
+  },
+  "upstream.88017ad.2492f00b32": {
+    "en": "Cleared Tab",
+    "zh-Hans": "已清理的标签页"
+  },
+  "upstream.88017ad.61ce447cc6": {
+    "en": "{0} Cleared Tabs",
+    "zh-Hans": "{0} 个已清理的标签页"
+  },
+  "upstream.88017ad.07289942c1": {
+    "en": "Closed Tab",
+    "zh-Hans": "已关闭的标签页"
+  },
+  "upstream.88017ad.18a1e104d3": {
+    "en": "{0} Closed Tabs",
+    "zh-Hans": "{0} 个已关闭的标签页"
+  },
+  "upstream.88017ad.53806c0e6d": {
+    "en": "Reopen {0}",
+    "zh-Hans": "重新打开{0}"
+  },
+  "upstream.88017ad.00e70be1f7": {
+    "en": "Couldn't save page",
+    "zh-Hans": "无法保存网页"
+  },
+  "upstream.88017ad.7e5d69be4d": {
+    "en": "Across the top of the window, down a side as a column, or as icons only",
+    "zh-Hans": "可在窗口顶部、两侧显示标签页，也可仅显示图标"
+  },
+  "upstream.88017ad.3aa9715b2e": {
+    "en": "Icons only is a narrow column of each tab's icon, the title in a tooltip. Nothing grows under the pointer.",
+    "zh-Hans": "仅显示图标时，标签页排列为窄图标栏，鼠标悬停可查看标题，图标不会随悬停放大。"
+  },
+  "upstream.88017ad.fab3c3b5c5": {
+    "en": "Closing a tab goes back to the one before",
+    "zh-Hans": "关闭标签页后返回上次查看的标签页"
+  },
+  "upstream.88017ad.5198315823": {
+    "en": "Otherwise you land on the tab beside it",
+    "zh-Hans": "关闭后默认选择相邻标签页"
+  },
+  "upstream.88017ad.8541bf11cc": {
+    "en": "The tab you viewed last in this space, as ⌃Tab would take you. The other half of a Split View stays first.",
+    "zh-Hans": "返回此空间中上次查看的标签页，与 ⌃Tab 一致。分屏中的另一页面仍优先。"
+  },
+  "upstream.88017ad.f654ec5618": {
+    "en": "⇧⌘R shows a page's article alone, in clean type. Most docs sites publish a Markdown copy; nothing in it can run, its text is escaped.",
+    "zh-Hans": "⇧⌘R 以简洁排版显示网页正文。多数文档网站提供 Markdown 副本；内容经过转义，不会执行其中的代码。"
+  },
+  "upstream.88017ad.133181a7e0": {
+    "en": "Third parties whose only job is to watch, and YouTube's ads",
+    "zh-Hans": "拦截第三方跟踪器和 YouTube 广告"
+  },
+  "upstream.88017ad.79b365167e": {
+    "en": "On YouTube, the ads announced in the player's own data are taken out before the video starts. Turn it off for one site from the site's row.",
+    "zh-Hans": "在 YouTube 视频开始前移除播放器数据中的广告。可在网站设置中单独关闭拦截。"
+  },
+  "upstream.88017ad.61579a8b34": {
+    "en": "Only with titles in the column",
+    "zh-Hans": "仅适用于带标题的侧栏"
+  },
+  "upstream.88017ad.7eefba1f1c": {
+    "en": "Icons only",
+    "zh-Hans": "仅图标"
+  },
+  "upstream.88017ad.d29d8693eb": {
+    "en": "Click, then press the new shortcut",
+    "zh-Hans": "点击后按下新的快捷键"
+  },
+  "upstream.88017ad.03b5eb004d": {
+    "en": "New Tab   ⌘T",
+    "zh-Hans": "新建标签页   ⌘T"
+  },
+  "upstream.88017ad.20db3aee25": {
+    "en": "Close Tabs Below",
+    "zh-Hans": "关闭下方标签页"
+  },
+  "upstream.88017ad.b8de339ac9": {
+    "en": "Close Tabs to the Right",
+    "zh-Hans": "关闭右侧标签页"
+  },
+  "upstream.88017ad.7f4f2bb98e": {
+    "en": "{0} — folded",
+    "zh-Hans": "{0} — 已折叠"
+  },
+  "upstream.88017ad.237dfa0a21": {
+    "en": "Private",
+    "zh-Hans": "无痕"
+  },
+  "upstream.88017ad.6ae0b07a6d": {
+    "en": "Playing sound",
+    "zh-Hans": "正在播放声音"
+  },
+  "upstream.address.floatingNewTab": {
+    "en": "New tab in a floating field",
+    "zh-Hans": "在浮动输入框中新建标签页"
+  },
+  "upstream.address.floatingNewTab.detail": {
+    "en": "Ask for an address first; a tab opens when you press Return",
+    "zh-Hans": "先输入网址，按回车后再创建标签页"
+  }
 }

@@ -45,6 +45,17 @@ final class LocalizationTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testDynamicallyNamedOptionsResolveInBothLanguages() {
+        let keys = BookmarkBarOpening.allCases.map { "bookmarks.bar.opening.\($0.rawValue)" }
+            + FlowDrag.objects.flatMap(FlowDrag.actions).map { "flowDrag.action." + $0 }
+        for language in ["en", "zh-Hans"] {
+            for key in Set(keys) {
+                XCTAssertNotEqual(L10n.render(key, language: language), key, key)
+            }
+        }
+    }
+
     func testProductNameAndUpstreamAttributionInBothLanguages() {
         for language in ["en", "zh-Hans"] {
             XCTAssertTrue(L10n.render("language.restart", language: language).contains("SearcheXtra"))

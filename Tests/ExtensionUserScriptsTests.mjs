@@ -13,7 +13,7 @@ let wrapper = 0;
 const freshNamespaces = {};
 Object.defineProperty(freshNamespaces, 'runtime', { configurable: true, enumerable: true,
   get: () => ({ id: 'fresh-wrapper', wrapper: ++wrapper }) });
-const namespaceFixture = { chrome: freshNamespaces, root: {} };
+const namespaceFixture = { chrome: freshNamespaces, root: {}, inContent: false };
 vm.runInNewContext(swift.slice(Math.min(namespaceStart, runtimeCapture), namespaceEnd) +
   '\nroot.runtime = runtime;', namespaceFixture);
 assert.equal(namespaceFixture.root.runtime, freshNamespaces.runtime, 'Runtime overrides must target the namespace extensions read');

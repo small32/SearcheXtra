@@ -84,6 +84,7 @@ final class Bookmarks: ObservableObject {
             revision &+= 1
             kept = preparedKept ?? Set(Bookmarks.urls(roots).map(\.absoluteString))
             preparedKept = nil
+            sites = nil
         }
     }
     private var revision = 0
@@ -150,6 +151,67 @@ final class Bookmarks: ObservableObject {
             }
         }
         return walk(roots, [])
+    }
+
+    // MARK: - in the address field
+
+    /// A site as the address field looks for it: its name and its address,
+    /// lowercased once, the address without its scheme or www, as the field
+    /// matches history (History.stripped).
+    private struct Site {
+        /// As it reads in the list.
+        let name: String
+        let title: String
+        let address: String
+        let url: URL
+    }
+
+    /// Every site, folders opened, made once after each change of the list
+    /// and kept: the field asks on every key, and walking a tree of a few
+    /// thousand imported bookmarks to lowercase each again was work thrown
+    /// away each time.
+    private var sites: [Site]?
+
+    /// The sites for what is typed in the address field, the best `limit`
+    /// first: every word, in any order, in the name or the address. Kept to
+    /// two letters and more: one letter is in nearly every name, and the
+    /// field finishes a single letter only towards a site you have been to.
+    func places(for typed: String, limit: Int) -> [Suggestion] {
+        let needle = typed.trimmingCharacters(in: .whitespaces).lowercased()
+        let words = needle.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard needle.count >= 2, let first = words.first else { return [] }
+        let bare = History.stripped(needle)
+        if sites == nil {
+            sites = Bookmarks.sites(roots)
+        }
+        // The address starting with what was typed first, then the name,
+        // then a word anywhere; among equals, the shorter address.
+        var best: [(site: Site, score: Int)] = []
+        for site in sites ?? [] {
+            guard words.allSatisfy({ site.title.contains($0) || site.address.contains($0) }) else { continue }
+            let score = site.address.hasPrefix(bare) ? 3
+                : site.title.hasPrefix(needle) || site.title.split(separator: " ").contains(where: { $0.hasPrefix(first) }) ? 2
+                : 1
+            let at = best.firstIndex {
+                score > $0.score || (score == $0.score && site.address.count < $0.site.address.count)
+            } ?? best.endIndex
+            guard at < limit else { continue }
+            best.insert((site, score), at: at)
+            if best.count > limit { best.removeLast() }
+        }
+        return best.map { found in
+            Suggestion(key: Address.editable(found.site.url), title: found.site.name, url: found.site.url, kind: .bookmark)
+        }
+    }
+
+    private static func sites(_ nodes: [Bookmark]) -> [Site] {
+        nodes.flatMap { node -> [Site] in
+            if node.isFolder { return sites(node.children ?? []) }
+            // Only places to go: a bookmarklet's javascript: is no address.
+            guard let url = node.address, ["http", "https", "file"].contains(url.scheme?.lowercased() ?? "") else { return [] }
+            let title = node.unnamed ? "" : node.title
+            return [Site(name: title, title: title.lowercased(), address: History.stripped(url.absoluteString), url: url)]
+        }
     }
 
     /// The folders `id` sits in, outermost first; empty at the top level,
@@ -307,14 +369,7 @@ final class Bookmarks: ObservableObject {
     /// What a folder holds, or the top level for nil.
     private func siblings(of folderID: Bookmark.ID?) -> [Bookmark] {
         guard let folderID else { return roots }
-        func walk(_ nodes: [Bookmark]) -> [Bookmark]? {
-            for node in nodes {
-                if node.id == folderID { return node.children ?? [] }
-                if let found = walk(node.children ?? []) { return found }
-            }
-            return nil
-        }
-        return walk(roots) ?? []
+        return bookmark(folderID)?.children ?? []
     }
 
     private static func detach(_ id: Bookmark.ID, from nodes: inout [Bookmark]) -> Bookmark? {
@@ -636,16 +691,6 @@ final class Bookmarks: ObservableObject {
         }
     }
 
-    func askEdit(_ node: Bookmark) {
-        guard let original = node.url else { return }
-        Ask.name(L10n.text("bookmarks.context.edit"), detail: L10n.text("bookmarks.emptyName.detail"), placeholder: node.label, initial: node.title, confirm: L10n.text("Bookmarks.0224"), empty: true) { title in
-            Ask.name(L10n.text("bookmarks.manager.address"), placeholder: "https://example.com", initial: original, confirm: L10n.text("Bookmarks.0224")) { address in
-                guard let url = URL(string: address), url.scheme != nil else { return }
-                self.update(node.id, title: title, url: url.absoluteString)
-            }
-        }
-    }
-
     /// A folder with bookmarks in it asks first: they all go with it, and
     /// there is no taking it back. Anything else goes at once.
     func askRemove(_ node: Bookmark) {
@@ -788,6 +833,7 @@ struct BookmarkOutline: View {
         ForEach(Array(nodes.enumerated()), id: \.element.id) { index, node in
             let isOpen = node.isFolder && expanded.contains(node.id)
             Row(
+                bookmarks: bookmarks,
                 node: node,
                 depth: depth,
                 // A folder's arrow has a place in front of every row, so the
@@ -806,8 +852,6 @@ struct BookmarkOutline: View {
                     else { binding.wrappedValue.insert(node.id) }
                 } },
                 toggle: node.isFolder ? { toggle(node.id) } : nil,
-                moveTargets: Bookmarks.folders(bookmarks.roots).filter { !Bookmarks.holds($0.node.id, node) },
-                moveTo: { bookmarks.move(node.id, into: $0) },
                 rename: { bookmarks.askRename(node) },
                 newFolder: node.isFolder ? {
                     bookmarks.askNewFolder(in: node.id) { _ in expanded.insert(node.id) }
@@ -996,6 +1040,7 @@ struct BookmarkOutline: View {
 
     private struct Row: View {
         @ObservedObject private var prefs = Shared.prefs
+        @ObservedObject var bookmarks: Bookmarks
         let node: Bookmark
         let depth: Int
         let arrows: Bool
@@ -1009,8 +1054,6 @@ struct BookmarkOutline: View {
         let selected: Bool
         let select: (() -> Void)?
         let toggle: (() -> Void)?
-        let moveTargets: [(node: Bookmark, depth: Int)]
-        let moveTo: (Bookmark.ID?) -> Void
         let rename: () -> Void
         /// A folder in this one: only on a folder.
         let newFolder: (() -> Void)?
@@ -1076,28 +1119,16 @@ struct BookmarkOutline: View {
                     bookmarkMenu()
                 } else {
                     if let open {
-                        Button(L10n.text("Bookmarks.0225"), action: open)
+                        Button(L10n.text("Browser.0353"), action: open)
                         Divider()
                     }
                     Button(L10n.text("Bookmarks.0226"), action: rename)
                     if let newFolder {
                         Button(L10n.text("Bookmarks.0227"), action: newFolder)
                     }
-                }
-                Menu(L10n.text("Bookmarks.0228")) {
-                    Button(L10n.text("Bookmarks.0229"), action: { moveTo(nil) })
-                    if !moveTargets.isEmpty {
-                        Divider()
-                        ForEach(moveTargets, id: \.node.id) { target in
-                            Button(String(repeating: "   ", count: target.depth) + target.node.title) {
-                                moveTo(target.node.id)
-                            }
-                        }
-                    }
-                }
-                if bookmarkMenu == nil {
+                    BookmarkMoveMenu(bookmarks: bookmarks, node: node)
                     Divider()
-                    Button(L10n.text("Bookmarks.0230"), role: .destructive, action: remove)
+                    Button(L10n.text("Bookmarks.0220"), role: .destructive, action: remove)
                 }
             }
             .animation(Motion.quick, value: hovering)
@@ -1138,7 +1169,7 @@ struct BookmarkDoor: View {
     }
 
     fileprivate static func door(_ browser: Browser, kept: Bool) -> some View {
-        Door(icon: kept ? "bookmark.fill" : "bookmark", help: L10n.text("Bookmarks.0231")) { browser.toggleBookmarks() }
+        Door(icon: kept ? "bookmark.fill" : L10n.text("Browser.0306"), help: L10n.text("Bookmarks.0231")) { browser.toggleBookmarks() }
     }
 
     /// Watches the tab for where it goes and the bookmarks for what is
@@ -1167,7 +1198,7 @@ struct BookmarkCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(L10n.text("Bookmarks.0232"))
+            Text(L10n.text("Browser.0270"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Palette.ink)
 
@@ -1189,7 +1220,7 @@ struct BookmarkCard: View {
             }
 
             HStack(spacing: 8) {
-                Quick(L10n.text("Bookmarks.0235"), tint: .red.opacity(0.75)) {
+                Quick(L10n.text("Bookmarks.0220"), tint: .red.opacity(0.75)) {
                     close()
                     bookmarks.remove(id)
                 }
@@ -1224,7 +1255,7 @@ struct BookmarkCard: View {
             }
             Divider()
             Button(L10n.text("Bookmarks.0238")) {
-                Ask.name(L10n.text("Bookmarks.0239"), placeholder: L10n.text("Bookmarks.0240"), confirm: L10n.text("Bookmarks.0241")) { name in
+                Ask.name(L10n.text("Bookmarks.0213"), placeholder: L10n.text("Bookmarks.0233"), confirm: L10n.text("Bookmarks.0241")) { name in
                     let made = bookmarks.insert(.folder(name, []), into: nil)
                     bookmarks.move(id, into: made.id)
                 }
@@ -1234,7 +1265,7 @@ struct BookmarkCard: View {
                 Image(systemName: "folder")
                     .font(.system(size: 10.5))
                     .foregroundStyle(Palette.muted)
-                Text(here?.title ?? L10n.text("Bookmarks.0242"))
+                Text(here?.title ?? L10n.text("Bookmarks.0237"))
                     .font(.system(size: 12.5))
                     .foregroundStyle(Palette.ink)
                     .lineLimit(1)
@@ -1323,7 +1354,7 @@ struct BookmarksDropdown: View {
             }
             Divider().overlay(Palette.hairline)
             VStack(spacing: 1) {
-                Foot(browser.pageKept ? "bookmark.fill" : "bookmark", browser.pageKept ? L10n.text("Bookmarks.0244") : L10n.text("Bookmarks.0245")) {
+                Foot(browser.pageKept ? "bookmark.fill" : L10n.text("Browser.0306"), browser.pageKept ? L10n.text("Bookmarks.0244") : L10n.text("Bookmarks.0245")) {
                     browser.bookmarkCurrent()
                 }
                 Foot(nil, L10n.text("Bookmarks.0246")) { browser.bookmarking = true }
@@ -1349,7 +1380,7 @@ struct BookmarksDropdown: View {
     /// A row's height and the gap under it (see BookmarkOutline.Row).
     private static let line: CGFloat = 28
 
-    /// Every row with every folder open, an empty one's "Empty" included,
+    /// Every row with every folder open, an empty one's L10n.text("Bookmarks.0221") included,
     /// counted only as far as the list can be tall.
     private static func count(_ nodes: [Bookmark], into lines: inout Int, upTo limit: Int) {
         for node in nodes {
@@ -1396,7 +1427,6 @@ struct BookmarksDropdown: View {
 struct BookmarksPanel: View {
     @ObservedObject var browser: Browser
     @ObservedObject var bookmarks: Bookmarks
-    @ObservedObject private var prefs = Shared.prefs
 
     @State private var expanded: Set<Bookmark.ID> = []
     @State private var query = ""
@@ -1411,11 +1441,6 @@ struct BookmarksPanel: View {
             VStack(alignment: .leading, spacing: 14) {
                 Hunt(text: $query, prompt: L10n.text("Bookmarks.0248"), focus: $hunting)
                     .onSubmit(openFirst)
-
-                Toggle(L10n.text("bookmarks.bar.folderIcons"), isOn: $prefs.bookmarkBarFolderIcons)
-                .toggleStyle(.switch)
-                Toggle(L10n.text("bookmarks.bar.websiteIcons"), isOn: $prefs.bookmarkWebsiteIcons)
-                .toggleStyle(.switch)
 
                 HStack(spacing: 10) {
                     Pill(L10n.text("bookmarks.manager.new")) { bookmarks.askNewBookmark() }
@@ -1482,7 +1507,7 @@ struct BookmarksPanel: View {
                 Pill(L10n.text("Passwords.0615")) { browser.lead(to: InternalPage(.importing)) }
                 Pill(L10n.text("Passwords.0616")) { browser.importFile() }
                 Spacer()
-                Pill(L10n.text("Bookmarks.0253")) { bookmarks.askNewFolder(in: nil) }
+                Pill(L10n.text("Bookmarks.0238")) { bookmarks.askNewFolder(in: nil) }
                 Text(bookmarks.count == 1 ? L10n.text("Bookmarks.0254") : L10n.text("Bookmarks.0255", String(describing: bookmarks.count)))
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
@@ -1602,7 +1627,7 @@ struct BookmarksPanel: View {
             .onHover { hovering = $0 }
             .contextMenu {
                 BookmarkContextMenu(browser: browser, bookmarks: bookmarks, node: node)
-                Button(L10n.text("Bookmarks.0259"), action: show)
+                Button(L10n.text("Bookmarks.0257"), action: show)
             }
             .overlay {
                 if let url = node.url.flatMap(URL.init(string:)) {
@@ -1684,7 +1709,7 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
         wrap()
     }
 
-    private var menu: NSMenu? { NSApp.mainMenu?.items.first(where: { $0.title == L10n.text("Bookmarks.0261") })?.submenu }
+    private var menu: NSMenu? { NSApp.mainMenu?.items.first(where: { $0.title == L10n.text("Bookmarks.0231") })?.submenu }
 
     /// The window in front's: its profile's bookmarks (see Profiles.swift).
     private var shown: Browser? { Browsers.front.flatMap { !$0.isPopup ? $0 : nil } ?? browser }
@@ -1757,21 +1782,12 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
         if browser.prefs.compactBookmarksBar { menu.font = .systemFont(ofSize: NSFont.smallSystemFontSize) }
         let made = items(for: folder.children ?? [], barBrowser: browser)
         if made.isEmpty {
-            let empty = NSMenuItem(title: L10n.text("Bookmarks.0263"), action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: L10n.text("Bookmarks.0221"), action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         }
         for item in made { menu.addItem(item) }
-        if let anchor, anchor.window != nil {
-            // A pull-down cell anchors below the bar and scrolls long menus.
-            menu.insertItem(NSMenuItem(title: folder.title, action: nil, keyEquivalent: ""), at: 0)
-            let cell = NSPopUpButtonCell(textCell: folder.title, pullsDown: true)
-            cell.menu = menu
-            cell.preferredEdge = .minY
-            cell.performClick(withFrame: anchor.bounds, in: anchor)
-        } else {
-            menu.popUp(positioning: menu.items.first, at: NSEvent.mouseLocation, in: nil)
-        }
+        menu.popUp(positioning: menu.items.first, at: NSEvent.mouseLocation, in: nil)
     }
 
     private func items(for nodes: [Bookmark], barBrowser: Browser? = nil) -> [NSMenuItem] {
@@ -1862,7 +1878,7 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         let made = items(for: kids.nodes, barBrowser: kids.barBrowser)
         if made.isEmpty {
-            let empty = NSMenuItem(title: L10n.text("Bookmarks.0264"), action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: L10n.text("Bookmarks.0221"), action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
         }

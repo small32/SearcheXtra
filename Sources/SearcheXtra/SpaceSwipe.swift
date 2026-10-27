@@ -88,8 +88,8 @@ final class SpaceSwipe {
         guard let window = event.window, window === browser.window else { return false }
         if browser.prefs.sidebar {
             return browser.prefs.sidePosition == .right
-                ? event.locationInWindow.x >= window.frame.width - browser.prefs.sideWidth
-                : event.locationInWindow.x < browser.prefs.sideWidth
+                ? event.locationInWindow.x >= window.frame.width - browser.prefs.columnWidth
+                : event.locationInWindow.x < browser.prefs.columnWidth
         }
         return event.locationInWindow.y > window.frame.height - Metrics.strip
     }
@@ -218,7 +218,7 @@ final class SpaceSwipe {
             browser.cancelSpaceCreation()
         }
         // A page is the column's width, or the bar's height.
-        let width = browser.prefs.sidebar ? browser.prefs.sideWidth : Metrics.strip
+        let width = browser.prefs.sidebar ? browser.prefs.columnWidth : Metrics.strip
         let away: CGFloat = target > here ? -1 : 1
         browser.spaceStep = target > here ? 1 : -1
         resting = Date().addingTimeInterval(SpaceSwipe.rest)
@@ -271,8 +271,8 @@ struct NewSpaceCard: View {
                     Segmented(options: [(true, L10n.text("SpaceSwipe.0988")), (false, L10n.text("SpaceSwipe.0989"))], selection: $shared)
                         .fixedSize()
                         .help(saying)
-                    Pill(L10n.text("SpaceSwipe.0990")) { cancel() }
-                    Pill(L10n.text("SpaceSwipe.0991"), filled: true) { create() }
+                    Pill(L10n.text("SpaceSwipe.0996")) { cancel() }
+                    Pill(L10n.text("SpaceSwipe.0997"), filled: true) { create() }
                 }
                 .frame(height: Metrics.strip)
             } else {

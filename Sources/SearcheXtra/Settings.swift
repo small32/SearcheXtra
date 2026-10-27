@@ -3,10 +3,11 @@ import SwiftUI
 /// Everything there is to set. Sections down the left, under a field that
 /// finds any setting by its words (⌘F); one section at a time on the right,
 /// in titled groups, each a card of rows. A row says what it is with a small
-/// icon and a line of plain words, the rest behind its (i); a row that only
-/// counts while another is on sits indented under it, and is only there
-/// while it counts. Every row comes from SettingsIndex, so what the find
-/// field finds is exactly what the sections hold.
+/// icon and a line of plain words, the rest behind its (i). Every row of a
+/// card stands at the same level, hairlines from edge to edge; a row that
+/// only counts while another is on is only there while it counts. Every
+/// row comes from SettingsIndex, so what the find field finds is exactly
+/// what the sections hold.
 struct SettingsPanel: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
@@ -89,10 +90,15 @@ struct SettingsPanel: View {
     }
 
     private static let rail: CGFloat = 196
+    private static let column: CGFloat = 600
     private static let width: CGFloat = 720
     private static let height: CGFloat = 540
-    /// Where a row's words start, past its icon: a hairline starts there too.
+    /// Where a row's words start, past its icon. What goes under a row's
+    /// words (pictures, lists, fields) starts there too.
     static let textInset: CGFloat = 52
+    /// A list under a row's words starts this far in, its lines adding
+    /// their own 14 to reach textInset.
+    static let listInset: CGFloat = textInset - 14
 
     var body: some View {
         Group {
@@ -115,7 +121,6 @@ struct SettingsPanel: View {
             Rectangle().fill(Palette.hairline).frame(width: 1)
             content
                 .padding(.top, 26)
-                .frame(maxWidth: 600)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -292,13 +297,22 @@ struct SettingsPanel: View {
                 }
             }
             .padding(.bottom, 18)
+            .padding(.horizontal, 24)
+            .frame(maxWidth: asTab ? SettingsPanel.column : .infinity)
+            .frame(maxWidth: .infinity)
 
             ScrollViewReader { reader in
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 22) {
                         if searching { results } else { section(page) }
                     }
+                    .environment(\.ruleInset, 0)
                     .padding(.bottom, 24)
+                    // Keep the rows narrow, not the scroll view: the empty
+                    // space beside them must receive scrolling too.
+                    .padding(.horizontal, 24)
+                    .frame(maxWidth: asTab ? SettingsPanel.column : .infinity)
+                    .frame(maxWidth: .infinity)
                 }
                 .onAppear { if let lit { reader.scrollTo(lit, anchor: .center) } }
             }
@@ -306,7 +320,6 @@ struct SettingsPanel: View {
             // them all opened Tabs as far down as General had been read.
             .id(searching ? "found" : page.rawValue)
         }
-        .padding(.horizontal, 24)
         .padding(.top, 18)
         .padding(.bottom, 0)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -320,8 +333,7 @@ struct SettingsPanel: View {
             groups(of: page)
         case .keyboard:
             groups(of: page)
-            GroupBlock(title: L10n.text("Settings.0694"), icon: "command",
-                       blurb: L10n.text("upstream.settings.8bcffc0465")) {
+            GroupBlock(title: L10n.text("Settings.0694"), icon: "command") {
                 ShortcutsPage(browser: browser, store: .shared, prefs: prefs)
             }
         case .extensions:
@@ -336,7 +348,7 @@ struct SettingsPanel: View {
 
     private func groups(of page: Page) -> some View {
         ForEach(SettingsIndex.groups(of: page)) { group in
-            GroupBlock(title: group.title, icon: group.icon, blurb: group.blurb) {
+            GroupBlock(title: group.title, icon: group.icon) {
                 Card { rows(SettingsIndex.items(in: group.id).filter(shown), searched: false) }
             }
         }
@@ -347,20 +359,19 @@ struct SettingsPanel: View {
 
     private func rows(_ items: [SettingsItem], searched: Bool) -> some View {
         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-            if index > 0 { Rule(inset: item.hangs && !searched ? SettingsPanel.textInset + 24 : SettingsPanel.textInset) }
-            row(item, searched: searched)
+            if index > 0 { Rule() }
+            row(item)
             after(item, searched: searched)
         }
     }
 
-    private func row(_ item: SettingsItem, searched: Bool) -> some View {
+    private func row(_ item: SettingsItem) -> some View {
         let counts = SettingsIndex.applies(item, prefs)
         return SettingRow(
             icon: item.icon,
             title: title(of: item),
             detail: counts ? detail(of: item) : SettingsIndex.needs(item),
             more: counts ? item.more : nil,
-            indent: item.hangs && !searched,
             wide: item.kind == .wide,
             lit: lit == item.id
         ) {
@@ -534,6 +545,7 @@ struct SettingsPanel: View {
     @ViewBuilder
     private func tabsControl(_ id: String) -> some View {
         switch id {
+        case "newtab.floating": Switch(on: $prefs.floatingNewTab)
         case "tabs.newPlace":
             Picker(L10n.text("sync.settings.newPlace"), selection: $prefs.newTabPlace) {
                 Text(L10n.text("sync.settings.next")).tag(NewTabPlace.next)
@@ -544,6 +556,7 @@ struct SettingsPanel: View {
             .pickerStyle(.menu)
             .fixedSize()
         case "tabs.newAfterLast": Switch(on: $prefs.newTabAfterLast)
+        case "tabs.closeGoesBack": Switch(on: $prefs.closeGoesBack)
         case "tabs.lazy": Switch(on: $prefs.lazyTabs)
         case "tabs.popupWindows": Switch(on: $prefs.popupWindows)
         case "tabs.sleep":
@@ -722,7 +735,7 @@ struct SettingsPanel: View {
         }
     }
 
-    // MARK: - what hangs under a row
+    // MARK: - what goes under a row
 
     @ViewBuilder
     private func after(_ item: SettingsItem, searched: Bool) -> some View {
@@ -744,16 +757,16 @@ struct SettingsPanel: View {
             if !searched { NewTabPageLine() }
         case "shield":
             if let trouble = shield.trouble {
-                Rule(inset: SettingsPanel.textInset)
+                Rule()
                 Line(trouble, L10n.text("upstream.settings.4548cdf7d7")) {
                     Pill(L10n.text("Settings.0809")) { shield.compile() }
                 }
-                .padding(.leading, SettingsPanel.textInset - 14)
+                .under()
             }
             if !searched, let host = browser.hereHost, prefs.shielded, shield.trouble == nil {
-                Rule(inset: SettingsPanel.textInset + 24)
+                Rule()
                 SettingRow(icon: "checkmark.shield", title: L10n.text("Settings.0810", String(describing: host)),
-                           detail: L10n.text("upstream.settings.5766873776"), indent: true) {
+                           detail: L10n.text("upstream.settings.5766873776")) {
                     Switch(on: Binding(
                         get: { !Shield.shared.isPaused(on: host) },
                         set: { on in
@@ -769,11 +782,11 @@ struct SettingsPanel: View {
                     NotificationSites()
                     PopupSiteList(prefs: prefs)
                 }
-                .padding(.leading, SettingsPanel.textInset - 14)
+                .under()
             }
         case "passkeys":
             if !searched, !Vault.never.isEmpty {
-                Rule(inset: SettingsPanel.textInset)
+                Rule()
                 SettingRow(icon: "hand.raised.slash", title: L10n.text("Settings.0794"),
                            detail: L10n.text("Settings.0795", String(describing: Vault.never.count))) {
                     Pill(L10n.text("Settings.0796")) {
@@ -784,16 +797,16 @@ struct SettingsPanel: View {
             }
         case "passwords.apple":
             ApplePasswordsCard(prefs: prefs, bare: true)
-                .padding(.leading, SettingsPanel.textInset - 14)
+                .under()
         case "profiles":
             if !searched {
                 ProfileList(browser: browser)
-                    .padding(.leading, SettingsPanel.textInset - 14)
+                    .under()
             }
         case "pages.120":
             if !searched, PageTranslator.available, !prefs.translateAlways.isEmpty {
                 TranslateLanguageList(prefs: prefs)
-                    .padding(.leading, SettingsPanel.textInset - 14)
+                    .under()
             }
         default:
             EmptyView()
@@ -1041,30 +1054,33 @@ struct SettingsPanel: View {
 
 // MARK: - pieces
 
-/// A group of a section: its small heading with an icon, a line saying what
-/// it is for, then its card.
+private extension View {
+    /// A list under a row's words (sites, profiles, languages): its lines
+    /// start where the row's title does, and its hairlines are pulled back
+    /// out to the card's left edge, as every other one in Settings.
+    func under() -> some View {
+        padding(.leading, SettingsPanel.listInset)
+            .environment(\.ruleInset, -SettingsPanel.listInset)
+    }
+}
+
+/// A group of a section: its small heading with an icon, then its card.
+/// No line under the heading: the rows say what they do.
 struct GroupBlock<Content: View>: View {
     let title: String
     let icon: String
-    let blurb: String
     @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Image(systemName: icon)
-                        .font(.system(size: 10.5, weight: .semibold))
-                    Text(title.uppercased())
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .tracking(0.5)
-                }
-                .foregroundStyle(Palette.ink.opacity(0.62))
-                Text(blurb)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 10.5, weight: .semibold))
+                Text(title.uppercased())
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .tracking(0.5)
             }
+            .foregroundStyle(Palette.ink.opacity(0.62))
             .padding(.leading, 2)
             content()
         }
@@ -1079,7 +1095,6 @@ struct SettingRow<Control: View>: View {
     let title: String
     let detail: String
     var more: String? = nil
-    var indent = false
     var wide = false
     var lit = false
     @ViewBuilder let control: () -> Control
@@ -1136,7 +1151,7 @@ struct SettingRow<Control: View>: View {
                     .padding(.leading, 38)
             }
         }
-        .padding(.leading, indent ? 38 : 14)
+        .padding(.leading, 14)
         .padding(.trailing, 14)
         .padding(.vertical, 10)
         .background(lit ? Palette.hover : .clear)
@@ -1228,6 +1243,24 @@ private struct LayoutPicture: View {
                     }
                     .frame(width: 18)
                     if layout == .left { page }
+                }
+                .padding(5)
+            case .icons:
+                // A narrow column of squares, one under the other: the
+                // tabs' icons, no titles.
+                HStack(spacing: 4) {
+                    VStack(spacing: 3) {
+                        VStack(spacing: 1.5) {
+                            ForEach(0..<3) { _ in Circle().fill(Palette.ink.opacity(0.25)).frame(width: 3, height: 3) }
+                        }
+                        .padding(.bottom, 1)
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous).fill(lit).frame(width: 6, height: 6)
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous).fill(tab).frame(width: 6, height: 6)
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous).fill(tab).frame(width: 6, height: 6)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(width: 8)
+                    page
                 }
                 .padding(5)
             }

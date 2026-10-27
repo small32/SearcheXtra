@@ -10,14 +10,13 @@ import SwiftUI
 // Settings.swift; what a merged control does to the old keys is here, on
 // Preferences, so the switch and the bench write the same thing.
 
-/// A titled group inside a section: a small heading with its icon, a line
-/// saying what the group is for, then its rows in one card.
+/// A titled group inside a section: a small heading with its icon, then
+/// its rows in one card.
 struct SettingsGroup: Identifiable {
     let id: String
     let page: SettingsPanel.Page
     let title: String
     let icon: String
-    let blurb: String
 }
 
 /// One row of Settings.
@@ -46,88 +45,57 @@ struct SettingsItem: Identifiable {
     /// Other words someone might type for it.
     var words: [String] = []
     var kind: Kind = .control
-    /// The row it hangs under: indented, and only there while that one
-    /// makes it count (see SettingsIndex.applies).
+    /// The row that makes this one count. It stands at the same level as
+    /// every other row, and is only there while that one makes it count
+    /// (see SettingsIndex.applies).
     var parent: String? = nil
     /// Only the find field shows it (moved to a menu, or always on).
     var findOnly = false
 
     var page: SettingsPanel.Page { SettingsIndex.group(group)?.page ?? .general }
-    /// Drawn under its parent, indented, when that is the row above it in
-    /// the same group; a row whose parent is elsewhere is only hidden.
-    var hangs: Bool { parent.flatMap(SettingsIndex.item)?.group == group }
 }
 
 enum SettingsIndex {
     // MARK: - groups
 
     static let groups: [SettingsGroup] = [
-        .init(id: "browser", page: .general, title: L10n.text("upstream.settings.34b9767b44"), icon: "globe.desk",
-              blurb: L10n.text("upstream.settings.860d0e7de6")),
-        .init(id: "bookmarkManager", page: .bookmarks, title: L10n.text("App.0170"), icon: "book",
-              blurb: L10n.text("upstream.settings.9ded824b39")),
-        .init(id: "bookmarkAppearance", page: .bookmarks, title: L10n.text("flowDrag.rootFolder"), icon: "bookmark",
-              blurb: L10n.text("upstream.settings.668a5872e1")),
-        .init(id: "extensions", page: .extensions, title: L10n.text("Extensions.0461"), icon: "puzzlepiece.extension",
-              blurb: L10n.text("upstream.settings.ace51db386")),
-        .init(id: "downloads", page: .general, title: L10n.text("Recall.0660"), icon: "arrow.down.circle",
-              blurb: L10n.text("upstream.settings.15229530ce")),
+        .init(id: "browser", page: .general, title: L10n.text("upstream.settings.34b9767b44"), icon: "globe.desk"),
+        .init(id: "bookmarkManager", page: .bookmarks, title: L10n.text("App.0170"), icon: "book"),
+        .init(id: "bookmarkAppearance", page: .bookmarks, title: L10n.text("flowDrag.rootFolder"), icon: "bookmark"),
+        .init(id: "extensions", page: .extensions, title: L10n.text("Extensions.0461"), icon: "puzzlepiece.extension"),
+        .init(id: "downloads", page: .general, title: L10n.text("Recall.0660"), icon: "arrow.down.circle"),
 
-        .init(id: "theme", page: .appearance, title: L10n.text("upstream.settings.e3e7d8fb22"), icon: "circle.lefthalf.filled",
-              blurb: L10n.text("upstream.settings.bb99481706")),
-        .init(id: "window", page: .appearance, title: L10n.text("Windows.1287"), icon: "macwindow",
-              blurb: L10n.text("upstream.settings.2b2c752072")),
-        .init(id: "tablook", page: .appearance, title: L10n.text("App.0145"), icon: "textformat.size",
-              blurb: L10n.text("upstream.settings.f54f918ed7")),
-        .init(id: "motion", page: .appearance, title: L10n.text("upstream.settings.e040db2b7f"), icon: "wind",
-              blurb: L10n.text("upstream.settings.f8b2dd492f")),
+        .init(id: "theme", page: .appearance, title: L10n.text("upstream.settings.e3e7d8fb22"), icon: "circle.lefthalf.filled"),
+        .init(id: "window", page: .appearance, title: L10n.text("Windows.1287"), icon: "macwindow"),
+        .init(id: "tablook", page: .appearance, title: L10n.text("App.0145"), icon: "textformat.size"),
+        .init(id: "motion", page: .appearance, title: L10n.text("upstream.settings.e040db2b7f"), icon: "wind"),
 
-        .init(id: "newtabs", page: .tabs, title: L10n.text("upstream.settings.406f113ad5"), icon: "plus.square",
-              blurb: L10n.text("upstream.settings.ddceeb61ee")),
-        .init(id: "memory", page: .tabs, title: L10n.text("upstream.settings.89c8a2851d"), icon: "moon.zzz",
-              blurb: L10n.text("upstream.settings.ae646f8204")),
-        .init(id: "tabbar", page: .tabs, title: L10n.text("upstream.settings.2f0b565b0d"), icon: "number",
-              blurb: L10n.text("upstream.settings.06e22f8f6d")),
+        .init(id: "newtabs", page: .tabs, title: L10n.text("upstream.settings.406f113ad5"), icon: "plus.square"),
+        .init(id: "memory", page: .tabs, title: L10n.text("upstream.settings.89c8a2851d"), icon: "moon.zzz"),
+        .init(id: "tabbar", page: .tabs, title: L10n.text("upstream.settings.2f0b565b0d"), icon: "number"),
 
-        .init(id: "search", page: .browsing, title: L10n.text("upstream.settings.98cc363c01"), icon: "magnifyingglass",
-              blurb: L10n.text("upstream.settings.e92582b1b7")),
-        .init(id: "links", page: .browsing, title: L10n.text("flowDrag.object.link"), icon: "link",
-              blurb: L10n.text("upstream.settings.0026c5c200")),
-        .init(id: "reading", page: .browsing, title: L10n.text("Settings.0845"), icon: "doc.plaintext",
-              blurb: L10n.text("upstream.settings.bdf553590a")),
-        .init(id: "video", page: .browsing, title: L10n.text("upstream.settings.bc17c1f017"), icon: "play.rectangle",
-              blurb: L10n.text("upstream.settings.fa16852b8b")),
-        .init(id: "pages", page: .browsing, title: L10n.text("upstream.settings.600584c2d5"), icon: "doc.richtext",
-              blurb: L10n.text("upstream.settings.20631e6028")),
+        .init(id: "search", page: .browsing, title: L10n.text("upstream.settings.98cc363c01"), icon: "magnifyingglass"),
+        .init(id: "links", page: .browsing, title: L10n.text("flowDrag.object.link"), icon: "link"),
+        .init(id: "reading", page: .browsing, title: L10n.text("Settings.0845"), icon: "doc.plaintext"),
+        .init(id: "video", page: .browsing, title: L10n.text("upstream.settings.bc17c1f017"), icon: "play.rectangle"),
+        .init(id: "pages", page: .browsing, title: L10n.text("upstream.settings.600584c2d5"), icon: "doc.richtext"),
 
-        .init(id: "arc", page: .spaces, title: L10n.text("upstream.settings.70cd152ff9"), icon: "arrow.down.forward.square",
-              blurb: L10n.text("upstream.settings.8a127978d7")),
-        .init(id: "spaces", page: .spaces, title: L10n.text("upstream.settings.eadc6e8b87"), icon: "rectangle.3.group",
-              blurb: L10n.text("upstream.settings.5a36c97f18")),
-        .init(id: "pins", page: .spaces, title: L10n.text("upstream.settings.76859a9147"), icon: "pin",
-              blurb: L10n.text("upstream.settings.ef827bbff0")),
-        .init(id: "opening", page: .spaces, title: L10n.text("upstream.settings.67e8dcea47"), icon: "command",
-              blurb: L10n.text("upstream.settings.3cbfbcb48d")),
+        .init(id: "arc", page: .spaces, title: L10n.text("upstream.settings.70cd152ff9"), icon: "arrow.down.forward.square"),
+        .init(id: "spaces", page: .spaces, title: L10n.text("upstream.settings.eadc6e8b87"), icon: "rectangle.3.group"),
+        .init(id: "pins", page: .spaces, title: L10n.text("upstream.settings.76859a9147"), icon: "pin"),
+        .init(id: "opening", page: .spaces, title: L10n.text("upstream.settings.67e8dcea47"), icon: "command"),
 
-        .init(id: "passwords", page: .passwords, title: L10n.text("Settings.0784"), icon: "key",
-              blurb: L10n.text("upstream.settings.c25df77a40")),
-        .init(id: "apple", page: .passwords, title: L10n.text("applePasswords.name"), icon: "lock.rectangle.stack",
-              blurb: L10n.text("upstream.settings.9eb13ec964")),
+        .init(id: "passwords", page: .passwords, title: L10n.text("Settings.0784"), icon: "key"),
+        .init(id: "apple", page: .passwords, title: L10n.text("applePasswords.name"), icon: "lock.rectangle.stack"),
 
-        .init(id: "blocking", page: .privacy, title: L10n.text("upstream.settings.d785c0d4b3"), icon: "shield",
-              blurb: L10n.text("upstream.settings.7ff9084bf2")),
-        .init(id: "permissions", page: .privacy, title: L10n.text("upstream.settings.dc5f2eb465"), icon: "checkmark.shield",
-              blurb: L10n.text("upstream.settings.1de9d4bfaf")),
-        .init(id: "clear", page: .privacy, title: L10n.text("Recall.0651"), icon: "trash",
-              blurb: L10n.text("upstream.settings.ecf8e09e4a")),
+        .init(id: "blocking", page: .privacy, title: L10n.text("upstream.settings.d785c0d4b3"), icon: "shield"),
+        .init(id: "permissions", page: .privacy, title: L10n.text("upstream.settings.dc5f2eb465"), icon: "checkmark.shield"),
+        .init(id: "clear", page: .privacy, title: L10n.text("Recall.0651"), icon: "trash"),
 
-        .init(id: "mouse", page: .keyboard, title: L10n.text("upstream.settings.4786b531bc"), icon: "computermouse",
-              blurb: L10n.text("upstream.settings.0d12dded46")),
+        .init(id: "mouse", page: .keyboard, title: L10n.text("upstream.settings.4786b531bc"), icon: "computermouse"),
 
-        .init(id: "updates", page: .about, title: L10n.text("Settings.0849"), icon: "arrow.triangle.2.circlepath",
-              blurb: L10n.text("upstream.settings.56e0cfe236")),
-        .init(id: "developer", page: .about, title: L10n.text("upstream.settings.7e08ebec5e"), icon: "hammer",
-              blurb: L10n.text("upstream.settings.222102f5f2")),
+        .init(id: "updates", page: .about, title: L10n.text("Settings.0849"), icon: "arrow.triangle.2.circlepath"),
+        .init(id: "developer", page: .about, title: L10n.text("upstream.settings.7e08ebec5e"), icon: "hammer"),
     ]
 
     static func group(_ id: String) -> SettingsGroup? { groups.first { $0.id == id } }
@@ -173,9 +141,11 @@ enum SettingsIndex {
               more: L10n.text("upstream.settings.87bc8b1e5d"),
               keys: ["pages.dusk"], words: ["dark", "dusk", "night"], parent: "look"),
         .init(id: "tabs.layout", group: "window", icon: "sidebar.left",
-              title: L10n.text("App.0145"), detail: L10n.text("upstream.settings.e8320bbeb0"),
-              keys: ["sidebar", "sidebar.position"],
-              words: ["sidebar", "vertical tabs", "column", "left", "right", "top", "tab bar", "position"], kind: .wide),
+              title: L10n.text("App.0145"), detail: L10n.text("upstream.88017ad.7e5d69be4d"),
+              more: L10n.text("upstream.88017ad.3aa9715b2e"),
+              keys: ["sidebar", "sidebar.position", "sidebar.icons"],
+              words: ["sidebar", "vertical tabs", "column", "left", "right", "top", "tab bar", "position",
+                      "icons only", "compact", "collapsed", "narrow", "favicons"], kind: .wide),
         .init(id: "sidebar.hides", group: "window", icon: "sidebar.squares.left",
               title: L10n.text("upstream.settings.b0954cf556"), detail: L10n.text("upstream.settings.2da0207a22"),
               keys: ["sidebar.hides"], words: ["auto hide", "sidebar"], parent: "tabs.layout"),
@@ -189,7 +159,7 @@ enum SettingsIndex {
         .init(id: "sidebar.roomy", group: "tablook", icon: "textformat.size.larger",
               title: L10n.text("sync.settings.roomy"), detail: L10n.text("upstream.settings.7daa104ab5"),
               keys: ["sidebar.roomy"], words: ["bigger", "larger", "text size", "accessibility"], parent: "tabs.layout"),
-        .init(id: "glyph", group: "tablook", icon: "character",
+        .init(id: "glyph", group: "tablook", icon: "app",
               title: L10n.text("Settings.0760"), detail: L10n.text("Settings.0761"),
               keys: ["glyph"], words: ["favicon", "icons", "letters"]),
         .init(id: "tabs.reading", group: "tablook", icon: "text.line.first.and.arrowtriangle.forward",
@@ -229,6 +199,9 @@ enum SettingsIndex {
         .init(id: "flowDrag.open", group: "newtabs", icon: "hand.draw",
               title: L10n.text("flowDrag.title"), detail: L10n.text("upstream.settings.826e825d58"),
               words: ["drag", "gesture", "search", "background", "FlowMouse"]),
+        .init(id: "newtab.floating", group: "newtabs", icon: "rectangle.on.rectangle",
+              title: L10n.text("upstream.address.floatingNewTab"), detail: L10n.text("upstream.address.floatingNewTab.detail"),
+              keys: ["newtab.floating"], words: ["new tab", "floating", "address"]),
         .init(id: "tabs.newPlace", group: "newtabs", icon: "arrow.right.to.line",
               title: L10n.text("sync.settings.newPlace"), detail: L10n.text("upstream.settings.7614d2c22d"),
               more: L10n.text("sync.settings.newPlace.detail"),
@@ -236,6 +209,10 @@ enum SettingsIndex {
         .init(id: "tabs.newAfterLast", group: "newtabs", icon: "plus.rectangle.on.rectangle",
               title: L10n.text("sync.settings.afterLast"), detail: L10n.text("upstream.settings.cb5248336a"),
               keys: ["tabs.newAfterLast"], words: ["last tab"]),
+        .init(id: "tabs.closeGoesBack", group: "newtabs", icon: "arrow.uturn.backward",
+              title: L10n.text("upstream.88017ad.fab3c3b5c5"), detail: L10n.text("upstream.88017ad.5198315823"),
+              more: L10n.text("upstream.88017ad.8541bf11cc"),
+              keys: ["tabs.closeGoesBack"], words: ["close", "previous tab", "recent"]),
         .init(id: "tabs.lazy", group: "newtabs", icon: "hourglass",
               title: L10n.text("Settings.0768"), detail: L10n.text("upstream.settings.9631a40911"),
               more: L10n.text("upstream.settings.4724442b27"),
@@ -276,7 +253,7 @@ enum SettingsIndex {
               keys: ["links.little"], words: ["little arc", "mini window"]),
         .init(id: "reader.twins", group: "reading", icon: "doc.text",
               title: L10n.text("upstream.settings.c57ac240ab"), detail: L10n.text("upstream.settings.107729ebd1"),
-              more: L10n.text("upstream.settings.daf26792e7"),
+              more: L10n.text("upstream.88017ad.f654ec5618"),
               keys: ["reader.twins"], words: ["markdown", "reader"]),
         .init(id: "reader.follows", group: "reading", icon: "circle.righthalf.filled",
               title: L10n.text("upstream.settings.cc16e3115a"), detail: L10n.text("upstream.settings.3fffe20d2d"),
@@ -354,8 +331,9 @@ enum SettingsIndex {
 
         // Privacy
         .init(id: "shield", group: "blocking", icon: "shield.lefthalf.filled",
-              title: L10n.text("Settings.0806"), detail: L10n.text("Settings.0807"),
-              keys: ["shield"], words: ["adblock", "ad blocker", "ads"]),
+              title: L10n.text("Settings.0806"), detail: L10n.text("upstream.88017ad.133181a7e0"),
+              more: L10n.text("upstream.88017ad.79b365167e"),
+              keys: ["shield"], words: ["adblock", "ad blocker", "ads", "youtube"]),
         .init(id: "sites.keep", group: "blocking", icon: "eye.slash",
               title: L10n.text("Settings.0812"), detail: L10n.text("upstream.settings.0744c57b83"),
               more: L10n.text("upstream.settings.c3d31a62a1"),
@@ -488,7 +466,8 @@ enum SettingsIndex {
     @MainActor static func applies(_ item: SettingsItem, _ prefs: Preferences) -> Bool {
         switch item.id {
         case "pages.dusk": return prefs.look != .light
-        case "sidebar.hides", "layout.cards", "sidebar.roomy", "pins.list": return prefs.sidebar
+        case "sidebar.roomy": return prefs.sidebar && !prefs.sideIcons
+        case "sidebar.hides", "layout.cards", "pins.list": return prefs.sidebar
         case "toolbar.left": return !prefs.sidebar
         default: return true
         }
@@ -499,6 +478,7 @@ enum SettingsIndex {
         switch item.id {
         case "pages.dusk": return L10n.text("upstream.settings.18b9a07d81")
         case "toolbar.left": return L10n.text("upstream.settings.e89364ed5e")
+        case "sidebar.roomy": return L10n.text("upstream.88017ad.61579a8b34")
         default: return L10n.text("upstream.settings.f2d1566f46")
         }
     }
@@ -506,16 +486,19 @@ enum SettingsIndex {
 
 // MARK: - merged controls
 
-/// Tabs: across the top, or a column down either side. Reads and writes
-/// `sidebar` and `sidebar.position`, as the two switches did.
+/// Tabs: across the top, a column down either side, or that column as
+/// icons only. Reads and writes `sidebar` and `sidebar.position`, as the
+/// two switches did, and `sidebar.icons`. Icons only keeps the side the
+/// column was on.
 enum TabsLayout: String, CaseIterable, Identifiable {
-    case top, left, right
+    case top, left, right, icons
     var id: String { rawValue }
     var title: String {
         switch self {
         case .top: return L10n.text("sync.settings.top")
         case .left: return L10n.text("Prefs.0638")
         case .right: return L10n.text("Prefs.0639")
+        case .icons: return L10n.text("upstream.88017ad.7eefba1f1c")
         }
     }
 }
@@ -556,12 +539,17 @@ enum PeekChoice: String, CaseIterable, Identifiable {
 
 extension Preferences {
     var tabsLayout: TabsLayout {
-        get { !sidebar ? .top : (sidePosition == .right ? .right : .left) }
+        get { !sidebar ? .top : sideIcons ? .icons : (sidePosition == .right ? .right : .left) }
         set {
-            if newValue == .top {
+            switch newValue {
+            case .top:
                 sidebar = false
-            } else {
+            case .icons:
+                sideIcons = true
+                sidebar = true
+            case .left, .right:
                 sidePosition = newValue == .right ? .right : .left
+                sideIcons = false
                 sidebar = true
             }
         }

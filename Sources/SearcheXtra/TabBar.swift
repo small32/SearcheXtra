@@ -352,7 +352,7 @@ struct TabBar: View {
         } else {
             TabPill(browser: browser, prefs: browser.prefs, tab: tab,
                     live: tab.id == activeID, width: width, room: room, pill: pill,
-                    close: interactive ? { browser.close(tab) } : {})
+                    close: interactive ? { browser.closeTab(tab) } : {})
         }
     }
 
@@ -524,15 +524,17 @@ struct PinLine: View {
 /// far end of the row, in the sidebar.
 struct Helm: View {
     @ObservedObject var browser: Browser
+    /// One above the other, for the column of icons.
+    var vertical = false
 
     var body: some View {
         if let tab = browser.active {
-            Wheel(browser: browser, tab: tab)
+            Wheel(browser: browser, tab: tab, vertical: vertical)
         } else {
             // Nowhere to go and nothing to reload: the doors stay in place,
             // greyed, so the row doesn't shift when a tab arrives.
-            HStack(spacing: 4) {
-                HStack(spacing: 4) {
+            Helm.stack(vertical) {
+                Helm.stack(vertical) {
                     Door(icon: "chevron.left") {}
                     Door(icon: "chevron.right") {}
                     Door(icon: "arrow.clockwise") {}
@@ -546,14 +548,20 @@ struct Helm: View {
         }
     }
 
+    static func stack<Content: View>(_ vertical: Bool, @ViewBuilder _ content: () -> Content) -> some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 4))
+        return layout { content() }
+    }
+
     private struct Wheel: View {
         let browser: Browser
         @ObservedObject var tab: Tab
+        var vertical = false
 
         var body: some View {
             let back = !tab.isBlank && tab.canGoBack
             let forward = !tab.isBlank && tab.canGoForward
-            HStack(spacing: 4) {
+            Helm.stack(vertical) {
                 Door(icon: "chevron.left", help: L10n.text("TabBar.1087"), held: { Rewind.menu(tab, back: true) }) { browser.back() }
                     .disabled(!back)
                     .opacity(back ? 1 : 0.3)
@@ -809,7 +817,7 @@ private struct TabPill: View {
     private var titled: some View {
         HStack(spacing: 6) {
             if editing {
-                TabAddressEditor(browser: browser, tab: tab)
+                TabNameField(browser: browser)
                     .frame(height: 16)
             } else {
                 if prefs.glyph == .icons, !tab.isBlank {
@@ -1096,7 +1104,7 @@ struct Carried: ViewModifier {
     }
 }
 
-struct TabAddressField: NSViewRepresentable {
+struct TabNameField: NSViewRepresentable {
     @ObservedObject var browser: Browser
 
     func makeCoordinator() -> Coordinator { Coordinator(browser: browser) }
@@ -1119,17 +1127,12 @@ struct TabAddressField: NSViewRepresentable {
         field.lineBreakMode = .byClipping
         field.stringValue = browser.tabDraft
         context.coordinator.watch(field)
-        // Suggestions follow the embedded field. The site card still opens
-        // explicitly from the adjacent site-information button.
-        TabOffersPanel.follow(browser, anchor: field)
         return field
     }
 
     static func dismantleNSView(_ field: Field, coordinator: Coordinator) {
         field.arrived = nil
         field.delegate = nil
-        SiteCardPanel.hide()
-        TabOffersPanel.hide(for: coordinator.browser)
         coordinator.unwatch()
     }
 
@@ -1146,16 +1149,12 @@ struct TabAddressField: NSViewRepresentable {
     func updateNSView(_ field: Field, context: Context) {
         let coordinator = context.coordinator
         coordinator.browser = browser
-        // Keep the draft intact while the arrow keys preview a row. A later
-        // engine response can redraw the list without changing the caret.
-        let picked = browser.tabPicked.flatMap { browser.tabOffers.indices.contains($0) ? browser.tabOffers[$0] : nil }
-        let want = picked?.key ?? browser.tabDraft
+        let want = browser.tabDraft
         if !coordinator.typing, want != coordinator.synced {
             coordinator.synced = want
             field.stringValue = want
             if let editor = field.currentEditor() as? NSTextView {
-                let start = picked != nil && want.hasPrefix(browser.tabDraft) ? (browser.tabDraft as NSString).length : (want as NSString).length
-                editor.selectedRange = NSRange(location: start, length: (want as NSString).length - start)
+                editor.selectedRange = NSRange(location: (want as NSString).length, length: 0)
             }
         }
         guard !coordinator.claimed || coordinator.focusRequest != browser.focusRequest else { return }
@@ -1185,11 +1184,8 @@ struct TabAddressField: NSViewRepresentable {
         /// scheduled by a SwiftUI update while the old editor is ending.
         var focusedRequest = -1
         var typing = false
-        /// The last programmatic text, including any row preview.
+        /// The last programmatic name.
         var synced = ""
-        /// A key that takes letters off: the field mustn't put the same
-        /// letters straight back as a completion, or it can't be shortened.
-        private var deleting = false
 
         init(browser: Browser) { self.browser = browser }
 
@@ -1222,18 +1218,8 @@ struct TabAddressField: NSViewRepresentable {
 
         func controlTextDidChange(_ note: Notification) {
             guard let field = note.object as? NSTextField else { return }
-            SiteCardPanel.hide()
             typing = true
             defer { typing = false }
-            let text = field.stringValue
-            let ending = browser.tabTyped(text)
-            // The rest of a place you have been, typed in selected, as ⌘L's
-            // field does: the next key replaces it and Return takes it.
-            if !deleting, let ending, let editor = field.currentEditor() as? NSTextView {
-                field.stringValue = text + ending
-                editor.selectedRange = NSRange(location: (text as NSString).length, length: (ending as NSString).length)
-            }
-            deleting = false
             browser.tabDraft = field.stringValue
             synced = field.stringValue
         }
@@ -1245,26 +1231,11 @@ struct TabAddressField: NSViewRepresentable {
         ) -> Bool {
             switch command {
             case #selector(NSResponder.insertNewline(_:)):
-                // Returning true keeps the field editing, which is what lets a
-                // refused address stay on screen instead of being thrown away.
                 browser.commitTabEdit()
                 return true
             case #selector(NSResponder.cancelOperation(_:)):
                 browser.cancelTabEdit()
                 return true
-            case #selector(NSResponder.moveDown(_:)) where !browser.tabOffers.isEmpty:
-                browser.walkTab(1)
-                return true
-            case #selector(NSResponder.moveUp(_:)) where !browser.tabOffers.isEmpty:
-                browser.walkTab(-1)
-                return true
-            case #selector(NSResponder.deleteBackward(_:)),
-                 #selector(NSResponder.deleteForward(_:)),
-                 #selector(NSResponder.deleteWordBackward(_:)),
-                 #selector(NSResponder.deleteWordForward(_:)),
-                 #selector(NSResponder.deleteToBeginningOfLine(_:)):
-                deleting = true
-                return false
             default:
                 return false
             }
@@ -1272,7 +1243,6 @@ struct TabAddressField: NSViewRepresentable {
 
         /// Clicking anywhere else keeps what was typed, as Return does.
         func controlTextDidEndEditing(_ note: Notification) {
-            guard !SiteCardPanel.isShown else { return }
             finishEditingLater(checkFocus: true)
         }
 
@@ -1309,18 +1279,6 @@ struct TabAddressField: NSViewRepresentable {
                 guard let self, let field, event.window === field.window,
                       !field.bounds.contains(field.convert(event.locationInWindow, from: nil))
                 else { return event }
-                if let content = field.window?.contentView {
-                    var hit = content.hitTest(content.convert(event.locationInWindow, from: nil))
-                    while let view = hit {
-                        if view.identifier?.rawValue == "TabSiteInfo" { return event }
-                        hit = view.superview
-                    }
-                }
-                let browser = self.browser
-                if let tab = browser.editingTab, SiteCardPanel.keepsAddressOpen(in: browser, tab: tab) {
-                    SiteCardPanel.dismiss()
-                    return event
-                }
                 self.finishEditingLater()
                 return event
             }
@@ -1378,8 +1336,7 @@ struct TabMenu: View {
             if rows {
                 Button(tab.listed ? L10n.text("TabBar.1097") : L10n.text("TabBar.1098")) { browser.setListed(tab, !tab.listed) }
             }
-            // Every active tab edits its embedded address on click. Keep
-            // returning a pin to its saved page as an explicit menu action.
+            // Returning a pin to its saved page remains an explicit menu action.
             Button(L10n.text("TabBar.1099")) { browser.goHome(tab) }
                 .disabled(tab.home.map { Browser.samePage($0, tab.address) } ?? true)
             if !(rows && tab.listed) {
@@ -1503,6 +1460,8 @@ struct TabMenu: View {
         Button(L10n.text("TabBar.1121"), action: close)
         Button(L10n.text("TabBar.1122")) { browser.closeOthers(but: tab) }
             .disabled(browser.tabs.count < 2)
+        Button(browser.prefs.sidebar ? L10n.text("upstream.88017ad.20db3aee25") : L10n.text("upstream.88017ad.b8de339ac9")) { browser.closeTabsBelow(tab) }
+            .disabled(browser.tabsBelow(tab).isEmpty)
         // ⌘⇧T, and the History menu's Recently Closed, where few think to
         // look for it: here too, where tabs are closed.
         Button(browser.reopenTitle) { browser.reopen() }

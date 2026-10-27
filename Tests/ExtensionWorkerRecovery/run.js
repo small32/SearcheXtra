@@ -227,5 +227,70 @@ async function test(name, run) { await run(); console.log('PASS ' + name); passe
     assert.deepEqual(Array.from(calls[0][1].types), filter.types);
     assert.deepEqual(Array.from(calls[0][2]), ['responseHeaders']);
   });
+  await test('Content scripts get Chrome install reason and platform enums', () => {
+    const { runtime } = load(true);
+    assert.equal(runtime.OnInstalledReason.INSTALL, 'install');
+    assert.equal(runtime.OnRestartRequiredReason.OS_UPDATE, 'os_update');
+    assert.equal(runtime.PlatformArch.ARM64, 'arm64');
+    assert.equal(runtime.PlatformOs.MAC, 'mac');
+    assert.equal(runtime.RequestUpdateCheckStatus.NO_UPDATE, 'no_update');
+  });
+  await test('Cookie listeners ignore malformed events and keep add/remove identity', () => {
+    const listeners = new Set(), seen = [];
+    const state = load(false, 0, state => {
+      state.root.chrome.cookies = { onChanged: {
+        addListener: f => listeners.add(f), removeListener: f => listeners.delete(f), hasListener: f => listeners.has(f),
+      } };
+    });
+    const changed = state.root.chrome.cookies.onChanged, listener = change => seen.push(change.cookie.name);
+    changed.addListener(listener); changed.addListener(listener);
+    for (const value of [undefined, {}, { cookie: null }, { cookie: { name: 'session' }, cause: 'explicit' }]) {
+      listeners.forEach(f => f(value));
+    }
+    assert.deepEqual(seen, ['session']);
+    assert.equal(changed.hasListener(listener), true);
+    changed.removeListener(listener);
+    assert.equal(changed.hasListener(listener), false);
+    assert.equal(listeners.size, 0);
+  });
+  await test('DNR omits redirects and headers WebKit would broaden, preserving other rules', async () => {
+    const changes = [];
+    const state = load(false, 0, state => {
+      state.root.chrome.declarativeNetRequest = {
+        getSessionRules: async () => [], getDynamicRules: async () => [],
+        updateSessionRules: async options => changes.push(options), updateDynamicRules: async options => changes.push(options),
+      };
+    });
+    const condition = { regexFilter: '^https?://.*', requestDomains: ['bad.example'], resourceTypes: ['main_frame'] };
+    const rules = [
+      { id: 1, action: { type: 'redirect', redirect: { extensionPath: '/blocked.html' } }, condition },
+      { id: 2, action: { type: 'modifyHeaders', requestHeaders: [] }, condition },
+      { id: 3, action: { type: 'block' }, condition },
+      { id: 4, action: { type: 'redirect', redirect: { extensionPath: '/blocked.html' } }, condition: { requestDomains: ['bad.example'] } },
+      { id: 5, action: { type: 'redirect', redirect: { extensionPath: '/blocked.html' } }, condition: { regexFilter: '^https://bad.example/' } },
+    ];
+    const dnr = state.root.chrome.declarativeNetRequest;
+    await dnr.updateSessionRules({ addRules: rules });
+    await dnr.updateDynamicRules({ addRules: rules });
+    assert.equal(changes.length, 2);
+    for (const change of changes) assert.deepEqual(Array.from(change.addRules, rule => rule.id), [3, 4, 5]);
+    assert.equal(rules.length, 5, 'Original extension rules remain intact');
+  });
+  await test('Per-tab side panel options reach native before tab placement', async () => {
+    const messages = [];
+    const state = load(false, 0, state => {
+      state.root.chrome.tabs = { get: async id => ({ id, index: 2, windowId: 7 }) };
+      state.root.chrome.windows = { getAll: async () => [{ id: 7, left: 10, top: 20, width: 800, height: 600 }] };
+      state.runtime.sendNativeMessage = (app, message) => { messages.push(message); return Promise.resolve({ value: null }); };
+    });
+    await state.root.chrome.sidePanel.setOptions({ tabId: 3, enabled: true, path: 'work.html' });
+    await drain();
+    const options = messages.findIndex(message => message.api === 'sidePanel.setOptions');
+    const placed = messages.findIndex(message => message.api === 'sidePanel.placed');
+    assert(options >= 0 && placed > options);
+    assert.equal(messages[placed].args[0], 3);
+    assert.equal(messages[placed].args[1].i, 2);
+    assert.equal(messages[placed].args[1].w.width, 800);
+  });
   console.log(passed + ' full-shim regression cases passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -2,30 +2,22 @@ import AppKit
 import SecurityInterface
 import SwiftUI
 
-// Site information opens explicitly from the tab context menu.
-// Editing an address stays entirely inside the tab.
+// Site information opens from the address field or the tab context menu.
 
-/// The card's own small window, under the tab's address. It never takes the
-/// keys: the address stays in the tab being edited, the caret where it was,
-/// and a click on the card is only a click.
+/// The site's settings beside the upstream address field. The field's draft
+/// stays intact while cookies and permissions are viewed or edited.
 @MainActor
 enum SiteCardPanel {
     private static var panel: Panel?
     private static var resign: Any?
     private static weak var owner: Browser?
-    private static var editingTab: Tab.ID?
 
     static var isShown: Bool { panel != nil }
 
-    static func keepsAddressOpen(in browser: Browser, tab: Tab.ID) -> Bool {
-        isShown && owner === browser && editingTab == tab
-    }
-
     static func dismiss() {
         let browser = owner
-        let tab = editingTab
         hide()
-        if let browser, let tab, browser.editingTab == tab { browser.cancelTabEdit() }
+        if browser?.editing == true { browser?.askFocus() }
     }
 
     // MARK: - when
@@ -34,15 +26,15 @@ enum SiteCardPanel {
 
     static func show(for tab: Tab, in browser: Browser) {
         hide()
-        original = browser.tabDraft
+        original = browser.typed
         place(tab, browser, tries: 0)
     }
 
     private static func place(_ tab: Tab, _ browser: Browser, tries: Int) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
-            guard original != nil, browser.editingTab == tab.id, browser.tabDraft == original else { return }
+            guard original != nil, browser.activeID == tab.id, browser.fieldShowing, browser.typed == original else { return }
             // The field with the caret in it is the one on screen; failing
-            // that, wait until the inline field has acquired focus.
+            // that, wait until the address field has acquired focus.
             let focused = ((browser.window ?? Links.window)?.firstResponder as? NSTextView)?.delegate as? NSTextField
             guard let field = focused, field.window != nil else {
                 if tries < 15 { place(tab, browser, tries: tries + 1) }
@@ -113,7 +105,6 @@ enum SiteCardPanel {
         }
         self.panel = panel
         owner = browser
-        editingTab = tab.id
         resign = NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { SiteCardPanel.dismiss() }
         }
@@ -135,7 +126,6 @@ enum SiteCardPanel {
     static func hide() {
         original = nil
         owner = nil
-        editingTab = nil
         if let resign { NotificationCenter.default.removeObserver(resign) }
         resign = nil
         guard let panel else { return }
@@ -193,14 +183,7 @@ struct SiteCard: View {
 
     var body: some View {
         Group {
-            if section == 2 {
-                VStack(alignment: .leading, spacing: 0) {
-                    SiteDetails(browser: browser, tab: tab, cookiesPage: false) { section = 0 }
-                    zoom
-                    sound
-                    grounded
-                }
-            } else if section == 1 {
+            if section != 0 {
                 SiteDetails(browser: browser, tab: tab, cookiesPage: section == 1) { section = 0 }
             } else if deeper, let safety {
                 security(safety)

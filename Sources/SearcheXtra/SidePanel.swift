@@ -35,8 +35,6 @@ enum SidePanelContent: Equatable {
 /// The sites offered in View › Side Panel, as they are typed: a short list,
 /// plus whatever page you are on.
 enum PanelSites {
-    static let offered: [(name: String, url: URL)] = []
-
     /// Only the web: never a file, a script or an extension's page.
     static func allowed(_ url: URL?) -> Bool {
         guard let scheme = url?.scheme?.lowercased() else { return false }

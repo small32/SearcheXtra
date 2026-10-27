@@ -13,15 +13,16 @@ final class SiteInfoButtonTests: XCTestCase {
         let tab = try XCTUnwrap(browser.active)
         tab.go(to: URL(string: "http://127.0.0.1:1/site-test")!)
         browser.beginTabEdit(tab)
-        let draft = browser.tabDraft
-        let host = NSHostingView(rootView: TabAddressEditor(browser: browser, tab: tab))
+        let draft = browser.typed
+        let host = NSHostingView(rootView: SiteInfoButton(browser: browser, tab: tab))
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 32),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
         defer {
             SiteCardPanel.hide()
-            browser.cancelTabEdit()
+            browser.dismiss()
+            browser.closeAll()
             window.close()
         }
         host.layoutSubtreeIfNeeded()
@@ -36,18 +37,21 @@ final class SiteInfoButtonTests: XCTestCase {
         XCTAssertFalse(SiteCardPanel.isShown)
         button.performClick(nil)
         XCTAssertTrue(SiteCardPanel.isShown)
-        XCTAssertEqual(browser.editingTab, tab.id)
-        XCTAssertEqual(browser.tabDraft, draft)
+        XCTAssertTrue(browser.editing)
+        XCTAssertNil(browser.editingTab)
+        XCTAssertEqual(browser.typed, draft)
         XCTAssertEqual(window.childWindows?.count, 1)
         // A focus-loss callback queued before the panel opened arrives late.
         browser.finishTabEdit()
-        XCTAssertEqual(browser.editingTab, tab.id)
-        XCTAssertEqual(browser.tabDraft, draft)
+        XCTAssertTrue(browser.editing)
+        XCTAssertNil(browser.editingTab)
+        XCTAssertEqual(browser.typed, draft)
         XCTAssertTrue(SiteCardPanel.isShown)
         button.performClick(nil)
         XCTAssertEqual(window.childWindows?.count, 1)
         SiteCardPanel.dismiss()
         XCTAssertFalse(SiteCardPanel.isShown)
         XCTAssertNil(browser.editingTab)
+        XCTAssertEqual(browser.typed, draft)
     }
 }

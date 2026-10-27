@@ -129,6 +129,8 @@ private struct KeyBox: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // What the Shortcuts group's line under its title used to say.
+        .help(L10n.text("upstream.88017ad.d29d8693eb"))
         .onHover { hovering = $0 }
         .onDisappear(perform: stop)
     }

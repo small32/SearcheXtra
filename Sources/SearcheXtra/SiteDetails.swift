@@ -2,21 +2,7 @@ import AppKit
 import SwiftUI
 import WebKit
 
-struct TabAddressEditor: View {
-    @ObservedObject var browser: Browser
-    @ObservedObject var tab: Tab
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if let url = tab.pageAddress, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-                SiteInfoButton(browser: browser, tab: tab).frame(width: 20, height: 20)
-            }
-            TabAddressField(browser: browser).frame(height: 16)
-        }
-    }
-}
-
-private struct SiteInfoButton: NSViewRepresentable {
+struct SiteInfoButton: NSViewRepresentable {
     let browser: Browser
     let tab: Tab
     func makeCoordinator() -> Coordinator { Coordinator(browser: browser, tab: tab) }

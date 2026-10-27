@@ -76,7 +76,8 @@ final class SidebarPressTests: XCTestCase {
         XCTAssertNil(browser.editingTab, "Releasing the selecting press must not edit the address")
         try await send(.leftMouseDown, at: point, in: window)
         try await send(.leftMouseUp, at: point, in: window)
-        XCTAssertEqual(browser.editingTab, first.id, "A fresh click on the active row still edits")
+        XCTAssertNil(browser.editingTab)
+        XCTAssertTrue(browser.editing, "A fresh click on the active row opens the upstream address field")
     }
 
     func testPressThenDragStillReordersWithoutEditing() async throws {
@@ -182,7 +183,8 @@ final class SidebarPressTests: XCTestCase {
         XCTAssertNil(browser.editingPin)
         try await send(.leftMouseDown, at: point, in: window)
         try await send(.leftMouseUp, at: point, in: window)
-        XCTAssertEqual(browser.editingTab, first.id, "A fresh click on the active pin edits its embedded address")
+        XCTAssertNil(browser.editingTab)
+        XCTAssertTrue(browser.editing, "An active pin opens the upstream address field")
         XCTAssertNil(browser.editingPin)
     }
 
@@ -299,11 +301,11 @@ final class SidebarPressTests: XCTestCase {
         XCTAssertEqual(selected, 0, "Only the left button selects on press; right-click stays the menu's")
     }
 
-    func testEmbeddedAddressWaitsForItsWindowBeforeTakingFocus() {
+    func testNameFieldWaitsForItsWindowBeforeTakingFocus() {
         let browser = makeBrowser()
-        browser.beginTabEdit(browser.tabs[0])
-        let coordinator = TabAddressField.Coordinator(browser: browser)
-        let field = TabAddressField.Field(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
+        browser.beginTabRename(browser.tabs[0])
+        let coordinator = TabNameField.Coordinator(browser: browser)
+        let field = TabNameField.Field(frame: NSRect(x: 0, y: 0, width: 200, height: 22))
         field.delegate = coordinator
         coordinator.focus(field)
         XCTAssertNotNil(field.arrived, "The focus request must wait while SwiftUI has not attached the field")
@@ -311,7 +313,7 @@ final class SidebarPressTests: XCTestCase {
         coordinator.focus(field)
         // Dismantling the native view clears its delayed request; nothing
         // must retain this field or re-open an edit after it goes away.
-        TabAddressField.dismantleNSView(field, coordinator: coordinator)
+        TabNameField.dismantleNSView(field, coordinator: coordinator)
         XCTAssertNil(field.arrived)
     }
 
@@ -465,8 +467,8 @@ final class SidebarPressTests: XCTestCase {
         NSPoint(x: 70, y: window.frame.height - Metrics.strip - 14 - CGFloat(index) * 30)
     }
 
-    private func addressField(in view: NSView) -> TabAddressField.Field? {
-        if let field = view as? TabAddressField.Field { return field }
+    private func addressField(in view: NSView) -> TabNameField.Field? {
+        if let field = view as? TabNameField.Field { return field }
         return view.subviews.lazy.compactMap { self.addressField(in: $0) }.first
     }
 

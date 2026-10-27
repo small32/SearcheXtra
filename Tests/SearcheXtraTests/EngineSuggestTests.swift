@@ -156,7 +156,7 @@ final class EngineSuggestTests: XCTestCase {
         XCTAssertNotNil(browser.engineQuestion(for: "cats"))
     }
 
-    func testEmbeddedFieldUsesTheEditedTabsPrivacyAndNeverRenames() throws {
+    func testAddressFieldUsesTheSelectedTabsPrivacyAndNeverRenames() throws {
         _ = NSApplication.shared
         let browser = Browser(record: WindowRecord())
         defer {
@@ -170,23 +170,24 @@ final class EngineSuggestTests: XCTestCase {
         let shy = try XCTUnwrap(browser.active)
         XCTAssertTrue(shy.shy)
 
-        // The edited tab decides: the active tab may have changed while
-        // SwiftUI is handing focus to the embedded address field.
+        // An address request selects its tab before the shared field asks
+        // for suggestions, so a private page never sends search words.
         browser.beginTabEdit(ordinary)
-        XCTAssertNotNil(browser.tabEngineQuestion(for: "上海 天气"))
-        XCTAssertNil(browser.tabEngineQuestion(for: "example.com"))
-        XCTAssertNil(browser.tabEngineQuestion(for: fakeToken))
+        XCTAssertNotNil(browser.engineQuestion(for: "上海 天气"))
+        XCTAssertNil(browser.engineQuestion(for: "example.com"))
+        XCTAssertNil(browser.engineQuestion(for: fakeToken))
 
         browser.select(ordinary)
         browser.beginTabEdit(shy)
-        XCTAssertNil(browser.tabEngineQuestion(for: "coffee"))
+        XCTAssertNil(browser.engineQuestion(for: "coffee"))
         browser.beginTabRename(ordinary)
-        XCTAssertNil(browser.tabEngineQuestion(for: "coffee"))
+        XCTAssertNil(browser.engineQuestion(for: "coffee"))
         browser.cancelTabEdit()
-        XCTAssertNil(browser.tabEngineQuestion(for: "coffee"))
+        browser.prefs.engineSuggests = false
+        XCTAssertNil(browser.engineQuestion(for: "coffee"))
     }
 
-    func testEmbeddedCancellationAndTurningOffStopPendingQuestions() async throws {
+    func testAddressFieldCancellationAndTurningOffStopPendingQuestions() async throws {
         _ = NSApplication.shared
         let oldEndpoint = Store.settings.object(forKey: "suggest.testURL")
         Store.settings.set("http://127.0.0.1:9/s?q=%s", forKey: "suggest.testURL")
@@ -199,41 +200,40 @@ final class EngineSuggestTests: XCTestCase {
         }
         browser.prefs.engineSuggests = true
         let tab = try XCTUnwrap(browser.active)
-        let asked = browser.tabSuggester.asked
-        let cancelled = browser.tabSuggester.cancelled
+        tab.go(to: URL(string: "http://127.0.0.1:9/address-fixture")!)
+        let asked = browser.suggester.asked
+        let cancelled = browser.suggester.cancelled
         browser.beginTabEdit(tab)
-        _ = browser.tabTyped("coffee")
-        browser.tabDraft = "coffee"
-        browser.cancelTabEdit()
+        browser.typed = "coffee"
+        browser.dismiss()
         try await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(browser.tabSuggester.asked, asked, "a cancelled debounce sends nothing")
-        XCTAssertGreaterThan(browser.tabSuggester.cancelled, cancelled)
-        XCTAssertTrue(browser.tabOffers.isEmpty)
+        XCTAssertEqual(browser.suggester.asked, asked, "a cancelled debounce sends nothing")
+        XCTAssertGreaterThan(browser.suggester.cancelled, cancelled)
+        XCTAssertTrue(browser.offers.isEmpty)
 
         browser.beginTabEdit(tab)
-        _ = browser.tabTyped("tea")
-        browser.tabDraft = "tea"
+        browser.typed = "tea"
         browser.prefs.engineSuggests = false
         try await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(browser.tabSuggester.asked, asked, "turning off cancels before the pause ends")
-        XCTAssertFalse(browser.tabOffers.contains { $0.kind == .suggested })
-        XCTAssertNil(browser.tabEngineQuestion(for: "tea"))
+        XCTAssertEqual(browser.suggester.asked, asked, "turning off cancels before the pause ends")
+        XCTAssertFalse(browser.offers.contains { $0.kind == .suggested })
+        XCTAssertNil(browser.engineQuestion(for: "tea"))
     }
 
 
-    func testOldEmbeddedFieldFocusLossCannotCloseAReopenedEdit() async throws {
+    func testOldNameFieldFocusLossCannotCloseAReopenedRename() async throws {
         _ = NSApplication.shared
         let browser = Browser(record: WindowRecord())
         defer { browser.closeAll() }
         let tab = try XCTUnwrap(browser.active)
-        browser.beginTabEdit(tab)
-        let oldField = TabAddressField.Coordinator(browser: browser)
+        browser.beginTabRename(tab)
+        let oldField = TabNameField.Coordinator(browser: browser)
         oldField.focusRequest = browser.focusRequest
         oldField.focusedRequest = browser.focusRequest
         let ended = Notification(name: NSControl.textDidEndEditingNotification)
         oldField.controlTextDidEndEditing(ended)
         // Reopen before the queued end-edit callback is delivered.
-        browser.beginTabEdit(tab)
+        browser.beginTabRename(tab)
         let newRequest = browser.focusRequest
         // SwiftUI may already have scheduled the replacement field's focus.
         oldField.focusRequest = newRequest
@@ -249,7 +249,7 @@ final class EngineSuggestTests: XCTestCase {
     }
 
 
-    func testDelayedFocusLossCannotDismissTheCurrentAddressEditor() async throws {
+    func testDelayedFocusLossCannotDismissTheCurrentNameEditor() async throws {
         _ = NSApplication.shared
         let browser = Browser(record: WindowRecord())
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 80),
@@ -257,11 +257,11 @@ final class EngineSuggestTests: XCTestCase {
         window.isReleasedWhenClosed = false
         browser.window = window
         let tab = try XCTUnwrap(browser.active)
-        browser.beginTabEdit(tab)
-        let coordinator = TabAddressField.Coordinator(browser: browser)
+        browser.beginTabRename(tab)
+        let coordinator = TabNameField.Coordinator(browser: browser)
         coordinator.focusRequest = browser.focusRequest
         coordinator.focusedRequest = browser.focusRequest
-        let field = TabAddressField.Field(frame: NSRect(x: 20, y: 20, width: 320, height: 22))
+        let field = TabNameField.Field(frame: NSRect(x: 20, y: 20, width: 320, height: 22))
         field.delegate = coordinator
         try XCTUnwrap(window.contentView).addSubview(field)
         defer {

@@ -1,5 +1,25 @@
 # SearcheXtra 更新日志
 
+## 未发布 / Unreleased
+
+### 简体中文
+
+- 移植 Search 上游 `76bd2c1..88017ad` 的 macOS 更新；保留本地书签、超级拖拽、中英双语及 MV2/MV3 用户脚本兼容。
+- 移除标签内地址输入，统一使用上游浮动地址框，支持书签与历史补全、站内搜索和可选的浮动新标签页；标签内仅保留重命名。
+- 修复 uBlock Origin Lite 空白页、扩展枚举与 Cookie 事件、侧边面板按钮和无扩展时的网站 Service Worker 清理。
+- 改善窗口关闭后的资源释放、空间排序持久化、静音恢复和登录字段识别；同步 Apple Passwords 的按需提示。
+- 同步纯图标标签栏、标签组折叠与关闭行为、关闭下方／右侧标签、返回最近查看标签、保存 WebArchive、设置布局及 YouTube 广告过滤。
+- 复用上游书签编辑与移动菜单、合并重复网站控件和重启流程，清理未使用的设置及翻译资源。
+
+### English
+
+- Port macOS updates from Search upstream `76bd2c1..88017ad`, retaining local bookmark management, super drag, both interface languages, and MV2/MV3 user-script compatibility.
+- Replace embedded tab address entry with the upstream floating field, including bookmark/history suggestions, site search, and optional floating new tabs. In-tab text editing is reserved for renaming.
+- Fix uBlock Origin Lite blank pages, extension enums and cookie events, side-panel actions, and unnecessary website service-worker cleanup when no extensions are installed.
+- Improve resource release after closing windows, persistent space order, muted-tab restoration, login-field detection, and on-demand Apple Passwords offers.
+- Port icon-only tabs, tab-group folding and closing behavior, close-below/right commands, returning to the previously viewed tab, WebArchive saving, settings layout improvements, and YouTube ad filtering.
+- Reuse upstream bookmark editing and move menus, unify duplicate site controls and relaunch paths, and remove unused settings and translations.
+
 ## 2.2.5 — 2026-10-26
 
 ### 简体中文

@@ -269,28 +269,28 @@ final class Updater: ObservableObject {
     /// to be gone before asking macOS to open the bundle again — `open` on a
     /// running app only brings it forward. Quitting goes through NSApp so
     /// everything that is written on the way out is written, the same as ⌘Q.
-    func relaunch() {
+    func relaunch(arguments: [String] = []) {
         let waiter = Process()
         waiter.executableURL = URL(fileURLWithPath: "/bin/sh")
         waiter.arguments = [
             "-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; shift; exec \"$@\"",
             "sh", String(ProcessInfo.processInfo.processIdentifier),
-        ] + Updater.reopen
-        try? waiter.run()
-        NSApp.terminate(nil)
+        ] + Updater.reopen(arguments: arguments)
+        do { try waiter.run(); NSApp.terminate(nil) }
+        catch { NSSound.beep() }
     }
 
     /// `open` and what to give it: the bundle, and — for a test run — the
     /// variables that made it a test run, since `open` starts from a fresh
     /// environment and a relaunch must not land on the real data.
-    private static var reopen: [String] {
-        var arguments = ["/usr/bin/open"]
+    static func reopen(arguments: [String] = []) -> [String] {
+        var command = ["/usr/bin/open"]
         for key in ["SEARCH_PROBE", "SEARCH_FEED"] {
             if let value = ProcessInfo.processInfo.environment[key] {
-                arguments += ["--env", "\(key)=\(value)"]
+                command += ["--env", "\(key)=\(value)"]
             }
         }
-        return arguments + [Bundle.main.bundleURL.path]
+        return command + [Bundle.main.bundleURL.path] + (arguments.isEmpty ? [] : ["--args"] + arguments)
     }
 
     static func fetch() async throws -> Release {

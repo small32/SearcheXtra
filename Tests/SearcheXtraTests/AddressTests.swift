@@ -60,13 +60,23 @@ final class AddressTests: XCTestCase {
         }
     }
 
-    func testTabEditingHidesExtensionURLsAndEmbeddedCredentials() throws {
+    @MainActor
+    func testUpstreamAddressFieldRedactsCredentialsAndDoesNotEditTheTab() throws {
+        guard Store.testing else { throw XCTSkip("Use SEARCH_PROBE for browser tests") }
+        _ = NSApplication.shared
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
+        defer { browser.closeAll() }
+        let tab = try XCTUnwrap(browser.active)
         let page = try XCTUnwrap(URL(string: "https://username:password@example.com/path?q=value#part"))
-        let edited = Address.tabEditable(page)
-        XCTAssertFalse(edited.contains("username"))
-        XCTAssertFalse(edited.contains("password"))
-        XCTAssertEqual(Address.url(from: edited)?.absoluteString, "https://example.com/path?q=value#part")
-        XCTAssertEqual(Address.tabEditable(try XCTUnwrap(URL(string: "webkit-extension://fixture/newtab.html"))), "")
+        tab.restore(url: page, title: "Page")
+        browser.beginTabEdit(tab)
+        XCTAssertEqual(browser.activeID, tab.id)
+        XCTAssertNil(browser.editingTab)
+        XCTAssertTrue(browser.editing)
+        XCTAssertTrue(browser.fieldShowing)
+        XCTAssertEqual(browser.typed, "https://example.com/path?q=value#part")
+        XCTAssertFalse(browser.typed.contains("username"))
+        XCTAssertFalse(browser.typed.contains("password"))
     }
 
     func testAddressesAndSearchPhrasesKeepTheirMeaning() {

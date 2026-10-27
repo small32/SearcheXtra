@@ -146,30 +146,14 @@ struct BookmarkContextMenu: View {
         }.disabled(urls.isEmpty)
         if let node {
             Divider()
-            if node.isFolder {
-                Button(L10n.text("bookmarks.context.rename")) {
-                    close()
-                    Ask.name(L10n.text("bookmarks.context.rename"), placeholder: node.title, initial: node.title, confirm: L10n.text("Bookmarks.0224")) {
-                        bookmarks.update(node.id, title: $0, url: nil)
-                    }
-                }
-            } else {
-                Button(L10n.text("bookmarks.context.edit")) { close(); bookmarks.askEdit(node) }
+            Button(L10n.text("bookmarks.context.rename")) { close(); bookmarks.askRename(node) }
+            if !node.isFolder {
+                Button(L10n.text("bookmarks.upstream.editAddress")) { close(); bookmarks.askAddress(node) }
             }
             Divider()
             Button(L10n.text("bookmarks.context.cut")) { close(); bookmarks.copy(node, cut: true) }
             Button(L10n.text("bookmarks.context.copy")) { close(); bookmarks.copy(node) }
-            let targets = Bookmarks.folders(bookmarks.roots).filter { !Bookmarks.holds($0.node.id, node) }
-            if !targets.isEmpty {
-                Menu(L10n.text("bookmarks.context.moveTo")) {
-                    ForEach(targets, id: \.node.id) { target in
-                        Button(String(repeating: "   ", count: target.depth) + target.node.title) {
-                            close()
-                            bookmarks.move(node.id, into: target.node.id)
-                        }
-                    }
-                }
-            }
+            BookmarkMoveMenu(bookmarks: bookmarks, node: node, close: close)
         }
         Button(L10n.text("bookmarks.context.paste")) { close(); bookmarks.paste(into: parent) }.disabled(!bookmarks.canPaste)
         if let node {
@@ -199,6 +183,29 @@ struct BookmarkContextMenu: View {
         Browsers.open(target, frame: nil)
     }
 
+}
+
+/// The upstream outline's move menu, shared by every bookmark surface.
+struct BookmarkMoveMenu: View {
+    @ObservedObject var bookmarks: Bookmarks
+    let node: Bookmark
+    var close: () -> Void = {}
+
+    var body: some View {
+        Menu(L10n.text("Bookmarks.0228")) {
+            Button(L10n.text("Bookmarks.0229")) { close(); bookmarks.move(node.id, into: nil) }
+            let targets = Bookmarks.folders(bookmarks.roots).filter { !Bookmarks.holds($0.node.id, node) }
+            if !targets.isEmpty {
+                Divider()
+                ForEach(targets, id: \.node.id) { target in
+                    Button(String(repeating: "   ", count: target.depth) + target.node.title) {
+                        close()
+                        bookmarks.move(node.id, into: target.node.id)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @MainActor

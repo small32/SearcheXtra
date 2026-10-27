@@ -8,6 +8,23 @@ import XCTest
 /// skipped, so nothing is ever saved.
 final class VaultAndUpdaterTests: XCTestCase {
     @MainActor
+    func testRelaunchKeepsProbeEnvironmentAndLanguageArgumentsSeparate() {
+        let standard = Updater.reopen()
+        XCTAssertEqual(standard.first, "/usr/bin/open")
+        XCTAssertEqual(standard.last, Bundle.main.bundleURL.path)
+        XCTAssertFalse(standard.contains("--args"))
+        for key in ["SEARCH_PROBE", "SEARCH_FEED"] {
+            if let value = ProcessInfo.processInfo.environment[key] {
+                let index = standard.firstIndex(of: "\(key)=\(value)")
+                XCTAssertNotNil(index)
+                if let index, index > 0 { XCTAssertEqual(standard[index - 1], "--env") }
+            }
+        }
+        let language = ["-AppleLanguages", "(\"zh-Hans\")"]
+        XCTAssertEqual(Updater.reopen(arguments: language), standard + ["--args"] + language)
+    }
+
+    @MainActor
     func testUnavailableAuthenticationDoesNotRevealPasswords() {
         for code in [LAError.notInteractive, .biometryNotAvailable, .systemCancel, .invalidContext] {
             let context = UnavailableAuthentication(code: code)

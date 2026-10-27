@@ -110,16 +110,6 @@ enum Address {
         ["chrome-extension", "webkit-extension"].contains(page.scheme?.lowercased() ?? "")
     }
 
-    static func tabEditable(_ page: URL) -> String {
-        guard !isExtensionPage(page) else { return "" }
-        guard var parts = URLComponents(url: page, resolvingAgainstBaseURL: false), parts.user != nil || parts.password != nil else {
-            return editable(page)
-        }
-        parts.user = nil
-        parts.password = nil
-        return parts.url.map(editable) ?? ""
-    }
-
     static func editable(_ page: URL) -> String {
         let full = page.absoluteString
         guard let scheme = page.scheme, full.lowercased().hasPrefix(scheme.lowercased() + "://") else { return full }
