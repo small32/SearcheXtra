@@ -346,6 +346,21 @@ final class ExtensionScriptCatTests: XCTestCase {
                 let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: current) as? [[String: Any]] ?? []
                 return scripts.contains { $0["id"] as? String == "scriptcat-content" } && scripts.contains { $0["id"] as? String == scriptID }
             }
+            // runtime.reload returns before the replacement worker finishes
+            // initialization. As in permissionCycle, persisted registrations
+            // are not a service-ready signal, and the old options page belongs
+            // to the unloaded context.
+            context = try XCTUnwrap(Extensions.shared.contexts[identifier])
+            let runtimeReadyOptions = browser.open(try XCTUnwrap(context.optionsPageURL), foreground: true)
+            options = runtimeReadyOptions
+            diagnosticOptions = runtimeReadyOptions
+            show(runtimeReadyOptions)
+            try await until("native ScriptCat content registration after runtime.reload") {
+                let scripts = try await self.evaluate(runtimeReadyOptions.web, "return await chrome.scripting.getRegisteredContentScripts();") as? [[String: Any]] ?? []
+                return scripts.contains { $0["id"] as? String == "scriptcat-scripting" }
+            }
+            _ = try await waitForRuntime(runtimeReadyOptions, "native runtime.reload")
+            trace("replacement ScriptCat background ready after runtime.reload")
             show(website)
             try await reload(website, in: window)
             try await until("GM storage and XHR after native chrome.runtime.reload") {
