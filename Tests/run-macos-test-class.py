@@ -13,23 +13,36 @@ def report(message):
     print(message, file=sys.stderr, flush=True)
 
 
-def sample_processes(process, directory):
+def process_descendants(process):
     snapshot = subprocess.run(
-        ["ps", "-axo", "pid=,pgid=,comm="],
+        ["ps", "-axo", "pid=,ppid=,pgid=,comm="],
         capture_output=True, text=True, timeout=5, check=False,
     )
-    targets = []
+    children = {}
     for line in snapshot.stdout.splitlines():
-        fields = line.strip().split(None, 2)
-        if len(fields) != 3:
+        fields = line.strip().split(None, 3)
+        if len(fields) != 4:
             continue
-        pid, group, command = fields
-        if int(group) == process.pid and (
-            "xctest" in command.lower() or "PackageTests" in command
-        ):
-            targets.append(int(pid))
+        pid, parent, _, command = fields
+        children.setdefault(int(parent), []).append((int(pid), command))
+    descendants = {}
+    pending = [process.pid]
+    while pending:
+        for pid, command in children.get(pending.pop(), []):
+            if pid not in descendants:
+                descendants[pid] = command
+                pending.append(pid)
+    return descendants
+
+
+def sample_processes(process, directory, descendants):
+    descendants.update(process_descendants(process))
+    targets = [
+        pid for pid, command in descendants.items()
+        if "xctest" in command.lower() or "packagetests" in command.lower()
+    ]
     if not targets:
-        report("No xctest process in the test group; sampling the SwiftPM process.")
+        report("No xctest descendant of SwiftPM; sampling the SwiftPM process.")
         targets = [process.pid]
     for pid in targets:
         destination = directory / f"sample-{pid}.log"
@@ -49,11 +62,22 @@ def sample_processes(process, directory):
             report(f"Could not sample PID {pid}: {error}")
 
 
-def stop_group(process):
+def stop_group(process, descendants):
+    try:
+        descendants.update(process_descendants(process))
+    except (OSError, subprocess.TimeoutExpired) as error:
+        report(f"Could not refresh test descendants: {error}")
+    # SwiftPM can put xctest in another process group. Keep the recorded PIDs
+    # even after their parent exits, so those children cannot become orphans.
+    for pid in descendants:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
-        return
+        pass
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
@@ -63,6 +87,11 @@ def stop_group(process):
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    for pid in descendants:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
     process.wait()
 
 
@@ -83,6 +112,7 @@ def main():
     trace.write_text("")
     environment = dict(os.environ, SEARCH_NATIVE_TEST_TRACE=str(trace))
     process = subprocess.Popen(args.command, env=environment, start_new_session=True)
+    descendants = {}
     try:
         code = process.wait(timeout=args.timeout)
         return code if code >= 0 else 128 - code
@@ -91,14 +121,14 @@ def main():
         try:
             report(f"=== Test progress: {trace} ===")
             report(trace.read_text(errors="replace") or "(no test progress recorded)")
-            sample_processes(process, directory)
+            sample_processes(process, directory, descendants)
         except (OSError, subprocess.TimeoutExpired) as error:
             report(f"Could not collect timeout diagnostics: {error}")
         finally:
-            stop_group(process)
+            stop_group(process, descendants)
         return 124
     except KeyboardInterrupt:
-        stop_group(process)
+        stop_group(process, descendants)
         return 130
 
 
