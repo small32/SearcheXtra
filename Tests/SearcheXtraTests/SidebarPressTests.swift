@@ -373,16 +373,11 @@ final class SidebarPressTests: XCTestCase {
         let window = makeStripWindow(browser)
         try await settle()
         let point = pillPoint(1)
-        if let view = window.contentView {
-            let local = view.convert(point, from: nil)
-            trace("STRIP DOWN hit=\(String(describing: view.hitTest(local))) active=\(String(describing: browser.tabs.firstIndex { $0.id == browser.activeID })) editing=\(String(describing: browser.editingTab))")
-        }
         // AppKit may track this click until release, as it does for the
         // address field. Queue the release before synchronous dispatch.
         NSApp.postEvent(try event(.leftMouseUp, at: point, in: window), atStart: false)
         window.sendEvent(try event(.leftMouseDown, at: point, in: window))
         try await settle()
-        trace("STRIP CLICK delivered")
         XCTAssertEqual(browser.activeID, second.id, "Watching the press for the pill to give must leave its click alone")
     }
 
@@ -434,6 +429,10 @@ final class SidebarPressTests: XCTestCase {
             if browser.tabs.last?.isBlank == false { browser.newTab() }
             browser.tabs.last?.restore(url: URL(string: "about:blank#\(word)")!, title: word)
         }
+        // New Tab starts editing its address. These fixtures represent
+        // settled pages, whose pill widths must stay at their normal size.
+        browser.cancelTabEdit()
+        XCTAssertNil(browser.editingTab)
         XCTAssertEqual(browser.tabs.count, 3)
         XCTAssertEqual(browser.pinnedCount, 0)
         return browser
