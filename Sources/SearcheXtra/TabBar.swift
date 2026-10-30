@@ -1457,7 +1457,12 @@ struct TabMenu: View {
         }
         .disabled(browser.awake(because: tab) != nil)
         Divider()
-        Button(L10n.text("TabBar.1121"), action: close)
+        let picked = browser.selectedTabIDs.contains(tab.id) ? browser.visibleSelectedTabCount : 1
+        if picked > 1 {
+            Button(L10n.text("upstream.closePickedTabs", String(picked))) { browser.closePickedTabs() }
+        } else {
+            Button(L10n.text("TabBar.1121"), action: close)
+        }
         Button(L10n.text("TabBar.1122")) { browser.closeOthers(but: tab) }
             .disabled(browser.tabs.count < 2)
         Button(browser.prefs.sidebar ? L10n.text("upstream.88017ad.20db3aee25") : L10n.text("upstream.88017ad.b8de339ac9")) { browser.closeTabsBelow(tab) }

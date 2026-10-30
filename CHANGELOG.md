@@ -4,7 +4,8 @@
 
 ### 简体中文
 
-- 移植 Search 上游 `76bd2c1..b2b07e6` 的 macOS 更新；保留本地书签、超级拖拽、中英双语及 MV2/MV3 用户脚本兼容。
+- 移植 Search 上游 `76bd2c1..b122202` 的 macOS 更新；保留本地书签、超级拖拽、中英双语及 MV2/MV3 用户脚本兼容。
+- 修复预览遮挡区域的鼠标响应、画中画返回视频、暂停的全屏视频点击，以及图片链接的右键菜单；支持批量关闭多选标签并一次恢复。
 - 链接右键菜单支持在分屏中打开；修复顶部标签栏中分屏标签的布局和关闭按钮。
 - 修复全屏时窗口按钮的位置与多窗口侧栏切换，修复清除浏览数据入口和侧边栏网站切换白屏。
 - 修复 macOS 15 读取扩展错误时闪退，改善 Vimium C 和扩展侧边栏兼容性。
@@ -22,7 +23,8 @@
 
 ### English
 
-- Port macOS updates from Search upstream `76bd2c1..b2b07e6`, retaining local bookmark management, super drag, both interface languages, and MV2/MV3 user-script compatibility.
+- Port macOS updates from Search upstream `76bd2c1..b122202`, retaining local bookmark management, super drag, both interface languages, and MV2/MV3 user-script compatibility.
+- Fix pointer events behind previews, returning from picture-in-picture, clicks on paused full-screen video, and image-link context menus. Close selected tabs together and restore them in one action.
 - Add Open Link in Split View to the link menu and fix split-tab layout and close-button behavior in the top tab bar.
 - Fix full-screen window buttons and sidebar switching, opening Clear Browsing Data, and blank panels after switching sites.
 - Fix a macOS 15 crash when reading extension errors and improve Vimium C and extension side-panel compatibility.

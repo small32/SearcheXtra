@@ -89,6 +89,22 @@ final class TabSelectionTests: XCTestCase {
         XCTAssertEqual(browser.selectedTabLinks.count, 4)
     }
 
+    func testCloseFrontClosesSelectionAndReopensAsOneBatch() {
+        let browser = makeBrowser()
+        let tabs = browser.shownTabs
+        let original = tabs.compactMap { $0.address?.absoluteString }
+        browser.extendTabSelection(to: tabs[0], modifiers: .command)
+        browser.extendTabSelection(to: tabs[2], modifiers: .command)
+        browser.closeFront()
+
+        XCTAssertEqual(browser.tabs.map(\.id), [tabs[1].id])
+        XCTAssertTrue(browser.selectedTabIDs.isEmpty)
+        XCTAssertEqual(browser.recentlyClosed.count, 1)
+        guard let batch = browser.recentlyClosed.first else { return XCTFail("Missing closed batch") }
+        browser.reopen(batch)
+        XCTAssertEqual(browser.shownTabs.compactMap { $0.address?.absoluteString }, original)
+    }
+
     private func makeBrowser() -> Browser {
         let browser = Browser(record: WindowRecord(), opensStartPage: false)
         browsers.append(browser)
