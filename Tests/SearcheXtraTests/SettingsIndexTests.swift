@@ -140,7 +140,8 @@ final class SettingsIndexTests: XCTestCase {
             XCTAssertFalse(SettingsIndex.find("user scripts").contains { $0.id == "extensions.manager" })
         }
         XCTAssertTrue(SettingsIndex.find("gesture").contains { $0.id == "flowDrag.open" })
-        XCTAssertFalse(SettingsIndex.items.contains { $0.id.hasPrefix("ai.") || $0.id == "newtab.floating" })
+        XCTAssertFalse(SettingsIndex.items.contains { $0.id.hasPrefix("ai.") })
+        XCTAssertNotNil(SettingsIndex.item("newtab.floating"))
     }
 
     func testExistingSwitchChoicesPersist() {

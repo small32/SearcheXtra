@@ -1281,6 +1281,35 @@ enum ExtensionShims {
           });
         } catch (e) {}
       }
+      // WebKit may hand a listener another wrapper for the same port. Keep
+      // the endpoint's original object, including extension-owned state.
+      const pinnedPorts = new WeakSet();
+      const pinPort = (port, view) => {
+        if (!port || typeof port !== "object" || pinnedPorts.has(port)) return;
+        pinnedPorts.add(port);
+        const set = (target, key, value) => { try { Object.defineProperty(target, key, { value, configurable: true, writable: true }); } catch (e) {} };
+        for (const name of ["onMessage", "onDisconnect"]) {
+          const event = port[name];
+          if (!event || typeof event.addListener !== "function") continue;
+          const add = event.addListener, remove = event.removeListener;
+          const given = new Map(), at = name === "onMessage" ? 1 : 0;
+          set(port, name, event);
+          set(event, "addListener", (f) => {
+            if (typeof f !== "function") return add.call(event, f);
+            if (given.has(f)) return;
+            const w = (...args) => { args[at] = view; return f(...args); };
+            add.call(event, w);
+            given.set(f, w);
+          });
+          set(event, "removeListener", (f) => {
+            const w = given.get(f);
+            given.delete(f);
+            try { remove.call(event, w || f); } catch (e) {}
+          });
+          set(event, "hasListener", (f) => given.has(f));
+          set(event, "hasListeners", () => given.size > 0);
+        }
+      };
       // Installed before the content-script return. Each passive subscription
       // is bound natively to the background that this port connected to. A
       // fresh connection that wakes a replacement must not lose its own port.
@@ -1371,11 +1400,16 @@ enum ExtensionShims {
             disconnect.call(port);
           });
           workerDisconnect.set(port, finish);
+          if (inContent) pinPort(port, port);
           return port;
         };
         const connect = runtime.connect.bind(runtime);
         put(runtime, "connect", (...args) => {
-          if (typeof args[0] === "string" && args[0] && args[0] !== runtime.id) return connect(...args);
+          if (typeof args[0] === "string" && args[0] && args[0] !== runtime.id) {
+            const port = connect(...args);
+            if (inContent) pinPort(port, port);
+            return port;
+          }
           checkWorker();
           // WebKit selects the connection's background before the following
           // observation reads its identity. An absent/loading background is
@@ -1723,21 +1757,28 @@ enum ExtensionShims {
       }
       const ownPanel = !chrome.sidePanel;
       define("sidePanel", ["open", "close", "setOptions", "getOptions", "setPanelBehavior", "getPanelBehavior"]);
-      // A tab's own panel options, and which of Search's tabs that is: the
-      // button asks the tab in front, which has no number on Search's side.
-      // Told after the options themselves, so a sidePanel.open right after
-      // setOptions still finds them.
-      if (ownPanel && chrome.sidePanel && chrome.tabs && typeof chrome.tabs.get === "function") {
-        const setOptions = chrome.sidePanel.setOptions;
-        put(chrome.sidePanel, "setOptions", (options, ...rest) => {
-          const answer = setOptions(options, ...rest);
-          const tabId = options && options.tabId;
-          if (typeof tabId === "number") {
-            Promise.all([chrome.tabs.get(tabId), frames()])
-              .then(([tab, known]) => tab && native("sidePanel.placed", [tabId, placeOf(tab, known)]))
-              .catch(() => {});
+      // Native tab/window numbers belong to WebKit. Send their placement
+      // with the operation, so disabling, opening or closing uses its target
+      // even after the user has focused another tab or window.
+      if (ownPanel && chrome.sidePanel) {
+        const target = async (options) => {
+          if (typeof options?.tabId === "number") {
+            const [tab, known] = await Promise.all([chrome.tabs.get(options.tabId), frames()]);
+            if (!tab || !known.has(tab.windowId)) throw new Error("No window for the side panel tab");
+            return { place: placeOf(tab, known) };
           }
-          return answer;
+          if (typeof options?.windowId === "number") {
+            const window = await chrome.windows.get(options.windowId);
+            if (!window) throw new Error("No window for the side panel");
+            return { window: { left: window.left, top: window.top, width: window.width, height: window.height } };
+          }
+          return {};
+        };
+        for (const name of ["setOptions", "open", "close"]) put(chrome.sidePanel, name, (options, ...rest) => {
+          const callback = typeof rest.at(-1) === "function" ? rest.pop() : null;
+          const answer = target(options).then(placed => native("sidePanel." + name, [options || {}, placed]));
+          if (!callback) return answer;
+          answer.then(value => callback(value), error => withLastError(error, callback));
         });
       }
       define("offscreen", ["createDocument", "closeDocument", "hasDocument"], [],
@@ -2157,7 +2198,7 @@ enum ExtensionShims {
           const current = () => Promise.resolve(getCurrent()).then((t) => {
             if (t && !(t.index >= 0 && t.index < 1e6)) { popup = true; return undefined; }
             if (t) popup = false;
-            return t;
+            return t || undefined;
           });
           current().catch(() => {});
           put(chrome.tabs, "getCurrent", (callback) => {
@@ -2830,6 +2871,7 @@ enum ExtensionShims {
           const add = target.addListener.bind(target), remove = target.removeListener.bind(target);
           const wrapped = new Map();
           put(target, "addListener", (listener, ...rest) => {
+            if (wrapped.has(listener)) return;
             const state = new Map();
             const w = function (...args) {
               if (skip && skip(args)) return;
@@ -2841,8 +2883,9 @@ enum ExtensionShims {
               held = turn;
               turn.then(() => { if (held === turn) held = null; });
             };
+            const answer = add(w, ...rest);
             wrapped.set(listener, w);
-            return add(w, ...rest);
+            return answer;
           });
           put(target, "removeListener", (listener) => { const w = wrapped.get(listener); wrapped.delete(listener); return remove(w || listener); });
           put(target, "hasListener", (listener) => wrapped.has(listener));
@@ -3037,6 +3080,11 @@ enum ExtensionShims {
           if (!functions.has(value)) functions.set(value, value.bind(target));
           return functions.get(value);
         } });
+        // Keep browser itself a native namespace: WebKit unwraps that
+        // object, then reads its runtime/events directly in native code.
+        // Only its JavaScript runtime view changes, so browser.runtime.reload
+        // shares Chrome's cleanup without hiding native event dispatch.
+        if (root.browser) put(root.browser, "runtime", runtimeView);
         root.chrome = new Proxy(chrome, { get(target, key) { return key === "runtime" ? runtimeView : Reflect.get(target, key, target); } });
         if (__SEARCH_VERBOSE__) root.__searchUserScriptRuntimeInstall = {
           installed: root.chrome.runtime.reload === reload,
@@ -3231,11 +3279,14 @@ enum ExtensionShims {
         // its messages from the extension.
         put(runtime, "connect", (...args) => {
           const port = connect.apply(runtime, args);
-          return inContent || (typeof args[0] === "string" && args[0] !== runtime.id) ? port : number(port);
+          const kept = inContent || (typeof args[0] === "string" && args[0] !== runtime.id) ? port : number(port);
+          pinPort(kept, kept);
+          return kept;
         });
         const onConnect = runtime.onConnect;
         const add = onConnect.addListener, remove = onConnect.removeListener, has = onConnect.hasListener;
         const wrapped = new WeakMap();
+        const views = new WeakMap();
         // The worker's sender is the bare origin, with no slash after it.
         const fromOwn = (port) => !!port && !!port.sender && (String(port.sender.url) + "/").startsWith(own);
         put(onConnect, "addListener", (listener, ...rest) => {
@@ -3243,10 +3294,15 @@ enum ExtensionShims {
           let w = wrapped.get(listener);
           if (!w) {
             w = (port) => {
+              // Every listener sees the same endpoint, including its event
+              // callbacks and Map/WeakMap keys retained by the extension.
+              const known = views.get(port);
+              if (known) return listener(known);
               const given = port && port.sender, sender = untabbed(given);
               port = fromOwn(port) ? number(port) : port;
               // WebKit makes a port's sender afresh at each look, over
               // anything set on the port: the port is seen through a proxy.
+              const target = port;
               if (sender !== given) {
                 port = new Proxy(port, { get: (target, key) => {
                   if (key === "sender") return sender;
@@ -3254,6 +3310,8 @@ enum ExtensionShims {
                   return typeof value === "function" ? value.bind(target) : value;
                 } });
               }
+              views.set(target, port);
+              pinPort(target, port);
               return listener(port);
             };
             wrapped.set(listener, w);
@@ -3798,8 +3856,8 @@ enum ExtensionShims {
     static var panelOff: Set<String> = []
     /// What setOptions said for one tab, by the extension's tab id.
     static var panelTabs: [String: [Int: (path: String?, enabled: Bool?)]] = [:]
-    /// Which of Search's tabs each of those tab ids is, as the extension's
-    /// shim found it (sidePanel.placed).
+    /// Which of Search's tabs each of those tab ids is, resolved alongside
+    /// the options rather than in a later, independently ordered message.
     static var panelTabIDs: [String: [Int: Tab.ID]] = [:]
     /// One voice for every extension that reads aloud.
     static let speaker = NSSpeechSynthesizer()
@@ -3893,6 +3951,13 @@ enum ExtensionShims {
         guard Browsers.all.count <= 1 else { return nil }
         let visible = owner.visibleTabs(for: context)
         return visible.indices.contains(index) ? visible[index] : nil
+    }
+
+    private static func locatedWindow(_ value: Any?, owner: Extensions) -> Browser? {
+        guard let frame = value as? [String: Any], let left = frame["left"] as? Double,
+              let top = frame["top"] as? Double, let width = frame["width"] as? Double,
+              let height = frame["height"] as? Double else { return nil }
+        return owner.browser(windowFrame: CGRect(x: left, y: top, width: width, height: height))
     }
 
     /// Each icon drawn once; the image is held so its identity stays its own.
@@ -4134,6 +4199,11 @@ enum ExtensionShims {
         case "sidePanel.setOptions":
             let options = first as? [String: Any] ?? [:]
             if let tab = options["tabId"] as? Int {
+                let target = args.dropFirst().first as? [String: Any]
+                guard let resolved = located(target?["place"], context: context, owner: owner) else {
+                    throw Unsupported(what: "No tab for the side panel")
+                }
+                panelTabIDs[id, default: [:]][tab] = resolved.id
                 var kept = panelTabs[id]?[tab] ?? (nil, nil)
                 if let path = options["path"] as? String { kept.path = path }
                 if let enabled = options["enabled"] as? Bool { kept.enabled = enabled }
@@ -4144,12 +4214,7 @@ enum ExtensionShims {
                     if enabled { panelOff.remove(id) } else { panelOff.insert(id) }
                 }
             }
-            // Turned off while it is up: it goes, as in Chrome.
-            if options["enabled"] as? Bool == false {
-                for browser in Browsers.all {
-                    if case .page(let shown, _, _) = browser.sidePanel, shown == id { browser.closeSidePanel() }
-                }
-            }
+            if options["enabled"] as? Bool == false { refreshPanels(id, in: Browsers.all) }
             return nil
         case "sidePanel.getOptions":
             let tab = (first as? [String: Any])?["tabId"] as? Int
@@ -4163,31 +4228,47 @@ enum ExtensionShims {
             return nil
         case "sidePanel.getPanelBehavior":
             return ["openPanelOnActionClick": panelOnClick.contains(id)]
-        case "sidePanel.placed":
-            if let number = first as? Int, let tab = located(args.dropFirst().first, context: context, owner: owner) {
-                panelTabIDs[id, default: [:]][number] = tab.id
-            }
-            return nil
         case "sidePanel.open":
             // For a tab, its own page when it was given one, and the panel
             // goes with that tab; otherwise the window's.
-            let tab = (first as? [String: Any])?["tabId"] as? Int
+            let options = first as? [String: Any] ?? [:]
+            let target = args.dropFirst().first as? [String: Any] ?? [:]
+            let tab = options["tabId"] as? Int
             let own = tab.flatMap { panelTabs[id]?[$0] }
+            let resolved: Tab?
+            let browser: Browser?
+            if tab != nil {
+                resolved = located(target["place"], context: context, owner: owner)
+                browser = resolved.flatMap(owner.browser(of:))
+            } else if options["windowId"] != nil {
+                resolved = nil
+                browser = locatedWindow(target["window"], owner: owner)
+            } else {
+                resolved = nil
+                browser = owner.browser
+            }
             guard own?.enabled ?? !panelOff.contains(id),
                   let path = own?.path ?? panelPath[id] ?? defaultPanel(context),
-                  let url = ExtensionShims.page(path, in: context), let browser = owner.browser
+                  let url = ExtensionShims.page(path, in: context), let browser
             else { throw Unsupported(what: "No active side panel for this extension") }
             // The panel, or, if it can't be made, the page as a tab of its
             // own, as before there was a panel to put it in. Beside a
             // private tab it may not see, nothing opens at all.
-            if browser.showSidePanel(context, url: url, for: own?.path != nil ? browser.activeID : nil) == .noPanel {
+            if browser.showSidePanel(context, url: url, for: own != nil ? resolved?.id : nil) == .noPanel {
                 browser.open(url, foreground: true)
             }
             return nil
         case "sidePanel.close":
-            for browser in Browsers.all {
-                if case .page(let shown, _, _) = browser.sidePanel, shown == id { browser.closeSidePanel() }
-            }
+            let options = first as? [String: Any] ?? [:]
+            let target = args.dropFirst().first as? [String: Any] ?? [:]
+            if options["tabId"] as? Int != nil {
+                guard let tab = located(target["place"], context: context, owner: owner),
+                      let browser = owner.browser(of: tab) else { throw Unsupported(what: "No tab for the side panel") }
+                try closePanel(id, for: tab.id, in: browser)
+            } else if options["windowId"] as? Int != nil {
+                guard let browser = locatedWindow(target["window"], owner: owner) else { throw Unsupported(what: "No window for the side panel") }
+                try closePanel(id, in: browser)
+            } else { throw Unsupported(what: "A tabId or windowId is required to close the side panel") }
             return nil
 
         // MARK: offscreen — a page with a DOM for a worker that has none
@@ -4269,6 +4350,11 @@ enum ExtensionShims {
                 add("BACKGROUND", script.map { context.baseURL.appendingPathComponent($0) })
             }
             if ExtensionPopup.shared.extensionID == id { add("POPUP", ExtensionPopup.shared.view?.url) }
+            for browser in Browsers.all {
+                guard case .page(let owner, _, _) = browser.sidePanel, owner == id,
+                      let url = SidePanelPages.shared.web(in: browser)?.url else { continue }
+                add("SIDE_PANEL", url)
+            }
             found += ExtensionOffscreen.contexts(for: id, matching: filter)
             return found
 
@@ -4871,8 +4957,7 @@ enum ExtensionShims {
     /// panel is turned off. `own`: the tab's own page, which goes with it.
     static func actionPanel(_ context: WKWebExtensionContext, over tab: Tab.ID?) -> (url: URL, own: Bool)? {
         let id = context.uniqueIdentifier
-        let number = tab.flatMap { tab in panelTabIDs[id]?.filter { $0.value == tab }.map(\.key).max() }
-        let own = number.flatMap { panelTabs[id]?[$0] }
+        let own = panelOptions(id, over: tab)
         guard own?.enabled ?? !panelOff.contains(id),
               let path = own?.path ?? panelPath[id] ?? defaultPanel(context),
               // Resolved, not appended: a path can carry a query — Claude's
@@ -4880,7 +4965,46 @@ enum ExtensionShims {
               // which appended would be escaped into the file's name.
               let url = ExtensionShims.page(path, in: context)
         else { return nil }
-        return (url, own?.path != nil)
+        return (url, own != nil)
+    }
+
+    private static func panelOptions(_ id: String, over tab: Tab.ID?) -> (path: String?, enabled: Bool?)? {
+        let number = tab.flatMap { tab in panelTabIDs[id]?.filter { $0.value == tab }.map(\.key).max() }
+        return number.flatMap { panelTabs[id]?[$0] }
+    }
+
+    static func panelEnabled(_ id: String, over tab: Tab.ID?) -> Bool {
+        panelOptions(id, over: tab)?.enabled ?? !panelOff.contains(id)
+    }
+
+    /// A disabled tab loses only its own open/bound panel. Default options
+    /// still yield to a tab's explicit enabled override in every window.
+    static func refreshPanels(_ id: String, in browsers: [Browser]) {
+        for browser in browsers {
+            SidePanelPages.shared.removeDisabled(id, in: browser) { panelEnabled(id, over: $0) }
+            if case .page(let shown, _, let tab) = browser.sidePanel, shown == id,
+               !panelEnabled(id, over: tab ?? browser.activeID) { browser.closeSidePanel() }
+            browser.objectWillChange.send()
+        }
+    }
+
+    /// Close only the requested scope. A tab's panel can be bound while
+    /// hidden, and closing a window's global panel leaves those bindings alone.
+    static func closePanel(_ id: String, for tab: Tab.ID? = nil, in browser: Browser) throws {
+        if let tab {
+            let bound: Bool
+            if case .page(let owner, _, _)? = SidePanelPages.shared.bound(to: tab, in: browser), owner == id {
+                bound = true
+                SidePanelPages.shared.unbind(tab, in: browser)
+            } else { bound = false }
+            guard case .page(let shown, _, let attached) = browser.sidePanel, shown == id else { return }
+            if attached == tab { browser.closeSidePanel() }
+            else if attached == nil, !bound {
+                throw Unsupported(what: "The tab has no tab-specific side panel to close")
+            }
+        } else if case .page(let shown, _, nil) = browser.sidePanel, shown == id {
+            browser.closeSidePanel()
+        }
     }
 
     /// The extension's button, for one that asked for its panel on a

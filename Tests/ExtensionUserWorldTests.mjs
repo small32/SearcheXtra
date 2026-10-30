@@ -183,6 +183,8 @@ await assert.rejects(vm.runInContext('__searchUserScriptHost("targets", { target
 const shims = fs.readFileSync(new URL('../Sources/SearcheXtra/ExtensionShims.swift', import.meta.url), 'utf8');
 const userStart = shims.indexOf('      const scripting = chrome.scripting;');
 const userEnd = shims.indexOf('      // WebKit says "install" again', userStart);
+const pinStart = shims.indexOf('      const pinnedPorts = new WeakSet();');
+const pinEnd = shims.indexOf('      // Installed before the content-script return.', pinStart);
 const portStart = shims.indexOf('      if (runtime && typeof runtime.connect === "function" && runtime.onConnect) {');
 const portEnd = shims.indexOf('      // Members of namespaces WebKit has.', portStart);
 const bridgeURL = 'chrome-extension://fixtureExtension/_search/user-script-host.html';
@@ -209,7 +211,7 @@ function extensionFixture(background) {
   const context = vm.createContext({ chrome, runtime, root: {}, background, inContent: false, console, setTimeout, __SEARCH_VERBOSE__: false,
     untabbed: sender => sender, put: (target, key, value) => { target[key] = value; }, put2: (key, value) => { chrome[key] = value; },
     native: async () => undefined, withLastError: () => {} });
-  vm.runInContext(shims.slice(userStart, userEnd) + shims.slice(portStart, portEnd), context);
+  vm.runInContext(shims.slice(userStart, userEnd) + shims.slice(pinStart, pinEnd) + shims.slice(portStart, portEnd), context);
   return { context, runtime, chrome };
 }
 const worker = extensionFixture(true), pageHost = extensionFixture(false);

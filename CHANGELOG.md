@@ -4,21 +4,39 @@
 
 ### 简体中文
 
-- 移植 Search 上游 `76bd2c1..88017ad` 的 macOS 更新；保留本地书签、超级拖拽、中英双语及 MV2/MV3 用户脚本兼容。
+- 移植 Search 上游 `76bd2c1..b2b07e6` 的 macOS 更新；保留本地书签、超级拖拽、中英双语及 MV2/MV3 用户脚本兼容。
+- 链接右键菜单支持在分屏中打开；修复顶部标签栏中分屏标签的布局和关闭按钮。
+- 修复全屏时窗口按钮的位置与多窗口侧栏切换，修复清除浏览数据入口和侧边栏网站切换白屏。
+- 修复 macOS 15 读取扩展错误时闪退，改善 Vimium C 和扩展侧边栏兼容性。
 - 移除标签内地址输入，统一使用上游浮动地址框，支持书签与历史补全、站内搜索和可选的浮动新标签页；标签内仅保留重命名。
 - 修复 uBlock Origin Lite 空白页、扩展枚举与 Cookie 事件、侧边面板按钮和无扩展时的网站 Service Worker 清理。
 - 改善窗口关闭后的资源释放、空间排序持久化、静音恢复和登录字段识别；同步 Apple Passwords 的按需提示。
 - 同步纯图标标签栏、标签组折叠与关闭行为、关闭下方／右侧标签、返回最近查看标签、保存 WebArchive、设置布局及 YouTube 广告过滤。
 - 复用上游书签编辑与移动菜单、合并重复网站控件和重启流程，清理未使用的设置及翻译资源。
+- 修复 Arc 导入时默认个人资料识别及后台空间会话保存；跨存储空间移动未保存页面前先确认。
+- 修复网站信息卡、标签重命名、地址搜索模式和 Unicode 补全选区；修复扩展侧边面板作用范围、事件监听去重及用户脚本重载。
+- 修复无痕链接预览保存网站权限的问题；权限提示随来源页面切换、导航和关闭而取消，并修正中文权限名称与右键菜单翻译。
+- 清除历史后使旧网站图标请求和写入失效；取消网页翻译时释放尚在建立的翻译会话和隐藏视图。
+- 按个人资料隔离书签导入来源，避免切换个人资料后重复导入；覆盖下载仅在成功后替换原文件，失败和取消保留原文件。
+- 修复扩展多个连接监听器之间的端口身份不一致；关闭扩展侧栏时遵循指定标签或窗口，并清除对应后台标签的面板绑定。
 
 ### English
 
-- Port macOS updates from Search upstream `76bd2c1..88017ad`, retaining local bookmark management, super drag, both interface languages, and MV2/MV3 user-script compatibility.
+- Port macOS updates from Search upstream `76bd2c1..b2b07e6`, retaining local bookmark management, super drag, both interface languages, and MV2/MV3 user-script compatibility.
+- Add Open Link in Split View to the link menu and fix split-tab layout and close-button behavior in the top tab bar.
+- Fix full-screen window buttons and sidebar switching, opening Clear Browsing Data, and blank panels after switching sites.
+- Fix a macOS 15 crash when reading extension errors and improve Vimium C and extension side-panel compatibility.
 - Replace embedded tab address entry with the upstream floating field, including bookmark/history suggestions, site search, and optional floating new tabs. In-tab text editing is reserved for renaming.
 - Fix uBlock Origin Lite blank pages, extension enums and cookie events, side-panel actions, and unnecessary website service-worker cleanup when no extensions are installed.
 - Improve resource release after closing windows, persistent space order, muted-tab restoration, login-field detection, and on-demand Apple Passwords offers.
 - Port icon-only tabs, tab-group folding and closing behavior, close-below/right commands, returning to the previously viewed tab, WebArchive saving, settings layout improvements, and YouTube ad filtering.
 - Reuse upstream bookmark editing and move menus, unify duplicate site controls and relaunch paths, and remove unused settings and translations.
+- Fix Arc default-profile identification and saving imports into background spaces; confirm before moving an unsaved page to a different data store.
+- Fix site-card lifetime, tab renaming, address search mode, and Unicode completion selection; fix extension side-panel scope, duplicate listeners, and user-script reloads.
+- Prevent private link previews from persisting website permissions; cancel permission prompts when their source page is switched, navigated, or closed, and fix Chinese permission labels and context-menu translations.
+- Invalidate old favicon requests and writes when clearing history; release pending translation sessions and hidden views when translation is cancelled.
+- Isolate bookmark import sources by profile to prevent duplicate imports after switching profiles. Replace existing download files only after success, preserving them on failure or cancellation.
+- Preserve port identity across multiple extension connection listeners; close side panels only for the specified tab or window and remove the corresponding background-tab bindings.
 
 ## 2.2.5 — 2026-10-26
 

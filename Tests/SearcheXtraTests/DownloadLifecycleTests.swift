@@ -251,6 +251,72 @@ final class DownloadLifecycleTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: destination), replacement)
     }
 
+    func testConfirmedReplacementKeepsOriginalUntilDownloadCompletes() async throws {
+        let tab = try await openFixturePage()
+        let target = downloadFolder.appendingPathComponent("existing.bin")
+        let original = Data("original file".utf8)
+        try original.write(to: target)
+        fixture.hold("/replace.bin", afterBytes: 256 * 1024)
+        defer { fixture.release("/replace.bin") }
+        let download = try await requestDownload("/replace.bin", from: tab.web, replacing: target)
+        let entry = try XCTUnwrap(browser.fetches.entry(for: download))
+        try await waitUntil { entry.completedBytes >= 64 * 1024 }
+        let staging = try XCTUnwrap(entry.destination)
+
+        XCTAssertNotEqual(staging, target)
+        XCTAssertEqual(entry.name, target.lastPathComponent)
+        XCTAssertEqual(try Data(contentsOf: target), original)
+        fixture.release("/replace.bin")
+        try await waitUntil { browser.loot.kept.contains { $0.path == target.path } }
+
+        XCTAssertEqual(try Data(contentsOf: target), fixture.expectedBytes())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staging.deletingLastPathComponent().path))
+    }
+
+    func testCancelledReplacementPreservesOriginalAndRemovesStaging() async throws {
+        let tab = try await openFixturePage()
+        let target = downloadFolder.appendingPathComponent("existing.bin")
+        let original = Data("do not remove on cancellation".utf8)
+        try original.write(to: target)
+        fixture.hold("/replace-cancel.bin", afterBytes: 256 * 1024)
+        defer { fixture.release("/replace-cancel.bin") }
+        let download = try await requestDownload("/replace-cancel.bin", from: tab.web, replacing: target)
+        let entry = try XCTUnwrap(browser.fetches.entry(for: download))
+        try await waitUntil { entry.completedBytes >= 64 * 1024 }
+        let staging = try XCTUnwrap(entry.destination)
+
+        browser.cancelDownload(entry)
+        // Model a finish already queued when Cancel was pressed. It must
+        // neither publish a completed download nor replace the old file.
+        browser.downloadDidFinish(download)
+        XCTAssertEqual(try Data(contentsOf: target), original)
+        try await waitUntil { browser.downloading.isEmpty }
+
+        XCTAssertEqual(try Data(contentsOf: target), original)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staging.deletingLastPathComponent().path))
+        XCTAssertTrue(browser.loot.kept.isEmpty)
+    }
+
+    func testFailedReplacementCanRetryWithoutTouchingOriginal() async throws {
+        let tab = try await openFixturePage()
+        let target = downloadFolder.appendingPathComponent("existing.bin")
+        let original = Data("do not remove on failure".utf8)
+        try original.write(to: target)
+        let download = try await requestDownload("/retry.bin", from: tab.web, replacing: target)
+        let entry = try XCTUnwrap(browser.fetches.entry(for: download))
+        try await waitUntil { entry.state == .failed }
+        XCTAssertEqual(try Data(contentsOf: target), original)
+        let first = entry.destination
+
+        browser.retryDownload(entry)
+        XCTAssertNotEqual(entry.destination, first)
+        XCTAssertEqual(try Data(contentsOf: target), original)
+        try await waitUntil { browser.loot.kept.contains { $0.path == target.path } }
+
+        XCTAssertEqual(try Data(contentsOf: target), fixture.expectedBytes())
+        XCTAssertEqual(fixture.count("/retry.bin"), 2)
+    }
+
     func testPrivateDownloadNeverEntersSharedEntriesHistoryOrCompletedList() async throws {
         let privateSource = Tab(shy: true)
         let tab = browser.open(URL(string: "about:blank")!, foreground: true, from: privateSource)
@@ -288,14 +354,25 @@ final class DownloadLifecycleTests: XCTestCase {
         return try XCTUnwrap(browser.fetches.entry(for: download))
     }
 
-    private func requestDownload(_ path: String, from webView: WKWebView) async throws -> WKDownload {
+    private func requestDownload(_ path: String, from webView: WKWebView, replacing target: URL? = nil) async throws -> WKDownload {
         let request = URLRequest(url: fixture.url(path))
         let browser = try XCTUnwrap(browser)
-        return await withCheckedContinuation { continuation in
+        return try await withCheckedThrowingContinuation { continuation in
             webView.startDownload(using: request) { download in
                 // Assign the delegate before returning to WebKit: resuming
                 // the actor first can lose the destination request to nil.
                 browser.keep(download, from: webView)
+                if let target, let entry = browser.fetches.entry(for: download) {
+                    do {
+                        // The target has already been confirmed in Save As.
+                        // Seed the same staging destination without opening UI.
+                        entry.reached(try entry.prepareReplacement(at: target))
+                    } catch {
+                        browser.cancelDownload(entry)
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                }
                 continuation.resume(returning: download)
             }
         }

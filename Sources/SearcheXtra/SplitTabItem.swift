@@ -33,6 +33,7 @@ struct SplitTabItem: View {
     @State private var hovered: Tab.ID?
 
     private var stacked: Bool { width == nil }
+    private var inset: CGFloat { stacked ? 0 : max(0, (height - SplitTabHalf.pillHeight) / 2) }
     private var focused: Tab.ID? { live ? (focusedID ?? browser.activeID) : nil }
 
     var body: some View {
@@ -56,23 +57,26 @@ struct SplitTabItem: View {
                     Rectangle()
                         .fill(Palette.hairline)
                         .frame(width: 1)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, inset + 6)
                     half(right, first: false)
                 }
                 .frame(width: width, height: height)
                 .overlay(alignment: .trailing) { cross }
+                // Keep the same half selected while the pointer enters its
+                // shared close button; clear it when it leaves the pair.
+                .onHover { if !$0 { hovered = nil } }
             }
         }
         .background {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(greys.tile)
-                .padding(.vertical, stacked ? 0 : 6)
+                .padding(.vertical, inset)
                 .allowsHitTesting(false)
         }
         .overlay {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .strokeBorder(Palette.hairline, lineWidth: 1)
-                .padding(.vertical, stacked ? 0 : 6)
+                .padding(.vertical, inset)
                 .allowsHitTesting(false)
         }
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -128,6 +132,7 @@ struct SplitTabItem: View {
 }
 
 private struct SplitTabHalf: View {
+    static let pillHeight: CGFloat = 28
     @Environment(\.greys) private var greys
     @Environment(\.tabShortcutNumbers) private var shortcutNumbers
     @ObservedObject var browser: Browser
@@ -161,7 +166,7 @@ private struct SplitTabHalf: View {
         row
             .padding(.leading, stacked ? 0 : 9)
             .padding(.trailing, stacked ? 7 : 4)
-            .frame(height: stacked ? height : 28)
+            .frame(height: stacked ? height : Self.pillHeight)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background { ground.animation(Motion.quick, value: stacked && focused).animation(Motion.quick, value: joined) }
             .frame(height: height)
@@ -190,7 +195,8 @@ private struct SplitTabHalf: View {
                 if interactive { MiddleClick { browser.closeTab(tab) } }
             }
             .onHover { over in
-                if over { hovered = tab.id } else if hovered == tab.id { hovered = nil }
+                if over { hovered = tab.id }
+                else if stacked, hovered == tab.id { hovered = nil }
             }
             .contextMenu {
                 if interactive { TabMenu(browser: browser, tab: tab, close: { browser.closeTab(tab) }) }

@@ -167,7 +167,8 @@ final class IconColumnTests: XCTestCase {
         restorePreferences = {
             (prefs.sidebar, prefs.sideIcons, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.usesSpaces, prefs.sharesPins) = previous
         }
-        let browser = Browser(record: WindowRecord())
+        Session.write(now: true, space: Space.firstID, .init(tabs: [], active: 0))
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
         browsers.append(browser)
         browser.prefs.tabsLayout = .icons
         browser.prefs.usesTabGroups = false

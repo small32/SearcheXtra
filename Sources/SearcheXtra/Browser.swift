@@ -68,10 +68,14 @@ final class Browser: NSObject, ObservableObject {
                 DispatchQueue.main.async { held.forEach { $0.present() } }
             }
             guard oldValue != activeID else { return }
+            SiteCardPanel.hide(in: self)
             sidePanelFollows(active)
             // Going to another tab ends a page's run of links (see placeForLink).
             linkRun = nil
             if displayTab?.id == oldValue { cancelDisplay() }
+            if captureTab?.id == oldValue || asking.map({ !$0.screen }) == true {
+                finishCapture(.deny, keep: false)
+            }
             clearTabSelection()
             // What was found belongs to the page just left; the words typed
             // go on to be looked for on this one.
@@ -326,6 +330,7 @@ final class Browser: NSObject, ObservableObject {
     @Published var editing = false {
         // The field put away takes its chip with it.
         didSet {
+            if !editing { SiteCardPanel.hide(in: self) }
             if !editing, siteChip != nil { siteChip = nil }
             if !editing, launching { launching = false }
         }
@@ -352,7 +357,12 @@ final class Browser: NSObject, ObservableObject {
     /// What is in the field. Every change re-reads the history, because the
     /// list under the field and the grey ending inside it are both just
     /// answers to this string.
-    @Published var typed = "" { didSet { guess() } }
+    @Published var typed = "" {
+        didSet {
+            if typed != oldValue { SiteCardPanel.hide(in: self) }
+            guess()
+        }
+    }
 
     /// This window's profile's (see Profiles.swift).
     let history: History
@@ -1414,6 +1424,13 @@ final class Browser: NSObject, ObservableObject {
     }
     @Published var recallHunt = ""
 
+    /// Opening History resets its mode, so select the clearing controls after
+    /// bringing the page forward.
+    func clearBrowsingData() {
+        recalling = true
+        recallMode = .clearing
+    }
+
     /// Cookies, caches, local storage — everything a site left on this Mac,
     /// in every space. Clearing it signs you out of everything, which is
     /// the point.
@@ -1477,6 +1494,10 @@ final class Browser: NSObject, ObservableObject {
     var transientSitePermissions: [String: Bool] = [:]
     @Published private(set) var asking: CaptureAsk?
     private var decide: ((WKPermissionDecision) -> Void)?
+    private weak var captureWeb: WKWebView?
+    private weak var captureTab: Tab?
+    private var captureHeld: HeldQuestion?
+    private var captureRequest: UUID?
     /// WebKit's screen-sharing answers: deny (0), screen (1), window (2).
     private var decideDisplay: ((Int) -> Void)?
     private weak var displayTab: Tab?
@@ -1522,23 +1543,65 @@ final class Browser: NSObject, ObservableObject {
 
     /// A page or popup going away must settle its permission callback too,
     /// the screen's included.
-    func cancelCapture() {
-        cancelDisplay()
-        let pending = decide
-        decide = nil
-        askedAbout = ""
-        asking = nil
-        pending?(.deny)
+    func cancelCapture(for webView: WKWebView? = nil) {
+        let request = captureRequest
+        cancelDisplay(for: webView)
+        guard captureRequest == request, webView == nil || captureWeb === webView else { return }
+        finishCapture(.deny, keep: false)
     }
 
     private func answerCapture(_ decision: WKPermissionDecision, keep: Bool = true) {
-        guard let decide, let asking, Date().timeIntervalSince(asking.shown) > 0.5 else { return }
+        guard decide != nil, let asking, !asking.screen,
+              Date().timeIntervalSince(asking.shown) > 0.5 else { return }
+        guard captureIsCurrent else { return finishCapture(.deny, keep: false) }
+        finishCapture(decision, keep: keep)
+    }
+
+    private func finishCapture(_ decision: WKPermissionDecision, keep: Bool) {
+        guard let reply = decide else { return }
         // Remembered per site, so a call you take every week asks once.
         if keep, !askedAbout.isEmpty { Store.settings.set(decision == .grant, forKey: "capture." + askedAbout) }
-        self.decide = nil
+        decide = nil
+        captureRequest = nil
+        if let tab = captureTab, let held = captureHeld {
+            heldDialogs[tab.id]?.removeAll { $0 === held }
+        }
+        captureHeld = nil
+        captureTab = nil
+        captureWeb = nil
         askedAbout = ""
-        self.asking = nil
-        decide(decision)
+        if asking?.screen == false { asking = nil }
+        reply(decision)
+    }
+
+    private var captureIsCurrent: Bool {
+        guard !shut, let web = captureWeb else { return false }
+        // Extension popups have a delegate of their own and no row here.
+        guard let tab = captureTab else { return true }
+        return tab.built === web && (tab.id == activeID || peekTab === tab || littleTab(for: web) === tab)
+    }
+
+    /// Keep the source even while a background page's question is waiting.
+    /// Navigation, closing or moving it must answer WebKit exactly once.
+    private func askCapture(from webView: WKWebView, question: CaptureAsk, key: String,
+                            reply: @escaping (WKPermissionDecision) -> Void) {
+        guard !permissionBusy, !shut else { return reply(.deny) }
+        let request = UUID()
+        captureRequest = request
+        captureWeb = webView
+        captureTab = popupTab(for: webView)
+        decide = reply
+        askedAbout = key
+        captureHeld = ask(from: webView, show: { [weak self] in
+            guard let self, captureRequest == request else { return }
+            guard captureIsCurrent else { return finishCapture(.deny, keep: false) }
+            var shown = question
+            shown.shown = Date()
+            asking = shown
+        }, drop: { [weak self] in
+            guard let self, captureRequest == request else { return }
+            finishCapture(.deny, keep: false)
+        })
     }
 
     /// Everything a site has been allowed or refused, for the day you want to
@@ -1800,8 +1863,18 @@ final class Browser: NSObject, ObservableObject {
         summoning = false
         typed = ""
         focusRequest += 1
-        SiteCardPanel.hide()
+        SiteCardPanel.hide(in: self)
         suggester.stop()
+        if prefs.sidebar && (prefs.iconColumn || squarePins.contains(where: { $0.id == tab.id })) {
+            cancelTabEdit()
+            Ask.name(L10n.text("TabBar.1112"), placeholder: tab.label, initial: tab.label,
+                     confirm: L10n.text("TabBar.1112"), empty: true) { [weak self, weak tab] name in
+                guard let self, let tab, self.tabs.contains(where: { $0 === tab }) else { return }
+                tab.name = name.isEmpty ? nil : name
+                self.writeSession(now: true)
+            }
+            return
+        }
         renamingTab = true
         tabDraft = tab.label
         editingTab = tab.id
@@ -2679,12 +2752,12 @@ final class Browser: NSObject, ObservableObject {
         var brought: [URL] = []
         var targets: [(id: UUID, space: ArcSidebar.Space?, profile: UUID)] = []
         // Arc's profiles become Search's (see Profiles.swift): its first,
-        // L10n.text("bookmarks.bar.opening.standard"), is this window's; each other one a profile of the same
+        // "Default", is this window's; each other one a profile of the same
         // name, made if there is none, with its spaces in it, signed in
         // with that profile's own cookies.
-        let others = Set(sidebar.spaces.map(\.profile)).subtracting([L10n.text("bookmarks.bar.opening.standard")])
+        let others = Set(sidebar.spaces.map(\.profile)).subtracting(["Default"])
         let named = others.isEmpty ? [:] : Arc.profileNames()
-        var profileFor: [String: UUID] = [L10n.text("bookmarks.bar.opening.standard"): profileID]
+        var profileFor: [String: UUID] = ["Default": profileID]
         for folder in others.sorted() {
             let name = named[folder] ?? folder
             if let same = Profiles.shared.list.first(where: { $0.id != profileID && $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }) {
@@ -2906,10 +2979,7 @@ final class Browser: NSObject, ObservableObject {
             }
             row.groups = groups
             parked[space] = row
-            if groups != (saved.groups ?? []) {
-                saved.groups = groups
-                writeRow(space, saved, now: true)
-            }
+            writeSession(now: true, space: space, row: row)
             return new.count
         }
         let new = fresh(saved.tabs.map(\.url))
@@ -2989,12 +3059,12 @@ final class Browser: NSObject, ObservableObject {
 
     /// Its window closed for good, with others open: every page let go.
     func closeAll() {
+        SiteCardPanel.hide(in: self)
         cancelTabEdit()
         suggester.stop()
         SidePanelPages.shared.forget(in: self)
         sidePanelShown = false
         sidePanel = nil
-        cancelDisplay()
         cancelCapture()
         for questions in heldDialogs.values { questions.forEach { $0.dismiss() } }
         heldDialogs = [:]
@@ -3560,6 +3630,7 @@ final class Browser: NSObject, ObservableObject {
     /// pin does, so this is where it was, not where it was when grouped.
     func putAway(_ tab: Tab) {
         guard tabs.contains(where: { $0.id == tab.id }) else { return }
+        if activeID == tab.id { SiteCardPanel.hide(in: self) }
         detachSplit(tab)
         heldDialogs.removeValue(forKey: tab.id)?.forEach { $0.dismiss() }
         dropQuestions(for: tab.id)
@@ -3602,6 +3673,7 @@ final class Browser: NSObject, ObservableObject {
     /// behind; closing that blank tab closes the window.
     func close(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        if activeID == tab.id { SiteCardPanel.hide(in: self) }
         if tab.pin == nil { discardSidePanel(for: tab.id) }
         let pair = split(for: tab)
         let partner = pair.flatMap { pair in tabs.first { $0.id == pair.partner(of: tab.id) } }
@@ -4060,7 +4132,7 @@ final class Browser: NSObject, ObservableObject {
               let destination = spaces.first(where: { $0.id == id }),
               let index = tabs.firstIndex(where: { $0.id == tab.id })
         else { return false }
-        if let web = tab.built { cancelDisplay(for: web) }
+        if let web = tab.built { cancelCapture(for: web) }
         let partner = split(for: tab).flatMap { pair in tabs.first { $0.id == pair.partner(of: tab.id) } }
         detachSplit(tab)
 
@@ -4126,6 +4198,37 @@ final class Browser: NSObject, ObservableObject {
               // A window of another profile is another browser: never there.
               target.map({ $0.profileID == profileID }) ?? true
         else { return }
+        guard let target, !tab.shy, tab.store !== Spaces.store(for: target.spaceID) else {
+            finishMoveToWindow(tab, target, at: point)
+            return
+        }
+        let from = spaceID
+        let to = target.spaceID
+        let targetWasOpen = target.isOpen
+        let view = tab.built
+        let complete: () -> Void = { [weak self, weak tab, weak target] in
+            guard let self, let tab, let target, self.spaceID == from, target.spaceID == to,
+                  !targetWasOpen || target.isOpen,
+                  tab.built === view else { return }
+            self.finishMoveToWindow(tab, target, at: point)
+        }
+        tab.unsaved { [weak self, weak tab, weak target] unsaved in
+            guard let self, let tab, let target, self.spaceID == from, target.spaceID == to,
+                  !targetWasOpen || target.isOpen,
+                  self.tabs.contains(where: { $0 === tab }), tab.built === view else { return }
+            if unsaved {
+                Ask.sure(L10n.text("Browser.0340"),
+                         detail: L10n.text("Browser.0341", target.space.name),
+                         confirm: L10n.text("Browser.0342"), then: complete)
+            } else {
+                complete()
+            }
+        }
+    }
+
+    private func finishMoveToWindow(_ tab: Tab, _ target: Browser?, at point: NSPoint?) {
+        guard tab.pin == nil, !tab.bench, target !== self, target?.isPopup != true,
+              tabs.contains(where: { $0 === tab }), target.map({ $0.profileID == profileID }) ?? true else { return }
         let destination = target ?? Browser(record: WindowRecord(space: spaceID))
         detach(tab)
         destination.receive(tab)
@@ -4161,7 +4264,7 @@ final class Browser: NSObject, ObservableObject {
     private func detach(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         discardSidePanel(for: tab.id)
-        if let web = tab.built { cancelDisplay(for: web) }
+        if let web = tab.built { cancelCapture(for: web) }
         let partner = split(for: tab).flatMap { pair in tabs.first { $0.id == pair.partner(of: tab.id) } }
         detachSplit(tab)
         if floating == tab.id { land() }
@@ -5517,7 +5620,11 @@ final class Browser: NSObject, ObservableObject {
             tab.$muted.dropFirst().sink { [weak self] _ in self?.rememberSession() },
             tab.$address
                 .dropFirst()
-                .sink { [weak self] _ in self?.rememberSession() },
+                .sink { [weak self, weak tab] _ in
+                    guard let self else { return }
+                    if let tab, self.activeID == tab.id { SiteCardPanel.hide(in: self) }
+                    self.rememberSession()
+                },
             tab.$title
                 .dropFirst()
                 .sink { [weak self, weak tab] title in
@@ -5586,8 +5693,10 @@ final class Browser: NSObject, ObservableObject {
 
     /// ⌘K. Only what is open, nothing else.
     func summon() {
+        SiteCardPanel.hide(in: self)
         reviewing = false
         cancelTabEdit()
+        siteChip = nil
         summoning = true
         typed = ""
         editing = true
@@ -5829,9 +5938,11 @@ final class Browser: NSObject, ObservableObject {
     /// ⌘L. The current address comes up selected, so typing over it replaces it
     /// and Escape puts it back.
     func edit() {
+        SiteCardPanel.hide(in: self)
         cancelTabEdit()
         summoning = false
         launching = false
+        siteChip = nil
         // Never a name and password written into the address: they would be
         // on screen, and in whatever you copy from here.
         typed = active?.shownURL.map { url -> String in
@@ -5846,6 +5957,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func dismiss() {
+        SiteCardPanel.hide(in: self)
         summoning = false
         cycling = false
         // The floating new tab was never a tab: nothing is left behind.
@@ -5882,6 +5994,7 @@ final class Browser: NSObject, ObservableObject {
     /// tab you were on is left as it was, behind it unless `front` (⇧⌘Return)
     /// asks to go there.
     func submit(aside: Bool = false, front: Bool = false) {
+        SiteCardPanel.hide(in: self)
         // A page already open is switched to, not opened again.
         if let picked, offers.indices.contains(picked),
            let id = offers[picked].tab,
@@ -6295,7 +6408,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        cancelDisplay(for: webView)
+        cancelCapture(for: webView)
         guard let navigation else { return }
         tab(for: webView)?.extensionReturn.started(navigation, at: webView.url)
     }
@@ -6384,6 +6497,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // The link menu's Open Link in New Tab, asked for in the last second.
         // Read once: reading it takes it.
         let behind = (webView as? PageView)?.takeBehind() == true
+        let beside = (webView as? PageView)?.takeBeside() == true
         let popup = windowFeatures.width != nil || windowFeatures.height != nil
             || windowFeatures.toolbarsVisibility?.boolValue == false
         // WebKit's copy of the opener's configuration still holds the
@@ -6404,7 +6518,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // pop-ups, takes the tab path as before. A window sized by the page,
         // "Sign in with…", is left alone, as is a modified click, and so is
         // anything that isn't a web page (about:blank, data:, blob:).
-        if clicked, !behind, !popup, prefs.pinsPeek, peekTab == nil, opener.pin != nil,
+        if clicked, !behind, !beside, !popup, prefs.pinsPeek, peekTab == nil, opener.pin != nil,
            [.linkActivated, .other].contains(action.navigationType),
            action.modifierFlags.intersection([.shift, .command, .option, .control]).isEmpty,
            let url = action.request.url, Browser.peekable(url) {
@@ -6433,10 +6547,11 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // ⌘-click's goes (see open(_:foreground:)).
         let destination = tabDestination
         destination.prepare(tab)
-        if behind {
+        if behind || beside {
             if prefs.usesTabGroups, tab.shy == opener.shy, !tab.bench { tab.groupID = opener.groupID }
             destination.tabs.insert(tab, at: destination.placeForLink(from: opener))
             destination.noteLink(tab, from: opener)
+            if beside, destination === self { pair(tab, with: opener, onLeft: false) }
         } else {
             destination.tabs.insert(tab, at: destination.placeForFront())
             if clicked, let run = destination.linkRun { destination.runBeforeScript = (tab.id, run) }
@@ -6745,7 +6860,7 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             site = origin.host.isEmpty ? host : "\(origin.protocol)://\(origin.host)" + (origin.port == 0 ? "" : ":\(origin.port)")
         }
         let key = "\(site)|\(type.rawValue)"
-        let shy = tab(for: webView).map { $0.shy || !webView.configuration.websiteDataStore.isPersistent } ?? false
+        let shy = !webView.configuration.websiteDataStore.isPersistent || popupTab(for: webView)?.shy == true
 
         if let remembered = shy ? transientSitePermissions[key] : Store.settings.object(forKey: "capture." + key) as? Bool {
             decisionHandler(remembered ? .grant : .deny)
@@ -6754,15 +6869,8 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         // Asked over its own page only, as a page's other questions are (see
         // ask): a tab behind, or the other page of a pair, waits until you go
         // to it, and is asked then — never over the page you are on.
-        ask(from: webView, show: { [weak self] in
-            guard let self else { return decisionHandler(.deny) }
-            // One question at a time. A second page asking while the first is
-            // still waiting is refused rather than queued behind it.
-            guard !permissionBusy else { return decisionHandler(.deny) }
-            decide = decisionHandler
-            askedAbout = shy ? "" : key
-            asking = CaptureAsk(host: host, wants: Browser.name(for: type))
-        }, drop: { decisionHandler(.deny) })
+        askCapture(from: webView, question: CaptureAsk(host: host, wants: Browser.captureKind(for: type)),
+                   key: shy ? "" : key, reply: decisionHandler)
     }
 
     /// WebKit's private delegate lets Search ask before opening the system picker.
@@ -6834,15 +6942,13 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
               Browser.origin(asker.protocol, asker.host, asker.port) == site
         else { return give(.deny) }
         let key = "\(site)|location"
-        if let remembered = tab.shy ? transientSitePermissions[key] : Store.settings.object(forKey: "capture." + key) as? Bool {
+        let shy = tab.shy || !webView.configuration.websiteDataStore.isPersistent
+        if let remembered = shy ? transientSitePermissions[key] : Store.settings.object(forKey: "capture." + key) as? Bool {
             return give(remembered ? .grant : .deny)
         }
-        // One question at a time, as for the camera.
-        guard !permissionBusy else { return give(.deny) }
-        decide = give
-        askedAbout = tab.shy ? "" : key
         let named = Browser.extensionScheme(origin.protocol) ? Browser.extensionName(origin.host) : origin.host
-        asking = CaptureAsk(host: named, wants: "location", once: true, keeps: !tab.shy)
+        askCapture(from: webView, question: CaptureAsk(host: named, wants: "location", once: true, keeps: !shy),
+                   key: shy ? "" : key, reply: give)
     }
 
     /// A page asking to send notifications. Asked over its own page, as the
@@ -6861,17 +6967,12 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             if remembered { SiteNotifications.shared.authorize() }
             return decisionHandler(remembered)
         }
-        ask(from: webView, show: { [weak self] in
-            guard let self else { return decisionHandler(false) }
-            guard !permissionBusy else { return decisionHandler(false) }
-            decide = { decision in
-                if decision == .grant { SiteNotifications.shared.authorize() }
-                decisionHandler(decision == .grant)
-                SiteNotifications.shared.objectWillChange.send()
-            }
-            askedAbout = "\(site)|notifications"
-            asking = CaptureAsk(host: origin.host, wants: "notifications")
-        }, drop: { decisionHandler(false) })
+        askCapture(from: webView, question: CaptureAsk(host: origin.host, wants: "notifications"),
+                   key: "\(site)|notifications") { decision in
+            if decision == .grant { SiteNotifications.shared.authorize() }
+            decisionHandler(decision == .grant)
+            SiteNotifications.shared.objectWillChange.send()
+        }
     }
 
     /// "scheme://host[:port]", the way an origin is kept for its answers.
@@ -6881,12 +6982,12 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         return "\(scheme)://\(host)" + (port == 0 || standard ? "" : ":\(port)")
     }
 
-    private static func name(for type: WKMediaCaptureType) -> String {
+    private static func captureKind(for type: WKMediaCaptureType) -> String {
         switch type {
-        case .camera: return L10n.text("Browser.0357")
-        case .microphone: return L10n.text("App.0188")
-        case .cameraAndMicrophone: return L10n.text("Browser.0359")
-        @unknown default: return L10n.text("Browser.0359")
+        case .camera: return "camera"
+        case .microphone: return "microphone"
+        case .cameraAndMicrophone: return "cameraAndMicrophone"
+        @unknown default: return "cameraAndMicrophone"
         }
     }
 
@@ -7088,8 +7189,8 @@ extension Browser: WKDownloadDelegate {
         let asked = response.url.flatMap { namedDownloads.removeValue(forKey: $0) }
         let chosen = fetches.destination(for: download)
         let name = Browser.fileName(asked ?? suggestedFilename)
-        let file = chosen ?? whereToSave(name)
-        guard let file else {
+        let target = chosen ?? whereToSave(name)
+        guard let target else {
             if let ended = fetches.destinationCancelled(download) {
                 ended.owner.relinquish(download)
             } else {
@@ -7098,18 +7199,44 @@ extension Browser: WKDownloadDelegate {
             completionHandler(nil)
             return
         }
+        let file: URL
+        do {
+            if chosen == nil, prefs.asksWhereToSave, let entry = fetches.entry(for: download) {
+                file = try entry.prepareReplacement(at: target)
+            } else {
+                file = target
+            }
+        } catch {
+            if let ended = fetches.destinationCancelled(download) { ended.owner.relinquish(download) }
+            else { relinquish(download) }
+            completionHandler(nil)
+            announce(L10n.text("Browser.0370"))
+            return
+        }
         fetches.going(download, to: file, cancel: finderCancellation(for: download))
         // A retry is numbered afresh from the name asked for, or the one you
         // gave it: never from "report 2.pdf", whose own " 2" is not its name.
-        if chosen == nil { fetches.entry(for: download)?.retryName = prefs.asksWhereToSave ? file.lastPathComponent : name }
+        if chosen == nil { fetches.entry(for: download)?.retryName = prefs.asksWhereToSave ? target.lastPathComponent : name }
         completionHandler(file)
-        announce(L10n.text("Browser.0367", String(describing: file.lastPathComponent)))
+        announce(L10n.text("Browser.0367", fetches.entry(for: download)?.name ?? target.lastPathComponent))
     }
 
     func downloadDidFinish(_ download: WKDownload) {
         let entry = fetches.entry(for: download)
+        // A queued finish may follow Cancel. Its completion owns cleanup;
+        // in particular, never replace an existing file after cancellation.
+        guard entry?.pendingStop != .cancel else { return }
         let source = download.originalRequest?.url ?? entry?.request?.url
-        let file = download.progress.fileURL ?? entry?.destination
+        var file = download.progress.fileURL ?? entry?.destination
+        do {
+            if let entry { file = try entry.completedFile(file) }
+        } catch {
+            if let ended = fetches.fail(download, error: error, resumeData: nil) {
+                ended.owner.relinquish(download)
+                if ended.announceFailure { announce(L10n.text("Browser.0370")) }
+            }
+            return
+        }
         let listed = !unlisted.contains(ObjectIdentifier(download))
         let ended = fetches.finish(download, file: file)
         (ended?.owner ?? self).relinquish(download)

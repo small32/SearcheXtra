@@ -108,6 +108,7 @@ final class Bookmarks: ObservableObject {
     /// Its profile deleted: its file removed, and nothing written again.
     func retire() {
         retired = true
+        Store.settings.removeObject(forKey: topKey)
         Disk.remove(file)
     }
 
@@ -438,7 +439,7 @@ final class Bookmarks: ObservableObject {
             roots = nodes
             added = Bookmarks.count(nodes)
             ids = Bookmarks.ids(nodes)
-            Store.settings.set(name, forKey: Bookmarks.topKey)
+            Store.settings.set(name, forKey: topKey)
         } else if intoTop(nodes, from: name) {
             Bookmarks.merge(nodes, into: &roots, added: &added, already: &already, ids: &ids)
         } else {
@@ -464,7 +465,8 @@ final class Bookmarks: ObservableObject {
             try control.checkCancellation()
             let snapshot = roots
             let version = revision
-            let top = Store.settings.string(forKey: Bookmarks.topKey)
+            let top = Store.settings.string(forKey: topKey)
+            let legacy = legacyTop
             let prepared: (roots: [Bookmark], kept: Set<String>, added: Int, already: Int, top: Bool) = try await withCheckedThrowingContinuation { continuation in
                 DispatchQueue.global(qos: .userInitiated).async {
                     do {
@@ -479,6 +481,7 @@ final class Bookmarks: ObservableObject {
                         } else {
                             let intoTop: Bool
                             if let top { intoTop = top == name }
+                            else if legacy == name { intoTop = true; setTop = true }
                             else {
                                 let theirs = try Bookmarks.fileURLs(incoming, control: control)
                                 let ours = Set(try Bookmarks.fileURLs(snapshot, control: control))
@@ -503,10 +506,10 @@ final class Bookmarks: ObservableObject {
                 }
             }
             try control.checkCancellation()
-            guard revision == version, Store.settings.string(forKey: Bookmarks.topKey) == top else { continue }
+            guard revision == version, Store.settings.string(forKey: topKey) == top, legacyTop == legacy else { continue }
             preparedKept = prepared.kept
             roots = prepared.roots
-            if prepared.top { Store.settings.set(name, forKey: Bookmarks.topKey) }
+            if prepared.top { Store.settings.set(name, forKey: topKey) }
             save()
             return (prepared.added, prepared.already)
         }
@@ -605,20 +608,28 @@ final class Bookmarks: ObservableObject {
         }
     }
 
-    /// Which browser filled the empty top level, the first time.
-    private static let topKey = "bookmarks.top"
+    /// The old global marker may have been overwritten by another profile.
+    /// It is only a migration hint for Personal; every file writes its own.
+    private var topKey: String { "bookmarks.top.\(fileName)" }
+    private var legacyTop: String? {
+        fileName == "bookmarks.json" ? Store.settings.string(forKey: "bookmarks.top") : nil
+    }
 
     /// Whether this browser's bookmarks belong at the top level: it filled
     /// it the first time — or, from before that was noted, most of its
     /// pages are already there.
     private func intoTop(_ nodes: [Bookmark], from name: String) -> Bool {
-        if let top = Store.settings.string(forKey: Bookmarks.topKey) { return top == name }
+        if let top = Store.settings.string(forKey: topKey) { return top == name }
+        if legacyTop == name {
+            Store.settings.set(name, forKey: topKey)
+            return true
+        }
         let theirs = Bookmarks.urls(nodes).map(\.absoluteString)
         guard !theirs.isEmpty else { return false }
         let ours = Set(Bookmarks.urls(roots).map(\.absoluteString))
         let shared = theirs.filter { ours.contains($0) }.count
         guard shared * 2 >= theirs.count else { return false }
-        Store.settings.set(name, forKey: Bookmarks.topKey)
+        Store.settings.set(name, forKey: topKey)
         return true
     }
 

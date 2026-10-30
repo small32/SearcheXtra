@@ -340,7 +340,7 @@ struct SearcheXtraApp: App {
                 Button(L10n.text("App.0179")) { browser.hoarding = true }
                     .shortcut("history.downloads")
                 Divider()
-                Button(L10n.text("App.0180")) { browser.recallMode = .clearing }
+                Button(L10n.text("App.0180")) { browser.clearBrowsingData() }
                     .shortcut("history.clearData")
                 Button(L10n.text("App.0181")) { browser.clearHistory() }
                     .shortcut("history.clear")
@@ -1092,7 +1092,11 @@ struct ContentView: View {
                   let content = window.contentView,
                   let frame = content.superview
             else { return }
-            frame.addSubview(container, positioned: .above, relativeTo: content)
+            // A restored full-screen window has its title bar in a separate
+            // window; moving it into the content frame puts it at the bottom.
+            if container.superview === frame {
+                frame.addSubview(container, positioned: .above, relativeTo: content)
+            }
             container.wantsLayer = true
             container.layer?.zPosition = 10
         }
@@ -1538,7 +1542,7 @@ struct ContentView: View {
 
         // Keep the clearing controls reachable from a focused page editor.
         if shifted, event.keyCode == 51 {
-            browser.recallMode = .clearing
+            browser.clearBrowsingData()
             return true
         }
 

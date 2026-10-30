@@ -2,6 +2,33 @@ import AppKit
 import SwiftUI
 import WebKit
 
+/// WebKit requires a destination that does not exist. When Save As confirms
+/// replacing a file, download beside it on the same volume and only replace
+/// the original after success. Pauses, failures and cancellation leave it alone.
+final class DownloadReplacement {
+    let target: URL
+    private let directory: URL
+
+    init(target: URL) throws {
+        self.target = target
+        directory = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                               appropriateFor: target, create: true)
+    }
+
+    deinit { try? FileManager.default.removeItem(at: directory) }
+
+    func nextFile() -> URL { directory.appendingPathComponent(UUID().uuidString) }
+
+    func finish(_ file: URL) throws -> URL {
+        if FileManager.default.fileExists(atPath: target.path) {
+            _ = try FileManager.default.replaceItemAt(target, withItemAt: file)
+        } else {
+            try FileManager.default.moveItem(at: file, to: target)
+        }
+        return target
+    }
+}
+
 /// A download visible in the Downloads panel. Resume data and the cookie
 /// store it was asked with live only for this process; neither is part of
 /// the saved history.
@@ -59,6 +86,7 @@ final class FetchEntry: ObservableObject, Identifiable {
     weak var webView: WKWebView?
     private(set) var store: WKWebsiteDataStore?
     var destination: URL?
+    private(set) var replacement: DownloadReplacement?
     /// The name asked for, before " 2" and so on: a retry is numbered afresh.
     var retryName: String
     var download: WKDownload?
@@ -117,7 +145,21 @@ final class FetchEntry: ObservableObject, Identifiable {
             destinationWasAbsent = !FileManager.default.fileExists(atPath: file.path)
         }
         destination = file
-        name = file.lastPathComponent
+        name = replacement?.target.lastPathComponent ?? file.lastPathComponent
+    }
+
+    /// Called only for a destination confirmed by Save As, never for an
+    /// automatic download whose name must instead be made unique.
+    func prepareReplacement(at target: URL) throws -> URL {
+        guard FileManager.default.fileExists(atPath: target.path) else { return target }
+        let made = try DownloadReplacement(target: target)
+        replacement = made
+        return made.nextFile()
+    }
+
+    func completedFile(_ file: URL?) throws -> URL? {
+        guard let replacement, let destination else { return file }
+        return try replacement.finish(destination)
     }
 
     /// The output URL is initially required to be absent. Claim it only after
@@ -209,6 +251,7 @@ final class FetchEntry: ObservableObject, Identifiable {
         webView = nil
         store = nil
         destination = nil
+        replacement = nil
         destinationWasAbsent = nil
         partialFileVersion = nil
         download = nil
@@ -449,7 +492,7 @@ final class Fetches: ObservableObject {
         guard entry.canRetry, let request = entry.request, let store = entry.store else { return nil }
         entry.discardOwnedPartialFile()
         let (webView, helper) = Self.view(for: entry, store: store)
-        let token = entry.preparingToStart(destination: destination())
+        let token = entry.preparingToStart(destination: entry.replacement?.nextFile() ?? destination())
         entry.resumeData = nil
         entry.resetProgress()
         return StartOperation(entry: entry, webView: webView, helper: helper, request: request, resumeData: nil, operationID: token)

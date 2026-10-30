@@ -362,7 +362,7 @@ extension Browser {
     /// tab shows white until somebody thinks to reload. Saying so, with the
     /// one thing worth offering, is what the failure view is for.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        cancelDisplay(for: webView)
+        cancelCapture(for: webView)
         guard let tab = tab(for: webView) else { return }
         dropQuestions(for: tab.id)
         // In front of you: straight back, a reload beats a white page with a

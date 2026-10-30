@@ -271,7 +271,7 @@ struct Command: Identifiable {
 
         Command("history.show", L10n.text("App.0178"), .history, KeyCombo("y")) { $0.recalling = true },
         Command("history.downloads", L10n.text("App.0179"), .history, KeyCombo("j", shift: true)) { $0.hoarding = true },
-        Command("history.clearData", L10n.text("App.0180"), .history, KeyCombo("delete", shift: true)) { $0.recallMode = .clearing },
+        Command("history.clearData", L10n.text("App.0180"), .history, KeyCombo("delete", shift: true)) { $0.clearBrowsingData() },
         Command("history.clear", L10n.text("App.0181"), .history, nil) { $0.clearHistory() },
     ] + (1...9).map { number in
         Command("spaces.\(number)", L10n.text("shortcuts.space", String(number)), .spaces,

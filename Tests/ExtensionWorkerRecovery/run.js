@@ -127,8 +127,92 @@ async function test(name, run) { await run(); console.log('PASS ' + name); passe
       port.postMessage({ plain: true });
       assert.equal(port.posts[0].plain, true);
       assert.equal(state.subscriptions.length, 0);
+      let received, disconnected;
+      port.onMessage.addListener((_, from) => { received = from; });
+      port.onDisconnect.addListener(from => { disconnected = from; });
+      port.onMessage.fire('hello', {});
+      port.nativeDisconnect.fire({});
+      assert.equal(received, port);
+      assert.equal(disconnected, port);
     });
   }
+  await test('Port listeners receive their original port for messages and disconnects', async () => {
+    for (const content of [true, false]) {
+      const state = load(content), port = state.runtime.connect();
+      port.localState = 'kept';
+      let received, disconnected;
+      const onMessage = (message, from) => { received = [message, from, from.localState]; };
+      const onDisconnect = from => { disconnected = [from, from.localState]; };
+      port.onMessage.addListener(onMessage);
+      port.onMessage.addListener(onMessage);
+      port.onDisconnect.addListener(onDisconnect);
+      port.onMessage.fire({ value: 1 }, { localState: 'wrong object' });
+      assert.equal(received[1], port); assert.equal(received[2], 'kept');
+      port.nativeDisconnect.fire({ localState: 'wrong object' });
+      assert.equal(disconnected[0], port); assert.equal(disconnected[1], 'kept');
+      port.onMessage.removeListener(onMessage);
+      assert.equal(port.onMessage.hasListener(onMessage), false);
+    }
+    const state = load(false), incoming = state.makePort();
+    incoming.sender = { url: 'https://example.test/' };
+    let shown, messagePort, disconnectPort;
+    state.runtime.onConnect.addListener(port => {
+      shown = port; port.localState = 'tab state';
+      port.onMessage.addListener((_, from) => { messagePort = from; });
+      port.onDisconnect.addListener(from => { disconnectPort = from; });
+    });
+    state.runtime.onConnect.fire(incoming);
+    incoming.onMessage.fire('hello', {});
+    incoming.nativeDisconnect.fire({});
+    assert.equal(messagePort, shown); assert.equal(messagePort.localState, 'tab state');
+    assert.equal(disconnectPort, shown);
+    const own = load(false), proxyTarget = own.makePort(), ownURL = own.runtime.getURL('page.html');
+    proxyTarget.sender = { url: ownURL, tab: { index: -1, url: ownURL } };
+    let ownView, ownMessage, ownDisconnect;
+    own.runtime.onConnect.addListener(port => {
+      ownView = port; port.localState = 'extension page';
+      port.onMessage.addListener((_, from) => { ownMessage = from; });
+      port.onDisconnect.addListener(from => { ownDisconnect = from; });
+    });
+    own.runtime.onConnect.fire(proxyTarget);
+    assert.notEqual(ownView, proxyTarget, 'The popup sender is exposed through a proxy');
+    proxyTarget.onMessage.fire('hello', {});
+    proxyTarget.nativeDisconnect.fire({});
+    assert.equal(ownMessage, ownView); assert.equal(ownMessage.localState, 'extension page');
+    assert.equal(ownDisconnect, ownView);
+  });
+  await test('Multiple onConnect listeners share one port identity and retain WeakMap state', async () => {
+    const state = load(false), target = state.makePort(), url = state.runtime.getURL('page.html');
+    target.sender = { url, tab: { index: -1, url } };
+    const seen = [], stateByPort = new WeakMap();
+    let messagePort, disconnectPort;
+    state.runtime.onConnect.addListener(port => { seen.push(port); });
+    const second = port => {
+      seen.push(port);
+      stateByPort.set(port, 'connection state');
+      port.onMessage.addListener((_, from) => { messagePort = from; });
+      port.onDisconnect.addListener(from => { disconnectPort = from; });
+    };
+    state.runtime.onConnect.addListener(second);
+    state.runtime.onConnect.fire(target);
+    assert.equal(seen[0], seen[1]);
+    assert.equal(seen[1].sender.tab, undefined, 'The shared view still removes the synthetic popup tab');
+    target.onMessage.fire('hello', {});
+    target.nativeDisconnect.fire({});
+    assert.equal(messagePort, seen[1]);
+    assert.equal(disconnectPort, seen[1]);
+    assert.equal(stateByPort.get(messagePort), 'connection state');
+    assert.equal(stateByPort.get(disconnectPort), 'connection state');
+    state.runtime.onConnect.removeListener(second);
+    assert.equal(state.runtime.onConnect.hasListener(second), false);
+  });
+  await test('A panel with no current tab receives undefined', async () => {
+    const state = load(false, 0, state => {
+      state.root.chrome.tabs = { getCurrent: async () => null };
+    });
+    assert.equal(await state.root.chrome.tabs.getCurrent(), undefined);
+    await new Promise(resolve => state.root.chrome.tabs.getCurrent(tab => { assert.equal(tab, undefined); resolve(); }));
+  });
   await test('delayed worker-only event is not lost behind a newer context event', async () => {
     for (const content of [true, false]) {
       const state = load(content), older = state.runtime.connect(), newer = state.runtime.connect();
@@ -276,7 +360,44 @@ async function test(name, run) { await run(); console.log('PASS ' + name); passe
     for (const change of changes) assert.deepEqual(Array.from(change.addRules, rule => rule.id), [3, 4, 5]);
     assert.equal(rules.length, 5, 'Original extension rules remain intact');
   });
-  await test('Per-tab side panel options reach native before tab placement', async () => {
+  await test('Tab listeners deduplicate registration and remove the original listener completely', async () => {
+    const listeners = new Set(), seen = [];
+    const state = load(false, 0, state => {
+      state.root.chrome.tabs = { onActivated: {
+        addListener: f => listeners.add(f), removeListener: f => listeners.delete(f), hasListener: f => listeners.has(f),
+      } };
+    });
+    const activated = state.root.chrome.tabs.onActivated, listener = info => seen.push(info.tabId);
+    activated.addListener(listener); activated.addListener(listener);
+    assert.equal(listeners.size, 1);
+    listeners.forEach(f => f({ tabId: 3, windowId: 7 }));
+    await drain();
+    assert.deepEqual(seen, [3]);
+    activated.removeListener(listener);
+    assert.equal(activated.hasListener(listener), false);
+    assert.equal(listeners.size, 0);
+    listeners.forEach(f => f({ tabId: 4, windowId: 7 }));
+    await drain();
+    assert.deepEqual(seen, [3], 'Removed listeners receive no later event');
+    activated.addListener(listener);
+    assert.equal(listeners.size, 1, 'A removed listener can be registered again');
+  });
+  await test('Tab listeners can retry after native registration throws', () => {
+    const listeners = new Set(); let fail = true;
+    const state = load(false, 0, state => {
+      state.root.chrome.tabs = { onActivated: {
+        addListener: f => { if (fail) throw new Error('registration refused'); listeners.add(f); },
+        removeListener: f => listeners.delete(f), hasListener: f => listeners.has(f),
+      } };
+    });
+    const event = state.root.chrome.tabs.onActivated, listener = () => {};
+    assert.throws(() => event.addListener(listener), /registration refused/);
+    assert.equal(event.hasListener(listener), false);
+    fail = false; event.addListener(listener); event.addListener(listener);
+    assert.equal(listeners.size, 1);
+    event.removeListener(listener); assert.equal(listeners.size, 0);
+  });
+  await test('Per-tab side panel options and placement arrive in one completed operation', async () => {
     const messages = [];
     const state = load(false, 0, state => {
       state.root.chrome.tabs = { get: async id => ({ id, index: 2, windowId: 7 }) };
@@ -284,13 +405,37 @@ async function test(name, run) { await run(); console.log('PASS ' + name); passe
       state.runtime.sendNativeMessage = (app, message) => { messages.push(message); return Promise.resolve({ value: null }); };
     });
     await state.root.chrome.sidePanel.setOptions({ tabId: 3, enabled: true, path: 'work.html' });
-    await drain();
-    const options = messages.findIndex(message => message.api === 'sidePanel.setOptions');
-    const placed = messages.findIndex(message => message.api === 'sidePanel.placed');
-    assert(options >= 0 && placed > options);
-    assert.equal(messages[placed].args[0], 3);
-    assert.equal(messages[placed].args[1].i, 2);
-    assert.equal(messages[placed].args[1].w.width, 800);
+    const options = messages.find(message => message.api === 'sidePanel.setOptions');
+    assert(options);
+    assert.equal(options.args[0].tabId, 3);
+    assert.equal(options.args[1].place.i, 2);
+    assert.equal(options.args[1].place.w.width, 800);
+    assert(!messages.some(message => message.api === 'sidePanel.placed'), 'No separate placement can race the next operation');
+  });
+  await test('Side panel open and close resolve the requested tab or window and preserve callback errors', async () => {
+    const messages = [], lookedUp = [];
+    const state = load(false, 0, state => {
+      state.root.chrome.tabs = { get: async id => { if (id === 99) throw new Error('No tab 99'); return { id, index: 2, windowId: 7 }; } };
+      state.root.chrome.windows = {
+        getAll: async () => [{ id: 7, left: 10, top: 20, width: 800, height: 600 }],
+        get: async id => { lookedUp.push(id); return { id, left: 110, top: 120, width: 900, height: 700 }; },
+      };
+      state.runtime.sendNativeMessage = (app, message) => { messages.push(message); return Promise.resolve({ value: null }); };
+    });
+    for (const operation of ['open', 'close']) {
+      messages.length = 0;
+      await state.root.chrome.sidePanel[operation]({ tabId: 3 });
+      const tab = messages.find(message => message.api === 'sidePanel.' + operation);
+      assert.equal(tab.args[0].tabId, 3); assert.equal(tab.args[1].place.i, 2); assert.equal(tab.args[1].place.w.left, 10);
+      messages.length = 0;
+      await state.root.chrome.sidePanel[operation]({ windowId: 8 });
+      const window = messages.find(message => message.api === 'sidePanel.' + operation);
+      assert.equal(window.args[0].windowId, 8); assert.equal(window.args[1].window.left, 110);
+      await new Promise(resolve => state.root.chrome.sidePanel[operation]({ tabId: 99 }, () => {
+        assert.match(state.runtime.lastError.message, /No tab 99/); resolve();
+      }));
+    }
+    assert.deepEqual(lookedUp, [8, 8]);
   });
   console.log(passed + ' full-shim regression cases passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

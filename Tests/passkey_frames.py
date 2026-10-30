@@ -68,6 +68,7 @@ t = sv.T()
 try:
     sv.setup()
     subprocess.run(["defaults", "write", sv.SUITE, "passkeys", "-bool", "true"])
+    subprocess.run(["defaults", "write", sv.SUITE, "passkeys.for", "-bool", "false"])
     sv.launch()
     before = sv.cmd({"do": "probe"}).get("passkeyAsks", 0)
     tid = sv.cmd({"do": "open", "url": f"http://localhost:{P2}/top?f=localhost"})["id"]

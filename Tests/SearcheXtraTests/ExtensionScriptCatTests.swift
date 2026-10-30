@@ -336,12 +336,13 @@ final class ExtensionScriptCatTests: XCTestCase {
             print("ScriptCat native runtime assembly: \(runtimeAssembly ?? [:])")
             XCTAssertEqual(runtimeAssembly?["nativeEvents"] as? Bool, true)
             guard (runtimeAssembly?["installed"] as? [String: Any])?["installed"] as? Bool == true,
-                  (runtimeAssembly?["reload"] as? String)?.contains("native(\"runtime.reload\"") == true else {
+                  (runtimeAssembly?["reload"] as? String)?.contains("native(\"runtime.reload\"") == true,
+                  (runtimeAssembly?["browserReload"] as? String)?.contains("native(\"runtime.reload\"") == true else {
                 throw FixtureFailure("The app runtime.reload method was not installed in the real extension page")
             }
-            let reloadSource = try await evaluate(runtimeOptions.web, "const source = Function.prototype.toString.call(chrome.runtime.reload); chrome.runtime.reload(); return source;")
+            let reloadSource = try await evaluate(runtimeOptions.web, "const source = Function.prototype.toString.call(browser.runtime.reload); browser.runtime.reload(); return source;")
             trace("runtime.reload dispatched: \(reloadSource ?? "unavailable")")
-            try await until("a fresh runtime and original ScriptCat registration after chrome.runtime.reload") {
+            try await until("a fresh runtime and original ScriptCat registration after browser.runtime.reload") {
                 guard let current = Extensions.shared.contexts[identifier], current !== runtimeContext else { return false }
                 let scripts = try await ExtensionUserScripts.call("userScripts.list", args: [], context: current) as? [[String: Any]] ?? []
                 return scripts.contains { $0["id"] as? String == "scriptcat-content" } && scripts.contains { $0["id"] as? String == scriptID }
@@ -363,11 +364,11 @@ final class ExtensionScriptCatTests: XCTestCase {
             trace("replacement ScriptCat background ready after runtime.reload")
             show(website)
             try await reload(website, in: window)
-            try await until("GM storage and XHR after native chrome.runtime.reload") {
+            try await until("GM storage and XHR after native browser.runtime.reload") {
                 let value = try await state()
                 return (Int(value["count"] as? String ?? "0") ?? 0) > countBeforeExtensionReload && value["xhr"] as? String == "200:true"
             }
-            trace("GM storage and native transport survived chrome.runtime.reload")
+            trace("GM storage and native transport survived browser.runtime.reload")
             let mv2 = scratch.appendingPathComponent("mv2", isDirectory: true)
             try files.createDirectory(at: mv2, withIntermediateDirectories: true)
             try #"{"manifest_version":2,"name":"SearcheXtra native MV2 fixture","version":"1.0","content_scripts":[{"matches":["http://127.0.0.1/*"],"js":["content.js"],"run_at":"document_end"}]}"#.write(to: mv2.appendingPathComponent("manifest.json"), atomically: true, encoding: .utf8)

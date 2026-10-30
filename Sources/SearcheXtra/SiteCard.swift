@@ -26,13 +26,16 @@ enum SiteCardPanel {
 
     static func show(for tab: Tab, in browser: Browser) {
         hide()
+        owner = browser
         original = browser.typed
         place(tab, browser, tries: 0)
     }
 
     private static func place(_ tab: Tab, _ browser: Browser, tries: Int) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
-            guard original != nil, browser.activeID == tab.id, browser.fieldShowing, browser.typed == original else { return }
+            guard owner === browser, original != nil, browser.activeID == tab.id,
+                  browser.tabs.contains(where: { $0 === tab }), browser.fieldShowing,
+                  browser.typed == original else { return }
             // The field with the caret in it is the one on screen; failing
             // that, wait until the address field has acquired focus.
             let focused = ((browser.window ?? Links.window)?.firstResponder as? NSTextView)?.delegate as? NSTextField
@@ -46,7 +49,8 @@ enum SiteCardPanel {
 
     /// Under the address field or its site information button.
     static func show(for tab: Tab, in browser: Browser, under field: NSView) {
-        guard let window = field.window else { return }
+        guard browser.activeID == tab.id, browser.fieldShowing,
+              browser.tabs.contains(where: { $0 === tab }), let window = field.window else { return }
         hide()
         let card = SiteCard(browser: browser, tab: tab) {
             SiteCardPanel.dismiss()
@@ -132,6 +136,13 @@ enum SiteCardPanel {
         panel.parent?.removeChildWindow(panel)
         panel.orderOut(nil)
         self.panel = nil
+    }
+
+    /// A background window's field changes must not close another window's card.
+    /// Pending placement belongs to its browser too, before a panel exists.
+    static func hide(in browser: Browser) {
+        guard owner === browser else { return }
+        hide()
     }
 
     private final class Panel: NSPanel {
@@ -222,9 +233,9 @@ struct SiteCard: View {
             Row(L10n.text("site.data"), submenu: true) { section = 1 }
             Row(L10n.text("site.settings"), submenu: true) { section = 2 }
             Row(L10n.text("site.close")) { close() }
-            Row(L10n.text("App.0165"), keys: "⇧⌘C") { after { browser.copyAddress() } }
+            Row(L10n.text("App.0165"), keys: "⇧⌘C") { after { copyAddress() } }
             Separator()
-            Row(L10n.text("App.0121"), keys: "⌘P") { after { browser.printPage() } }
+            Row(L10n.text("App.0121"), keys: "⌘P") { after { printPage() } }
             zoom
             sound
             grounded
@@ -233,12 +244,12 @@ struct SiteCard: View {
                 HStack(spacing: 0) {
                     Text(L10n.text("site.keepAwake")).font(MenuMetrics.font)
                     Spacer(minLength: 24)
-                    Switch(on: Binding(get: { browser.keepsAwake(tab) }, set: { browser.keepAwake($0, for: tab) }))
+                    Switch(on: Binding(get: { browser.keepsAwake(tab) }, set: { if ownsTab { browser.keepAwake($0, for: tab) } }))
                         .accessibilityRepresentation {
-                            Toggle(L10n.text("site.keepAwake"), isOn: Binding(get: { browser.keepsAwake(tab) }, set: { browser.keepAwake($0, for: tab) }))
+                            Toggle(L10n.text("site.keepAwake"), isOn: Binding(get: { browser.keepsAwake(tab) }, set: { if ownsTab { browser.keepAwake($0, for: tab) } }))
                         }
                         .focusable()
-                        .onKeyPress(.space) { browser.keepAwake(!browser.keepsAwake(tab), for: tab); return .handled }
+                        .onKeyPress(.space) { if ownsTab { browser.keepAwake(!browser.keepsAwake(tab), for: tab) }; return .handled }
                 }
                 .padding(.leading, MenuMetrics.text)
                 .padding(.trailing, MenuMetrics.trailing)
@@ -264,7 +275,7 @@ struct SiteCard: View {
     /// paused, and the frame dark. It takes effect on the page at once.
     @ViewBuilder private var darken: some View {
         if browser.canDusk(tab) {
-            Darken(on: Binding(get: { tab.dusked }, set: { browser.dusk($0, tab) }))
+            Darken(on: Binding(get: { tab.dusked }, set: { if ownsTab { browser.dusk($0, tab) } }))
         }
     }
 
@@ -288,8 +299,8 @@ struct SiteCard: View {
                 .font(MenuMetrics.font)
                 .foregroundStyle(Color(nsColor: .labelColor))
             Spacer(minLength: 24)
-            Step(symbol: "minus", help: L10n.text("SiteCard.0956")) { browser.zoom(by: 1 / 1.1) }
-            Button { browser.resetZoom() } label: {
+            Step(symbol: "minus", help: L10n.text("SiteCard.0956")) { magnify(by: 1 / 1.1) }
+            Button { resetZoom() } label: {
                 Text("\(Int((tab.zoom * 100).rounded()))%")
                     .font(MenuMetrics.font)
                     .monospacedDigit()
@@ -299,11 +310,35 @@ struct SiteCard: View {
             }
             .buttonStyle(.plain)
             .help(L10n.text("SiteCard.0957"))
-            Step(symbol: "plus", help: L10n.text("SiteCard.0958")) { browser.zoom(by: 1.1) }
+            Step(symbol: "plus", help: L10n.text("SiteCard.0958")) { magnify(by: 1.1) }
         }
         .padding(.leading, MenuMetrics.text)
         .padding(.trailing, MenuMetrics.inset + 4)
         .frame(height: MenuMetrics.row)
+    }
+
+    private var ownsTab: Bool { browser.tabs.contains { $0 === tab } }
+
+    func copyAddress() {
+        guard ownsTab, let url = tab.address else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(url.absoluteString, forType: .string)
+        browser.announce(L10n.text("Browser.0326"))
+    }
+
+    func magnify(by factor: CGFloat) {
+        guard ownsTab else { return }
+        tab.magnify(by: factor)
+    }
+
+    func resetZoom() {
+        guard ownsTab else { return }
+        tab.resetZoom()
+    }
+
+    private func printPage() {
+        guard ownsTab, tab.isWeb, let window = browser.window else { return }
+        Browser.printing(tab.web).runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
     }
 
     /// The line itself. WebKit takes it as a page loads, so a page already
@@ -418,7 +453,7 @@ struct SiteCard: View {
             Separator()
             if let trust = safety.trust {
                 Row(certified == false ? L10n.text("SiteCard.0962") : L10n.text("SiteCard.0963")) {
-                    after { SiteCard.show(trust) }
+                    after { if ownsTab { SiteCard.show(trust, in: browser.window) } }
                 }
             }
             Row(L10n.text("App.0146")) { deeper = false }
@@ -487,8 +522,8 @@ struct SiteCard: View {
     }
 
     /// The system's own certificate sheet, over the window.
-    private static func show(_ trust: SecTrust) {
-        guard let window = Links.window else { return }
+    private static func show(_ trust: SecTrust, in window: NSWindow?) {
+        guard let window else { return }
         SFCertificatePanel.shared().beginSheet(
             for: window, modalDelegate: nil, didEnd: nil, contextInfo: nil, trust: trust, showGroup: false
         )

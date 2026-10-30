@@ -175,6 +175,7 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
 
     /// Tells WebKit the popup's window and tab are gone.
     private func forget() {
+        if let web { for browser in Browsers.all { browser.cancelCapture(for: web) } }
         if let page { Extensions.shared.controller.didCloseTab(page, windowIsClosing: false) }
         web?.navigationDelegate = nil
         web?.uiDelegate = nil
@@ -350,6 +351,14 @@ final class ExtensionPopup: NSObject, WKUIDelegate, WKNavigationDelegate, NSPopo
     // MARK: - the page asking
 
     func webViewDidClose(_ webView: WKWebView) { if webView === web { close() } }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        for browser in Browsers.all { browser.cancelCapture(for: webView) }
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        for browser in Browsers.all { browser.cancelCapture(for: webView) }
+    }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { if webView === web { follow() } }
 

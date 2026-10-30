@@ -74,7 +74,7 @@ function fixture({ allowed = false, optional = false, background = false, saved 
     put2: (k, v) => { chrome[k] = v; },
     withLastError: (e, callback) => { runtime.lastError = { message: e.message }; try { callback(); } finally { delete runtime.lastError; } },
   });
-  return { state, chrome: root.chrome, root };
+  return { state, chrome: root.chrome, root, nativeNamespace: chrome };
 }
 
 async function scriptCatProbe(chrome) {
@@ -112,7 +112,13 @@ const dynamic = fixture({ dynamicRuntime: true });
 dynamic.chrome.runtime.reload();
 await Promise.resolve();
 assert(dynamic.state.calls.includes('runtime.reload'), 'A native dynamic property cannot hide the app reload method');
+dynamic.state.calls.length = 0;
+dynamic.root.browser.runtime.reload();
+await Promise.resolve();
+assert(dynamic.state.calls.includes('runtime.reload'), 'browser.runtime.reload must use the same browser-owned user-script cleanup');
+assert.equal(dynamic.root.browser, dynamic.nativeNamespace, 'WebKit must still unwrap the original native browser namespace');
 assert.equal(dynamic.chrome.runtime.receiver(), true, 'Native runtime methods keep their original receiver');
+assert.equal(dynamic.root.browser.runtime.receiver(), true, 'The browser alias also keeps native method receivers');
 assert.equal(dynamic.chrome.runtime.onMessage, dynamic.root.browser.runtime.onMessage, 'Native event objects are retained');
 assert.notEqual(dynamic.chrome, dynamic.root.browser, 'WebKit keeps its real browser namespace for native event dispatch');
 await assert.rejects(disabled.chrome.userScripts.getScripts(), /disabled/);

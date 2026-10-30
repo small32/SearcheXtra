@@ -343,15 +343,19 @@ final class Extensions: NSObject, ObservableObject {
     /// turns the window's frame over from the bottom of the first screen;
     /// it is turned back here, give or take two points.
     func tab(windowFrame frame: CGRect, index: Int, for context: WKWebExtensionContext) -> Tab? {
+        guard let browser = browser(windowFrame: frame) else { return nil }
+        let tabs = visibleTabs(of: browser, for: context)
+        return tabs.indices.contains(index) ? tabs[index] : nil
+    }
+
+    func browser(windowFrame frame: CGRect) -> Browser? {
         let height = NSScreen.screens.first?.frame.height ?? 0
         let match = Browsers.all.filter { browser in
             guard let window = browser.window?.frame else { return false }
             return abs(window.minX - frame.minX) <= 2 && abs((height - window.maxY) - frame.minY) <= 2
                 && abs(window.width - frame.width) <= 2 && abs(window.height - frame.height) <= 2
         }
-        guard match.count == 1, let browser = match.first else { return nil }
-        let tabs = visibleTabs(of: browser, for: context)
-        return tabs.indices.contains(index) ? tabs[index] : nil
+        return match.count == 1 ? match.first : nil
     }
 
     /// The window a tab is in, when it is in one's row.
@@ -894,6 +898,32 @@ final class Extensions: NSObject, ObservableObject {
         return true
     }
 
+    struct RecordedError {
+        let domain: String
+        let code: Int
+        let text: String
+        let userInfo: [String: Any]
+    }
+
+    /// WebKit's errors may be Objective-C proxies, not NSError instances.
+    /// Asking them directly avoids Swift's Error bridge, which can crash on macOS 15.
+    nonisolated static func errors(of context: WKWebExtensionContext) -> [RecordedError] {
+        errors(in: context.value(forKey: "errors"))
+    }
+
+    nonisolated static func errors(in value: Any?) -> [RecordedError] {
+        guard let array = value as? NSArray else { return [] }
+        return (0..<array.count).compactMap { index in
+            let item = array.object(at: index) as AnyObject
+            guard item.responds(to: NSSelectorFromString("domain")),
+                  let domain = item.value(forKey: "domain") as? String else { return nil }
+            return RecordedError(domain: domain,
+                                 code: (item.value(forKey: "code") as? NSNumber)?.intValue ?? 0,
+                                 text: (item.value(forKey: "localizedDescription") as? String) ?? "",
+                                 userInfo: (item.value(forKey: "userInfo") as? [String: Any]) ?? [:])
+        }
+    }
+
     /// WebKit records a worker that failed to start as an error on its
     /// context, and then doesn't try again: the extension would be dead
     /// until someone noticed. It is taken up afresh as soon as that shows.
@@ -904,9 +934,8 @@ final class Extensions: NSObject, ObservableObject {
         errorWatchers[id] = NotificationCenter.default.addObserver(forName: WKWebExtensionContext.errorsDidUpdateNotification, object: context, queue: .main) { [weak self, weak context] _ in
             MainActor.assumeIsolated {
                 guard let self, let context, self.contexts[id] === context else { return }
-                let failed = context.errors.contains { error in
-                    let e = error as NSError
-                    return e.domain == WKWebExtensionContext.errorDomain && e.code == WKWebExtensionContext.Error.backgroundContentFailedToLoad.rawValue
+                let failed = Extensions.errors(of: context).contains {
+                    $0.domain == WKWebExtensionContext.errorDomain && $0.code == WKWebExtensionContext.Error.backgroundContentFailedToLoad.rawValue
                 }
                 guard failed else { return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in

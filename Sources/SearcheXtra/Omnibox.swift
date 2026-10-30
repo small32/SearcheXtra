@@ -444,7 +444,7 @@ struct AddressField: NSViewRepresentable {
         if want != coordinator.synced {
             coordinator.synced = want
             field.stringValue = want
-            coordinator.select(from: browser.typed.count, in: field)
+            coordinator.select(from: browser.typed.utf16.count, in: field)
         }
 
         if coordinator.answered != browser.focusRequest {
@@ -513,7 +513,7 @@ struct AddressField: NSViewRepresentable {
             // A draft come back to its blank tab is carried on, not typed
             // over: the caret after it. An address ⌘L raises is selected whole.
             if browser.active?.isBlank == true, !browser.typed.isEmpty {
-                select(from: browser.typed.count, in: field)
+                select(from: browser.typed.utf16.count, in: field)
             } else {
                 editor.selectAll(nil)
             }
@@ -534,7 +534,7 @@ struct AddressField: NSViewRepresentable {
 
             field.stringValue = text + ending
             synced = field.stringValue
-            select(from: text.count, in: field)
+            select(from: text.utf16.count, in: field)
         }
 
         /// The part after the caret, shown as selected, so the next keystroke
@@ -545,7 +545,9 @@ struct AddressField: NSViewRepresentable {
                 .backgroundColor: NSColor(Palette.ink.opacity(0.12)),
                 .foregroundColor: Palette.NS.ink,
             ]
-            let length = field.stringValue.count
+            // NSTextView's ranges count UTF-16 units, including surrogate
+            // pairs and combining marks, rather than Swift Characters.
+            let length = field.stringValue.utf16.count
             guard start <= length else { return }
             editor.selectedRange = NSRange(location: start, length: length - start)
         }

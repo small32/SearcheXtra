@@ -207,7 +207,11 @@ struct Fold: View {
         .onChange(of: prefs.sidePosition) { _, _ in
             resetPending()
             browser.peeking = false
-            if let bar = Fold.titlebar { Fold.reset(bar, hidden: lightsOff) }
+            // Each window owns its title bar. In full screen macOS shows the
+            // buttons in its menu bar, even while the column is folded.
+            if let window = browser.window, let bar = window.standardWindowButton(.closeButton)?.superview {
+                Fold.reset(bar, hidden: lightsOff && !window.styleMask.contains(.fullScreen))
+            }
         }
         .onChange(of: prefs.columnWidth) { _, _ in
             if browser.folded { hideLights() }

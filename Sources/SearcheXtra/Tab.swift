@@ -1905,7 +1905,7 @@ final class Tab: ObservableObject, Identifiable {
         media.forget()
         guard let web = built else { return }
         if #available(macOS 15.4, *) { ExtensionUserScripts.discard(web) }
-        (delegate as? Browser)?.cancelDisplay(for: web)
+        (delegate as? Browser)?.cancelCapture(for: web)
         built = nil
         Passkeys.shared.forget(web)
         let controller = web.configuration.userContentController
@@ -2128,6 +2128,19 @@ final class PageView: WKWebView {
                 front.isAlternate = true
                 menu.insertItem(front, at: index + 1)
             }
+            // WebKit's link action carries the target and frame information
+            // needed when it later asks the browser to create a page.
+            if Shared.prefs.splitView, let beside = item.copy() as? NSMenuItem {
+                beside.title = L10n.text("upstream.link.openSplit")
+                beside.identifier = NSUserInterfaceItemIdentifier("SearchOpenLinkInSplitView")
+                beside.keyEquivalentModifierMask = []
+                beside.isAlternate = false
+                beside.target = self
+                beside.action = #selector(openLinkBeside(_:))
+                var at = index + 1
+                while at < menu.items.count, menu.items[at].isAlternate { at += 1 }
+                menu.insertItem(beside, at: at)
+            }
             openLink = (item.target, item.action)
             item.title = L10n.text("Tab.1085")
             item.keyEquivalentModifierMask = []
@@ -2141,7 +2154,7 @@ final class PageView: WKWebView {
             let item = menu.items[index]
             if let clean = item.copy() as? NSMenuItem {
                 copyLink = (item.target, item.action)
-                clean.title = "Copy Clean Link"
+                clean.title = L10n.text("upstream.copyCleanLink")
                 clean.identifier = NSUserInterfaceItemIdentifier("SearchCopyCleanLink")
                 clean.target = self
                 clean.action = #selector(copyCleanLink(_:))
@@ -2149,7 +2162,7 @@ final class PageView: WKWebView {
             }
         } else if let url, CleanLink.clean(url) != url,
                   let index = menu.items.firstIndex(where: { $0.identifier?.rawValue == "WKMenuItemIdentifierReload" }) {
-            let clean = NSMenuItem(title: "Copy Clean Link", action: #selector(copyCleanPage(_:)), keyEquivalent: "")
+            let clean = NSMenuItem(title: L10n.text("upstream.copyCleanLink"), action: #selector(copyCleanPage(_:)), keyEquivalent: "")
             clean.identifier = NSUserInterfaceItemIdentifier("SearchCopyCleanLink")
             clean.target = self
             clean.representedObject = url
@@ -2187,7 +2200,7 @@ final class PageView: WKWebView {
     func translateItem() -> NSMenuItem? {
         guard PageTranslator.enabled, let on = translating?() else { return nil }
         let language = PageTranslator.name(PageTranslator.code(PageTranslator.reader))
-        let item = NSMenuItem(title: on ? "Show Original" : "Translate Page to \(language)", action: #selector(translatePage(_:)), keyEquivalent: "")
+        let item = NSMenuItem(title: on ? L10n.text("upstream.translate.showOriginal") : L10n.text("upstream.translate.pageTo", language), action: #selector(translatePage(_:)), keyEquivalent: "")
         item.target = self
         return item
     }
@@ -2245,6 +2258,20 @@ final class PageView: WKWebView {
     func takeBehind() -> Bool {
         defer { behindSince = nil }
         return behindSince.map { Date().timeIntervalSince($0) < 1 } ?? false
+    }
+
+    /// Mark the next page created by WebKit's link action for Split View.
+    private var besideSince: Date?
+
+    @objc private func openLinkBeside(_ item: NSMenuItem) {
+        guard let action = openLink.action else { return }
+        besideSince = Date()
+        NSApp.sendAction(action, to: openLink.target, from: item)
+    }
+
+    func takeBeside() -> Bool {
+        defer { besideSince = nil }
+        return besideSince.map { Date().timeIntervalSince($0) < 1 } ?? false
     }
 
     /// WebKit's Copy Link, for Copy Clean Link to clean what it copies.

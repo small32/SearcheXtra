@@ -185,6 +185,7 @@ final class ExtensionOffscreen: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     private func close(error: Error) {
         guard !closed else { return }
         closed = true
+        for browser in Browsers.all { browser.cancelCapture(for: web) }
         if Self.documents[extensionID] === self { Self.documents[extensionID] = nil }
         extensionContext.didCloseTab(self, windowIsClosing: false)
         web.navigationDelegate = nil
@@ -195,6 +196,10 @@ final class ExtensionOffscreen: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         deliveryOrder.removeAll()
         waiters.forEach { $0.resume(throwing: error) }
         finish(.failure(error))
+    }
+
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        for browser in Browsers.all { browser.cancelCapture(for: webView) }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

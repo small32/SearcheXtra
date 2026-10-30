@@ -1,4 +1,5 @@
 {
+  "upstream.link.openSplit": {"en":"Open Link in Split View","zh-Hans":"在分屏中打开链接"},
   "upstream.closeWindow": {"en":"Close Window","zh-Hans":"关闭窗口"},
   "extensions.private.detail": {"en":"Each extension stays out of private tabs until you allow it in its details in the extension manager. One you allow can tell which tabs are private, but may still keep what you visit in them.","zh-Hans":"每个扩展默认无法访问无痕标签页，需在扩展管理器的详情中单独允许。获准的扩展可以识别无痕标签页，也可能保存其中的浏览记录。"},
   "extensions.private.allowed": {"en":"allowed in private tabs","zh-Hans":"已允许访问无痕标签页"},
@@ -4742,6 +4743,7 @@
   "upstream.translate.doneFrom": {"en":"Translated from {0}","zh-Hans":"已从{0}翻译"},
   "upstream.translate.done": {"en":"Translated","zh-Hans":"已翻译"},
   "upstream.translate.showOriginal": {"en":"Show Original","zh-Hans":"显示原文"},
+  "upstream.translate.pageTo": {"en":"Translate Page to {0}","zh-Hans":"将网页翻译为{0}"},
   "upstream.translate.privateAlways": {"en":"Translate {0} in This Tab","zh-Hans":"在此标签页中翻译{0}"},
   "upstream.translate.always": {"en":"Always Translate {0}","zh-Hans":"始终翻译{0}"},
   "upstream.translate.privateDetail": {"en":"Only until this private tab closes","zh-Hans":"仅在此无痕标签页关闭前有效"},

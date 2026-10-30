@@ -76,6 +76,10 @@ extension Browser {
                                   letIn: Extensions.mayGoPrivate(context))
         else { return .notHere }
         let content = SidePanelContent.page(extensionID: context.uniqueIdentifier, url: url, tab: tab)
+        if let tab, tab != activeID {
+            SidePanelPages.shared.bind(content, to: tab, in: self)
+            return .taken
+        }
         guard SidePanelPages.shared.load(url, from: context, in: self) else { return .noPanel }
         if let tab { SidePanelPages.shared.bind(content, to: tab, in: self) }
         sidePanel = content
@@ -233,8 +237,9 @@ extension Browser {
     /// its panel is up is held back too, having nothing left to say it may
     /// be there.
     var sidePanelHeld: Bool {
-        guard case .page(let id, _, _) = sidePanel, panelPanes().contains(where: { $0.shy })
-        else { return false }
+        guard case .page(let id, _, _) = sidePanel else { return false }
+        if #available(macOS 15.4, *), !ExtensionShims.panelEnabled(id, over: activeID) { return true }
+        guard panelPanes().contains(where: { $0.shy }) else { return false }
         guard #available(macOS 15.4, *), let context = Extensions.shared.contexts[id] else { return true }
         return Browser.holdsPanel(shy: true, letIn: Extensions.mayGoPrivate(context))
     }
@@ -361,6 +366,7 @@ final class SidePanelPages: NSObject {
 
     func drop(in browser: Browser) {
         guard let page = pages.removeValue(forKey: ObjectIdentifier(browser)) else { return }
+        browser.cancelCapture(for: page.web)
         page.web.stopLoading()
         page.web.navigationDelegate = nil
         page.web.uiDelegate = nil
@@ -404,6 +410,15 @@ final class SidePanelPages: NSObject {
 
     func bound(to tab: Tab.ID, in browser: Browser) -> SidePanelContent? {
         bound[ObjectIdentifier(browser)]?[tab]
+    }
+
+    func removeDisabled(_ id: String, in browser: Browser, enabled: (Tab.ID) -> Bool) {
+        let key = ObjectIdentifier(browser)
+        bound[key] = bound[key]?.filter { tab, content in
+            if case .page(let owner, _, _) = content, owner == id { return enabled(tab) }
+            return true
+        }
+        if bound[key]?.isEmpty == true { bound[key] = nil }
     }
 
     /// An extension gone: its panels with it.
@@ -519,6 +534,10 @@ final class ExtensionPanelDelegate: NSObject, WKNavigationDelegate, WKUIDelegate
     private var loaded = false
     init(browser: Browser, base: URL, first: URL) { self.browser = browser; self.base = base; self.first = first }
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        browser?.cancelCapture(for: webView)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { loaded = true }
 
     /// The panel's page never came up (a missing file, a page WebKit
@@ -545,6 +564,7 @@ final class ExtensionPanelDelegate: NSObject, WKNavigationDelegate, WKUIDelegate
 
     /// Its web process gone: the page is made again where it was.
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        browser?.cancelCapture(for: webView)
         if loaded { webView.reload() } else { fellThrough(NSError(domain: "Search", code: 1)) }
     }
 
@@ -663,13 +683,16 @@ struct SidePanelView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 Rectangle().fill(Palette.hairline).frame(height: 1)
-                PanelPage(browser: browser)
+                PanelPage(web: SidePanelPages.shared.web(in: browser))
             }
         case .site:
             VStack(spacing: 0) {
-                if let delegate = SidePanelPages.shared.siteDelegate(in: browser) { SiteLine(browser: browser, delegate: delegate) }
+                // A replacement site must watch its own page's delegate.
+                if let delegate = SidePanelPages.shared.siteDelegate(in: browser) {
+                    SiteLine(browser: browser, delegate: delegate).id(ObjectIdentifier(delegate))
+                }
                 Rectangle().fill(Palette.hairline).frame(height: 1)
-                PanelPage(browser: browser)
+                PanelPage(web: SidePanelPages.shared.web(in: browser))
             }
         case nil:
             Color.clear
@@ -720,9 +743,9 @@ private struct SiteLine: View {
     }
 }
 
-/// The extension's page, in the panel.
+/// The current page, so replacing it updates the representable and holder.
 private struct PanelPage: NSViewRepresentable {
-    let browser: Browser
+    let web: WKWebView?
 
     func makeNSView(context: Context) -> NSView {
         let holder = NSView()
@@ -733,7 +756,7 @@ private struct PanelPage: NSViewRepresentable {
     func updateNSView(_ holder: NSView, context: Context) { place(in: holder) }
 
     private func place(in holder: NSView) {
-        guard let web = SidePanelPages.shared.web(in: browser) else {
+        guard let web else {
             holder.subviews.forEach { $0.removeFromSuperview() }
             return
         }

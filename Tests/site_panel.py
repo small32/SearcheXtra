@@ -129,6 +129,17 @@ def main():
         st = panel()
         t.ok("Open in Side Panel from a tab's menu", st["shown"] and st["content"]["url"].endswith("/b"), st)
 
+        # Replacing a visible site attaches the new page and its own line.
+        wait(lambda: panel()["title"] == "b")
+        other = sv.BASE.replace("127.0.0.1", "localhost") + "/other"
+        panel("site", url=other)
+        wait(lambda: panel()["title"] == "other")
+        st = panel()
+        t.ok("another site replaces the visible panel page",
+             st["shown"] and st["page"] == other and len(st["frame"]) == 4 and st["frame"][2] == WIDTH, st)
+        wait(lambda: panel()["content"]["line"].startswith("localhost"))
+        t.ok("the panel line follows the replacement site", panel()["content"]["line"].startswith("localhost"), panel()["content"])
+
         # Never a private tab's page.
         panel("close")
         sv.sp("private"); time.sleep(0.6)
