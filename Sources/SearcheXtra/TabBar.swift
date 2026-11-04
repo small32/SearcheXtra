@@ -768,7 +768,7 @@ private struct TabPill: View {
         .onHover { hovering = $0 }
         .contextMenu { TabMenu(browser: browser, tab: tab, close: close) }
         .help(pinned || compact ? tab.label : "")
-        .animation(Motion.quick, value: hovering)
+        .animation(nil, value: hovering)
         .animation(Motion.glide, value: editing)
         .animation(Motion.glide, value: tab.pin)
         .onChange(of: browser.refusals) { _, _ in
@@ -896,7 +896,7 @@ private struct TabPill: View {
                             .frame(width: 30, height: 28)
                     }
                 }
-                .animation(Motion.quick, value: hovering)
+                .animation(nil, value: hovering)
                 .animation(Motion.quick, value: tab.loading)
             }
         }

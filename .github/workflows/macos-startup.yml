@@ -10,6 +10,7 @@ on:
       - 'Tests/ExtensionUserWorldTests.mjs'
       - 'Tests/ExtensionWorkerRecovery/**'
       - 'Tests/FlowDragTests.mjs'
+      - 'Tests/KeptScrollTests.mjs'
       - 'Tests/run-macos-regressions.sh'
       - 'Tests/verify-macos-app-launch.sh'
       - 'Package.swift'
@@ -45,6 +46,7 @@ jobs:
           node Tests/ExtensionUserWorldTests.mjs
           node Tests/ExtensionWorkerRecovery/run.js
           node Tests/FlowDragTests.mjs
+          node Tests/KeptScrollTests.mjs
 
       - name: Verify original ScriptCat MV3 package
         shell: bash

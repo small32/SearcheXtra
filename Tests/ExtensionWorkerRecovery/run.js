@@ -437,5 +437,29 @@ async function test(name, run) { await run(); console.log('PASS ' + name); passe
     }
     assert.deepEqual(lookedUp, [8, 8]);
   });
+  await test('Permission queries start independently and merge only the browser-owned grants', async () => {
+    let resolveWebKit, resolveBrowser;
+    let webKitStarted = false, browserStarted = false;
+    const state = load(false, 0, state => {
+      state.root.chrome.permissions = {
+        contains: async () => false, request: async () => false, remove: async () => false,
+        getAll: () => { webKitStarted = true; return new Promise(resolve => { resolveWebKit = resolve; }); },
+      };
+      const original = state.runtime.sendNativeMessage;
+      state.runtime.sendNativeMessage = (app, message) => {
+        if (message.api !== 'permissions.granted') return original(app, message);
+        browserStarted = true;
+        return new Promise(resolve => { resolveBrowser = value => resolve({ value }); });
+      };
+    });
+    const result = state.root.chrome.permissions.getAll();
+    await drain();
+    assert(webKitStarted && browserStarted, 'Neither lookup waits for the other to finish');
+    resolveBrowser(['history', 'downloads', 'not-a-browser-grant']);
+    resolveWebKit({ permissions: ['tabs', 'history'], origins: ['https://example.test/*'] });
+    const grants = await result;
+    assert.deepEqual(Array.from(grants.permissions), ['tabs', 'history', 'downloads']);
+    assert.deepEqual(Array.from(grants.origins), ['https://example.test/*']);
+  });
   console.log(passed + ' full-shim regression cases passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

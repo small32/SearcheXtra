@@ -1,10 +1,14 @@
 # SearcheXtra 更新日志
 
-## 未发布 / Unreleased
+## 2.2.6 — 待发布 / Unreleased
 
 ### 简体中文
 
-- 移植 Search 上游 `76bd2c1..b122202` 的 macOS 更新；保留本地书签、超级拖拽、中英双语及 MV2/MV3 用户脚本兼容。
+- 移植 Search 上游 `76bd2c1..3279d28` 的 macOS 更新；保留本地书签、超级拖拽、中英双语及 MV2/MV3 用户脚本兼容。
+- 修复分屏及重复新建标签后的地址栏焦点；地址建议统一显示已缓存的网站图标，标签悬停即时反馈。
+- 修复触控板导航后的页面偏移与白边，返回 GitHub 等页面时恢复滚动位置；关闭设置、历史等内置页面后返回原标签。
+- 支持扩展在链接预览和外部链接小窗口中运行；并行读取扩展页面与权限，加快翻译启动，保留本地用户脚本原生桥接。
+- 加快大图片复制并保留大小限制；导入 Arc 空间时匹配其内置图标。
 - 修复预览遮挡区域的鼠标响应、画中画返回视频、暂停的全屏视频点击，以及图片链接的右键菜单；支持批量关闭多选标签并一次恢复。
 - 链接右键菜单支持在分屏中打开；修复顶部标签栏中分屏标签的布局和关闭按钮。
 - 修复全屏时窗口按钮的位置与多窗口侧栏切换，修复清除浏览数据入口和侧边栏网站切换白屏。
@@ -23,7 +27,11 @@
 
 ### English
 
-- Port macOS updates from Search upstream `76bd2c1..b122202`, retaining local bookmark management, super drag, both interface languages, and MV2/MV3 user-script compatibility.
+- Port macOS updates from Search upstream `76bd2c1..3279d28`, retaining local bookmark management, super drag, both interface languages, and MV2/MV3 user-script compatibility.
+- Fix address-field focus after new tabs and in Split View, show cached site icons in address suggestions, and make tab hover feedback instant.
+- Fix shifted pages and blank strips after swipe navigation, restore scroll positions on sites such as GitHub, and return to the previous tab after closing built-in pages.
+- Support extensions in link previews and small external-link windows; read extension pages and permissions concurrently and start translation faster, retaining the native user-script bridge.
+- Speed up large-image copying while retaining size limits, and match Arc's built-in space icons during import.
 - Fix pointer events behind previews, returning from picture-in-picture, clicks on paused full-screen video, and image-link context menus. Close selected tabs together and restore them in one action.
 - Add Open Link in Split View to the link menu and fix split-tab layout and close-button behavior in the top tab bar.
 - Fix full-screen window buttons and sidebar switching, opening Clear Browsing Data, and blank panels after switching sites.

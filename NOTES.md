@@ -1,3 +1,5 @@
+SearcheXtra 2.2.6：同步上游 macOS 更新，改善地址栏、触控板导航、扩展兼容、图片复制和 Arc 导入，修复权限、下载、书签导入及资源释放问题。 SearcheXtra 2.2.6: Sync upstream macOS updates, improve the address field, swipe navigation, extension compatibility, image copying and Arc import, and fix permissions, downloads, bookmark imports and resource cleanup.
+
 SearcheXtra 2.2.5：合并上游更新代码，并修复了一些BUG。 SearcheXtra 2.2.5: Merged upstream updates and fixed some bugs.
 
 SearcheXtra 2.2.3：同步上游 16 个提交，新增逐扩展无痕权限、默认关闭的搜索建议与固定页跨站预览，修复扩展启动竞态、Stylus、媒体键、密码、安全密钥、本地文件及标签焦点问题。 SearcheXtra 2.2.3: Merge 16 upstream commits, adding per-extension private access and optional search suggestions and pinned-tab peeks, with fixes for extension startup, Stylus, media keys, passwords, passkeys, local files and tab focus. 分别提供 macOS ARM64 和 Intel x86_64 安装包。 Separate macOS ARM64 and Intel x86_64 packages.
