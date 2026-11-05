@@ -52,7 +52,18 @@ final class Profiles: ObservableObject {
     private nonisolated static var file: URL { Store.file("profiles.json") }
 
     nonisolated static func read() -> [Profile] {
-        let saved = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode([Profile].self, from: $0) } ?? []
+        var saved: [Profile] = []
+        if FileManager.default.fileExists(atPath: file.path) {
+            guard let data = try? Data(contentsOf: file),
+                  let list = try? JSONDecoder().decode([Profile].self, from: data)
+            else {
+                // Unreadable is not the same as gone: keep it for a person
+                // to look at instead of writing one profile over the rest.
+                Store.quarantine(file)
+                return [Profile.personal]
+            }
+            saved = list
+        }
         let personal = saved.first(where: \.isPersonal).map { Profile(id: Profile.personalID, name: $0.name, home: Space.firstID) } ?? .personal
         return [personal] + saved.filter { !$0.isPersonal }
     }

@@ -1151,7 +1151,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func forget(_ login: Kept) {
-        Vault.forget(host: login.host, user: login.user)
+        Vault.forget(host: login.host, user: login.user, clear: login.clear)
         relist()
     }
 
@@ -1180,7 +1180,7 @@ final class Browser: NSObject, ObservableObject {
                 DispatchQueue.global(qos: .userInitiated).async {
                     // Counted as the keychain answers, not as asked: one
                     // it kept is not reported gone.
-                    let gone = shown.filter { Vault.forget(host: $0.host, user: $0.user) }.count
+                    let gone = shown.filter { Vault.forget(host: $0.host, user: $0.user, clear: $0.clear) }.count
                     DispatchQueue.main.async {
                         self.forgetting = false
                         self.relist()
@@ -2654,6 +2654,12 @@ final class Browser: NSObject, ObservableObject {
             out.append(tab)
         }
         for gone in pinned {
+            // The same way out a closed tab takes: a pin that was playing
+            // in the little window must not leave it holding a dead page.
+            if floating == gone.id { land(covering: false) }
+            heldDialogs.removeValue(forKey: gone.id)?.forEach { $0.dismiss() }
+            dropQuestions(for: gone.id)
+            detachSplit(gone)
             discardSidePanel(for: gone.id)
             gone.close()
         }
@@ -3674,6 +3680,10 @@ final class Browser: NSObject, ObservableObject {
     /// behind; closing that blank tab closes the window.
     func close(_ tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        // A tab closed while its name was being edited must not leave the
+        // editor pointing at it: the next keystroke would go to a tab that
+        // is gone, and the address field would stay quiet (see renamingTab).
+        if editingTab == tab.id { cancelTabEdit() }
         if activeID == tab.id { SiteCardPanel.hide(in: self) }
         if tab.pin == nil { discardSidePanel(for: tab.id) }
         let pair = split(for: tab)

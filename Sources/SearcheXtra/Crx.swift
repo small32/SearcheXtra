@@ -230,10 +230,10 @@ enum Crx {
         var type = SecExternalItemType.itemTypePublicKey
         var items: CFArray?
         guard SecItemImport(rsaSPKI as CFData, nil, &format, &type, [], nil, nil, &items) == errSecSuccess,
-              let key = (items as? [Any])?.first
+              let key = (items as? [Any])?.first as? SecKey
         else { return false }
         return SecKeyVerifySignature(
-            key as! SecKey, .rsaSignatureMessagePKCS1v15SHA256,
+            key, .rsaSignatureMessagePKCS1v15SHA256,
             message as CFData, signature as CFData, nil
         )
     }

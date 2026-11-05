@@ -32,13 +32,25 @@ final class Shield: ObservableObject {
         Store.settings.stringArray(forKey: "shield.paused") ?? []
     )
 
+    /// The form a host is kept in: no "www.", as Curtain's host is, so the
+    /// Settings row and the page's own navigation ask about the same name.
+    private static func bare(_ host: String) -> String {
+        host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
     func isPaused(on host: String?) -> Bool {
         guard let host else { return false }
-        return paused.contains(host)
+        let bare = Shield.bare(host)
+        return paused.contains(bare) || paused.contains(host)
     }
 
     func pause(_ host: String, _ off: Bool) {
-        if off { paused.insert(host) } else { paused.remove(host) }
+        let bare = Shield.bare(host)
+        if off { paused.insert(bare) } else { paused.remove(bare) }
+        // An older list may hold the name with its "www.": that one would
+        // go on matching after this site was switched back on. Only when
+        // the two names differ, or this would take back the line above.
+        if bare != host { paused.remove(host) }
         Store.settings.set(Array(paused).sorted(), forKey: "shield.paused")
     }
 

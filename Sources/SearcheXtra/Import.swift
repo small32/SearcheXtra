@@ -317,7 +317,10 @@ enum Chromium {
         var complete = !profiles.isEmpty
         for profile in profiles {
             guard let marks = source.file("Bookmarks", in: profile) else { complete = false; continue }
-            guard FileManager.default.fileExists(atPath: marks.path) else { continue }
+            // A file that is gone is not a profile with no bookmarks: a
+            // Replace that trusted this would take the last import's away
+            // and put nothing back.
+            guard FileManager.default.fileExists(atPath: marks.path) else { complete = false; continue }
             guard let data = try? source.data("Bookmarks", in: profile),
                   let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let roots = top["roots"] as? [String: Any]

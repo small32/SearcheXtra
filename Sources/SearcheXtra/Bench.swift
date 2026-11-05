@@ -108,7 +108,14 @@ final class Bench {
             var asked = query
             asked[kSecReturnAttributes as String] = true
             let status = SecItemCopyMatching(asked as CFDictionary, nil)
-            return status == errSecSuccess || status == errSecMissingEntitlement
+            // A build with no provisioning profile has nowhere to keep the
+            // mark. That used to count as "on", which let a plain
+            // `defaults write` open the socket. It now takes an explicit
+            // test run or SEARCH_BENCH=1, so the switch still means
+            // something on a build nobody signed.
+            if status == errSecSuccess { return true }
+            guard status == errSecMissingEntitlement else { return false }
+            return Store.testing || ProcessInfo.processInfo.environment["SEARCH_BENCH"] != nil
         }
 
         static func grant() {
@@ -128,6 +135,27 @@ final class Bench {
 
     // MARK: - starting and stopping
 
+    /// Whether another copy is listening on this path. A socket file left by
+    /// a copy that is gone answers nothing, and may be cleared.
+    private static func socketIsAlive(_ path: String) -> Bool {
+        let probe = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        guard probe >= 0 else { return false }
+        defer { close(probe) }
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let room = MemoryLayout.size(ofValue: address.sun_path)
+        guard path.utf8.count < room else { return false }
+        withUnsafeMutablePointer(to: &address.sun_path) { sun in
+            sun.withMemoryRebound(to: CChar.self, capacity: room) { bytes in
+                _ = strlcpy(bytes, path, room)
+            }
+        }
+        let size = socklen_t(MemoryLayout<sockaddr_un>.size)
+        return withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(probe, $0, size) }
+        } == 0
+    }
+
     func start(for browser: Browser) {
         guard !running else { return }
         self.browser = browser
@@ -140,6 +168,9 @@ final class Bench {
         try? FileManager.default.createDirectory(
             at: Bench.socket.deletingLastPathComponent(), withIntermediateDirectories: true
         )
+        // A second copy must not take the socket from a copy already
+        // listening: connect first, and only clear a path nobody answers on.
+        if FileManager.default.fileExists(atPath: path), Bench.socketIsAlive(path) { return }
         unlink(path)
 
         let fd = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
@@ -182,9 +213,14 @@ final class Bench {
         clients.values.forEach { $0.drop() }
         clients = [:]
         running = false
-        // The tabs a script left open go with it.
-        if let browser {
-            for tab in browser.tabs where tab.bench { browser.close(tab) }
+        // The tabs a script left open go with it, in every window it used.
+        for owner in Browsers.all {
+            for tab in owner.tabs where tab.bench { owner.close(tab) }
+        }
+        // The wake-up it was keeping is handed back too.
+        if let awake {
+            ProcessInfo.processInfo.endActivity(awake)
+            self.awake = nil
         }
     }
 
@@ -199,6 +235,9 @@ final class Bench {
             close(fd)
             return
         }
+        // A write to a client that has gone must not take the app with it.
+        var noPipe: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noPipe, socklen_t(MemoryLayout<Int32>.size))
         let client = Client(fd: fd) { [weak self] request, answer in
             self?.handle(request, answer)
         } gone: { [weak self] fd in
@@ -267,12 +306,20 @@ final class Bench {
             out.append(0x0A)
             out.withUnsafeBytes { raw in
                 var sent = 0
+                var spins = 0
                 while sent < raw.count {
                     let n = write(fd, raw.baseAddress! + sent, raw.count - sent)
                     if n <= 0 {
-                        if errno == EAGAIN { usleep(2000); continue }
+                        // A client that never reads must not spin the main
+                        // queue forever: half a second, then give up.
+                        if errno == EAGAIN, spins < 250 {
+                            spins += 1
+                            usleep(2000)
+                            continue
+                        }
                         break
                     }
+                    spins = 0
                     sent += n
                 }
             }
@@ -297,12 +344,18 @@ final class Bench {
             answered = true
             given(reply)
         }
-        let patience = (request["do"] as? String) == "wait" ? (request["seconds"] as? Double ?? 30) + 5 :
+        let asked: Double = (request["do"] as? String) == "wait" ? (request["seconds"] as? Double ?? 30) + 5 :
             (request["do"] as? String) == "import-file" ? (request["timeout"] as? Double ?? 120) : 25
+        // Anything a script sends: clamped so neither DispatchTime nor the
+        // message below can trap on an absurd number.
+        let patience = asked.isFinite ? min(max(asked, 1), 600) : 25
         DispatchQueue.main.asyncAfter(deadline: .now() + patience) { answer(["error": "no answer within \(Int(patience)) s"]) }
         // --window N: the Nth window's browser, oldest first; the first
         // window's otherwise.
-        let picked = (request["window"] as? Int).flatMap { n in Browsers.all.indices.contains(n - 1) ? Browsers.all[n - 1] : nil }
+        let picked = (request["window"] as? Int).flatMap { n in
+            guard n >= 1, n <= Browsers.all.count else { return nil }
+            return Browsers.all[n - 1]
+        }
         let live = browser.flatMap { b in Browsers.all.contains { $0 === b } ? b : nil }
         guard let browser = picked ?? live ?? Browsers.primary else {
             answer(["error": "no browser"])
@@ -331,7 +384,7 @@ final class Bench {
             // full screen. How many times a change of chrome moves the page
             // (Tests/fullscreen_exit.py).
             guard Store.testing else { answer(["error": "layouts is for test runs"]); return }
-            let seconds = min(10, request["seconds"] as? Double ?? 1.5)
+            let seconds = min(10, max(0, request["seconds"] as? Double ?? 1.5))
             let record = LayoutRecord(browser: browser)
             record.look()
             if let on = request["immerse"] as? Bool {
@@ -387,7 +440,7 @@ final class Bench {
 
         case "wait":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
-            let limit = Date().addingTimeInterval(request["seconds"] as? Double ?? 20)
+            let limit = Date().addingTimeInterval(min(max(request["seconds"] as? Double ?? 20, 0), 600))
             wait(for: tab, until: limit, answer)
 
         case "sleep":
@@ -499,6 +552,9 @@ final class Bench {
             house(tab)
             // Search's own world is where its page scripts live (see Web.world).
             if request["world"] as? String == "search" {
+                // Search's own world carries its native bridges: a script
+                // outside a test run must not speak through them.
+                guard Store.testing else { answer(["error": "search world needs a test run"]); return }
                 tab.web.evaluateJavaScript(js, in: nil, in: Web.world) { result in
                     switch result {
                     case .success(let value): answer(["value": Bench.plain(value)])
@@ -767,8 +823,11 @@ final class Bench {
         case "shot":
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             house(tab)
-            let path = (request["path"] as? String)
-                ?? NSTemporaryDirectory() + "search-bench-\(Bench.short(tab)).png"
+            let fallback = NSTemporaryDirectory() + "search-bench-\(Bench.short(tab)).png"
+            // A path of the script's own is a test run's: the shipped
+            // browser writes where it would have written anyway, never over
+            // a file the person has.
+            let path = Store.testing ? ((request["path"] as? String) ?? fallback) : fallback
             let width = request["width"] as? Double
             shoot(tab, to: URL(fileURLWithPath: path), width: width, answer)
 
@@ -924,7 +983,7 @@ final class Bench {
                     timestamp: ProcessInfo.processInfo.systemUptime,
                     windowNumber: number, context: nil,
                     characters: chars, charactersIgnoringModifiers: chars,
-                    isARepeat: repeats && type == .keyDown, keyCode: UInt16(code)
+                    isARepeat: repeats && type == .keyDown, keyCode: UInt16(clamping: code)
                 ) else { continue }
                 NSApp.postEvent(event, atStart: false)
             }
@@ -1794,7 +1853,7 @@ final class Bench {
             guard let event = NSEvent.keyEvent(
                 with: .keyDown, location: .zero, modifierFlags: flags,
                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
-                characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: UInt16(code)
+                characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: UInt16(clamping: code)
             ) else { answer(["error": "no event"]); return }
             let before = (finding: browser.finding, summoning: browser.editing, folded: browser.folded)
             var firstPass = "search"
@@ -1939,12 +1998,12 @@ final class Bench {
             guard Store.testing else { answer(["error": "accounts only works on a --test run"]); return }
             if request["keep"] as? Bool == true { browser.keepOffer() }
             if request["forget"] as? Bool == true {
-                Vault.all().forEach { Vault.forget(host: $0.host, user: $0.user) }
+                Vault.all().forEach { Vault.forget(host: $0.host, user: $0.user, clear: $0.clear) }
                 browser.dropOffer()
             } else if let user = request["forget"] as? String {
                 // One account's, as Settings › Passwords forgets it: "" is
                 // the login kept under no name.
-                Vault.all().filter { $0.user == user }.forEach { Vault.forget(host: $0.host, user: $0.user) }
+                Vault.all().filter { $0.user == user }.forEach { Vault.forget(host: $0.host, user: $0.user, clear: $0.clear) }
             }
             let offer: [String: Any] = browser.offering.map { ["user": $0.login.user, "host": $0.login.host, "changed": $0.changed] } ?? [:]
             // Every account this world keeps, by name, without a secret.
@@ -2057,7 +2116,7 @@ final class Bench {
             // commit included. For the reading fill and what watches the tab.
             guard Store.testing else { answer(["error": "fill only works on a --test run"]); return }
             guard let tab = browser.active else { answer(["error": "no tab"]); return }
-            let steps = request["steps"] as? Int ?? 200
+            let steps = max(1, request["steps"] as? Int ?? 200)
             var times: [Double] = []
             @MainActor func step(_ n: Int) {
                 guard n < steps else {
@@ -3278,7 +3337,9 @@ final class Bench {
 
         case "ui":
             // Open or close the app's own panels, to reproduce what a person
-            // did without a person.
+            // did without a person. It drives the browser the person is
+            // using, so it is a test run's alone.
+            guard Store.testing else { answer(["error": "ui needs a test run"]); return }
             if let on = request["settings"] as? Bool { browser.tuning = on }
             if let on = request[L10n.text("Browser.0312")] as? Bool, Store.testing { browser.managing = on }
             if let on = request["welcome"] as? Bool { browser.welcoming = on }
@@ -4015,13 +4076,20 @@ final class Bench {
         case "ext-shot":
             // A picture of the extension's popup, while it is open.
             guard let id = request["id"] as? String, ExtensionPopup.shared.extensionID == id,
-                  let web = ExtensionPopup.shared.view, let path = request["path"] as? String
+                  let web = ExtensionPopup.shared.view
             else { answer(["error": "no popup open for that extension"]); return }
+            // A picture goes where a test asked; a shipped browser has no
+            // reason to write a file of the script's choosing.
+            guard Store.testing, let path = request["path"] as? String else {
+                answer(["error": "ext-shot needs a test run and a path"])
+                return
+            }
             shoot(web, to: URL(fileURLWithPath: path), width: nil, answer)
         case "ext-menu":
             // The list behind the puzzle button, as a picture.
-            guard let path = request["path"] as? String, let data = extensionMenuPicture()?.representation(using: .png, properties: [:]) else {
-                answer(["error": "ext-menu needs a path"])
+            guard Store.testing, let path = request["path"] as? String,
+                  let data = extensionMenuPicture()?.representation(using: .png, properties: [:]) else {
+                answer(["error": "ext-menu needs a test run and a path"])
                 return
             }
             do { try data.write(to: URL(fileURLWithPath: path)); answer(["saved": path]) }
@@ -4082,7 +4150,13 @@ final class Bench {
     }
 
     private func describe(_ tab: Tab) -> [String: Any] {
-        [
+        // The window this tab is in, not the one the bench started with: a
+        // request may have picked another by --window, and the starting one
+        // may be gone.
+        let owner = Browsers.all.first { candidate in
+            candidate.tabs.contains { $0 === tab } || candidate.parkedTabs.contains { $0 === tab }
+        } ?? browser
+        return [
             "id": Bench.short(tab),
             "url": tab.address?.absoluteString ?? "",
             "page": tab.pageAddress?.absoluteString ?? "",
@@ -4090,17 +4164,17 @@ final class Bench {
             "title": tab.title,
             "name": tab.name ?? "",
             // The group it is in, by name, whether or not groups are on.
-            "group": browser?.group(of: tab).flatMap { id in browser?.tabGroups.first { $0.id == id }?.name } ?? "",
+            "group": owner?.group(of: tab).flatMap { id in owner?.tabGroups.first { $0.id == id }?.name } ?? "",
             "loading": tab.loading,
             "hollow": tab.hollow,
             "view": tab.built?.url?.absoluteString ?? "",
             "bench": tab.bench,
-            "active": tab.id == browser?.activeID,
+            "active": tab.id == owner?.activeID,
             // Where the page is, as its tab would say it at rest, and whether
             // it says it now: the setting on, the tab you're on, not edited
             // (see AtRest.swift).
             "atRest": AtRest.of(tab.restAddress)?.text ?? "",
-            "atRestShown": browser.map { tab.id == $0.activeID && $0.editingTab != tab.id && AtRest.said(tab.restAddress, always: $0.prefs.showsAddress) != nil } ?? false,
+            "atRestShown": owner.map { tab.id == $0.activeID && $0.editingTab != tab.id && AtRest.said(tab.restAddress, always: $0.prefs.showsAddress) != nil } ?? false,
             "asleep": tab.asleep,
             "shy": tab.shy,
             "noisy": tab.noisy,

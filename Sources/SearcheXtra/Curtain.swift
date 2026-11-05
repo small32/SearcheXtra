@@ -87,9 +87,13 @@ final class Curtain: ObservableObject {
     // MARK: - the file
 
     private func load() {
+        guard FileManager.default.fileExists(atPath: file.path) else { return }
         guard let data = try? Data(contentsOf: file),
               let stored = try? JSONDecoder().decode([String: [Veil]].self, from: data)
-        else { return }
+        else {
+            Store.quarantine(file)
+            return
+        }
         byHost = stored
     }
 

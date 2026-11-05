@@ -213,7 +213,10 @@ extension Browser {
         else { return false }
         let w = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
         let h = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
-        return w > 0 && h > 0 && w * h <= mostPixels
+        guard w > 0, h > 0 else { return false }
+        // A header can declare 4294967295 × 4294967295: divide instead of
+        // multiplying, so the check itself cannot overflow.
+        return w <= mostPixels / h
     }
 
     /// The same WKDownload this app already knows how to finish — asked for

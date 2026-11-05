@@ -1077,8 +1077,10 @@ final class Tab: ObservableObject, Identifiable {
         controller.addUserScript(
             WKUserScript(source: Veiling.picker, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Web.world)
         )
+        // Every frame: a sign-in box inside an iframe is still a sign-in
+        // box, and the message carries which frame it came from.
         controller.addUserScript(
-            WKUserScript(source: FormRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)
+            WKUserScript(source: FormRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: false, in: Web.world)
         )
         controller.addUserScript(
             WKUserScript(source: IconRelay.script, injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: Web.world)

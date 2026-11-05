@@ -303,7 +303,7 @@ struct Parked {
 }
 
 extension Browser {
-    var space: Space { spaces.first { $0.id == spaceID } ?? spaces[0] }
+    var space: Space { spaces.first { $0.id == spaceID } ?? spaces.first ?? Space.first() }
 
     /// Every tab of the spaces not on screen, for the sleep timer.
     var parkedTabs: [Tab] { parked.values.flatMap(\.tabs) }

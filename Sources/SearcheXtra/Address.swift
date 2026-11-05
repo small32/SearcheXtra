@@ -8,7 +8,7 @@ enum Address {
     /// Schemes the window can show itself. Anything else typed with a scheme —
     /// mailto:, a custom app link — is somebody else's job and gets refused
     /// here rather than opening a blank tab.
-    private static let ours: Set<String> = ["http", "https", "file", "about", "data", InternalPage.scheme]
+    private static let ours: Set<String> = ["http", "https", "file", "about", InternalPage.scheme]
 
     /// Only committed navigation checks the disk; suggestions and dropped text never do.
     static func file(from typed: String) -> URL? {
@@ -30,7 +30,7 @@ enum Address {
             guard ours.contains(scheme) else { return nil }
             return URL(string: text)
         }
-        if text.lowercased().hasPrefix("about:") || text.lowercased().hasPrefix("data:") {
+        if text.lowercased().hasPrefix("about:") {
             return URL(string: text)
         }
 
@@ -38,8 +38,15 @@ enum Address {
         // in front of it. "hello world" is not a website, and neither is "todo".
         let head = text.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
         guard !head.contains("@") else { return nil }   // an email address
-        // This Mac by its IPv6 address, [::1]:3000, is a place too.
-        if head.hasPrefix("[::1]") { return URL(string: "http://" + text) }
+        // An IPv6 address in brackets — this Mac's [::1]:3000, or any
+        // other — is a place too: the host is everything inside them.
+        if head.hasPrefix("["), let close = head.firstIndex(of: "]") {
+            let inside = head[head.index(after: head.startIndex)..<close]
+            guard !inside.isEmpty,
+                  inside.allSatisfy({ $0.isHexDigit || $0 == ":" || $0 == "." })
+            else { return nil }
+            return URL(string: "http://" + text)
+        }
         let host = head.split(separator: ":").first.map(String.init) ?? String(head)
         guard looksLikeHost(host) else { return nil }
 
@@ -135,7 +142,11 @@ enum Address {
     static func pretty(_ url: URL) -> String {
         guard let host = url.host() else { return url.absoluteString }
         let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        var out = bare + (url.port.map { ":\($0)" } ?? "")
         let path = url.path()
-        return path.isEmpty || path == "/" ? bare : bare + path
+        if !path.isEmpty, path != "/" { out += path }
+        if let query = url.query() { out += "?" + query }
+        if let fragment = url.fragment() { out += "#" + fragment }
+        return out
     }
 }

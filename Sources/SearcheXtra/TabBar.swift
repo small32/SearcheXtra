@@ -1849,7 +1849,13 @@ struct PinField: NSViewRepresentable {
 
         func controlTextDidEndEditing(_ note: Notification) {
             let browser = browser
-            DispatchQueue.main.async { browser.endPinEdit() }
+            let tab = tab
+            DispatchQueue.main.async {
+                // Only the pin whose field this is may end the edit: another
+                // pin's field can finish loading while this one is up.
+                guard browser.editingPin == tab.id else { return }
+                browser.endPinEdit()
+            }
         }
     }
 }

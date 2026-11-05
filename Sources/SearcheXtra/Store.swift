@@ -147,9 +147,23 @@ enum Store {
     static func quarantine(_ file: URL) {
         guard FileManager.default.fileExists(atPath: file.path) else { return }
         let stamp = Int(Date().timeIntervalSince1970)
-        let aside = file.deletingLastPathComponent()
-            .appendingPathComponent("\(file.deletingPathExtension().lastPathComponent).unreadable-\(stamp).json")
-        try? FileManager.default.moveItem(at: file, to: aside)
+        let folder = file.deletingLastPathComponent()
+        let base = file.deletingPathExtension().lastPathComponent
+        // A second bad read in the same second must not land on the first
+        // one's name: the first is still the thing worth keeping.
+        var aside = folder.appendingPathComponent("\(base).unreadable-\(stamp).json")
+        var suffix = 1
+        while FileManager.default.fileExists(atPath: aside.path), suffix <= 100 {
+            aside = folder.appendingPathComponent("\(base).unreadable-\(stamp)-\(suffix).json")
+            suffix += 1
+        }
+        do {
+            try FileManager.default.moveItem(at: file, to: aside)
+        } catch {
+            // Nothing further to do about a folder that won't take a
+            // rename, but say so rather than lose the trace silently.
+            NSLog("Store: could not set %@ aside: %@", file.lastPathComponent, error.localizedDescription)
+        }
     }
 
     /// Settings live apart too: a test that changes what the tabs wear or

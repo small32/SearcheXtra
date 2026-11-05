@@ -1395,7 +1395,16 @@ final class Extensions: NSObject, ObservableObject {
         let action = (manifest["action"] ?? manifest["browser_action"]) as? [String: Any]
         guard let path = action?["default_popup"] as? String, !path.isEmpty else { return nil }
         // Relative to the extension, and keeping a query it may carry.
-        return URL(string: path, relativeTo: context.baseURL)?.absoluteURL
+        return ownPage(path, for: context)
+    }
+
+    /// A page of the extension's own. Chrome refuses anything else for a
+    /// popup, and so does this: an absolute https address would turn the
+    /// button's panel into somebody else's site with no address bar over it.
+    static func ownPage(_ path: String, for context: WKWebExtensionContext) -> URL? {
+        guard let url = URL(string: path, relativeTo: context.baseURL)?.absoluteURL else { return nil }
+        guard url.scheme == Extensions.scheme, url.host == context.baseURL.host else { return nil }
+        return url
     }
 
     // MARK: - asking
@@ -1761,7 +1770,7 @@ final class Extensions: NSObject, ObservableObject {
         let path = activeAdapter(for: context)?.tab.flatMap { set[$0.id.uuidString] } ?? set["*"]
         guard let path else { return Extensions.popupURL(for: context) }
         guard !path.isEmpty else { return nil }
-        return URL(string: path, relativeTo: context.baseURL)?.absoluteURL
+        return Extensions.ownPage(path, for: context)
     }
 
     /// A keystroke an extension registered for.
@@ -1928,6 +1937,8 @@ extension Extensions: WKWebExtensionControllerDelegate {
         // the page it was clicked on (activeTab), and the ones it asked for
         // through permissions.request. So neither does Search.
         asked.append("(refused) \(extensionContext.webExtension.displayName ?? "?") → \(Set(urls.compactMap { $0.host() }).sorted().joined(separator: ", "))")
+        // A page that keeps reaching has no bound otherwise.
+        if asked.count > 40 { asked.removeFirst(asked.count - 40) }
         return ([], nil)
     }
 

@@ -3926,6 +3926,18 @@ enum ExtensionShims {
         "power": "power",
         "tts": "tts",
         "tabGroups": "tabGroups",
+        // The family is "tabs", but these three are tabGroups' own: without
+        // this, an extension that never asked for tabGroups could still
+        // make, join and leave groups by calling through "tabs".
+        "tabs.group": "tabGroups",
+        "tabs.groups": "tabGroups",
+        "tabs.ungroup": "tabGroups",
+        // Chrome asks for one of these per system area. They are not a
+        // family with a common permission, so each name is its own.
+        "system.cpu": "system.cpu",
+        "system.memory": "system.memory",
+        "system.storage": "system.storage",
+        "system.display": "system.display",
     ]
 
     /// What this extension asked for: the names in its manifest and any
@@ -4025,7 +4037,16 @@ enum ExtensionShims {
         if api == "tabs.describe", !context.hasPermission(.tabs) {
             throw Unsupported(what: "The extension never asked for \u{201C}tabs\u{201D}")
         }
-        if let needed = gates[String(api.prefix(while: { $0 != "." }))], !allowed(id, context: context).contains(needed) {
+        // The table may name a whole API ("tabs.group"), a family
+        // ("bookmarks"), or a family's area ("system.cpu", which is what
+        // "system.cpu.getInfo" asks for). The longest name that fits wins,
+        // so a sensitive corner can ask for another permission than the
+        // rest of its family.
+        let family = String(api.prefix(while: { $0 != "." }))
+        let needed = gates[api] ?? gates[family] ?? gates
+            .filter { api.hasPrefix($0.key + ".") }
+            .max { $0.key.count < $1.key.count }?.value
+        if let needed, !allowed(id, context: context).contains(needed) {
             throw Unsupported(what: "The extension never asked for \u{201C}\(needed)\u{201D}")
         }
 
@@ -4370,12 +4391,22 @@ enum ExtensionShims {
                 return key
             }
             let center = UNUserNotificationCenter.current()
-            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+            do {
+                _ = try await center.requestAuthorization(options: [.alert, .sound])
+            } catch {
+                NSLog("Extensions: notification permission for %@ failed: %@", id, error.localizedDescription)
+            }
             let content = UNMutableNotificationContent()
             content.title = options["title"] as? String ?? (context.webExtension.displayName ?? "")
             content.body = options["message"] as? String ?? ""
             content.subtitle = context.webExtension.displayName ?? ""
-            try? await center.add(UNNotificationRequest(identifier: "\(id).\(key)", content: content, trigger: nil))
+            do {
+                try await center.add(UNNotificationRequest(identifier: "\(id).\(key)", content: content, trigger: nil))
+            } catch {
+                // The extension was told it made a notification; saying so
+                // when it did not is how a click handler never comes.
+                throw Unsupported(what: "Notification not delivered: \(error.localizedDescription)")
+            }
             return key
         case "notifications.clear":
             if !Store.testing, let key = first as? String {
@@ -4668,8 +4699,10 @@ enum ExtensionShims {
 
         // MARK: browsing data
         case "browsingData.settings":
+            // Only what clear() below actually removes: downloads and
+            // passwords are the person's files and keychain, not ours.
             return ["options": ["since": 0], "dataToRemove": [:], "dataRemovalPermitted": [
-                "cache": true, "cookies": true, "history": true, "downloads": true, "localStorage": true,
+                "cache": true, "cookies": true, "history": true, "localStorage": true,
                 "indexedDB": true, "serviceWorkers": true, "cacheStorage": true, "fileSystems": true, "webSQL": true,
             ]]
         case let api where api.hasPrefix("browsingData."):
@@ -4680,6 +4713,12 @@ enum ExtensionShims {
             } else {
                 let key = String(api.dropFirst("browsingData.remove".count))
                 what = [key.prefix(1).lowercased() + key.dropFirst(): true]
+            }
+            let supported: Set<String> = ["cache", "cookies", "history", "localStorage", "indexedDB",
+                                          "serviceWorkers", "cacheStorage", "fileSystems", "webSQL"]
+            let unknown = Set(what.keys).subtracting(supported)
+            guard unknown.isEmpty else {
+                throw Unsupported(what: "Search can't remove: \(unknown.sorted().joined(separator: ", "))")
             }
             try await clear(what, options: options, browser: browser)
             return nil
@@ -4844,10 +4883,20 @@ enum ExtensionShims {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent(name)
         if !FileManager.default.fileExists(atPath: url.path) { try source.write(to: url, atomically: true, encoding: .utf8) }
-        for old in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
-        where old.lastPathComponent.hasPrefix("script-") && old != url {
-            let age = (try? old.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate).map { -$0.timeIntervalSinceNow } ?? 0
-            if age > 60 { try? FileManager.default.removeItem(at: old) }
+        let scripts = ((try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.contentModificationDateKey]
+        )) ?? []).filter { $0.lastPathComponent.hasPrefix("script-") && $0 != url }
+        let dated = scripts.map { file in
+            (file, (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date())
+        }
+        for (old, when) in dated where -when.timeIntervalSinceNow > 60 {
+            try? FileManager.default.removeItem(at: old)
+        }
+        // Even inside the minute, a loop of different functions must not
+        // grow without a ceiling.
+        for (old, _) in dated.filter({ FileManager.default.fileExists(atPath: $0.0.path) })
+            .sorted(by: { $0.1 > $1.1 }).dropFirst(200) {
+            try? FileManager.default.removeItem(at: old)
         }
         return "_search/" + name
     }

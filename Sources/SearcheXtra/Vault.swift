@@ -193,6 +193,10 @@ enum Vault {
             kSecAttrServer as String: host,
             kSecAttrAccount as String: user,
             kSecAttrLabel as String: label,
+            // The protocol is part of the item: without it, saving the same
+            // site over http would rewrite the https entry (and its
+            // password) as clear, and the other way round.
+            kSecAttrProtocol as String: clear ? kSecAttrProtocolHTTP : kSecAttrProtocolHTTPS,
         ]
         // A web form's, which also keeps ours apart from another app's item
         // in the keychain's eyes: one for the same server, account and
@@ -221,12 +225,15 @@ enum Vault {
 
     /// Whether the keychain let it go: Remove All… counts only those.
     @discardableResult
-    static func forget(host: String, user: String) -> Bool {
+    static func forget(host: String, user: String, clear: Bool = false) -> Bool {
         SecItemDelete([
             kSecClass as String: kSecClassInternetPassword,
             kSecAttrServer as String: host,
             kSecAttrAccount as String: user,
             kSecAttrLabel as String: label,
+            // Only the protocol this login was kept from: the https entry
+            // of the same site is a different password, not this one.
+            kSecAttrProtocol as String: clear ? kSecAttrProtocolHTTP : kSecAttrProtocolHTTPS,
         ] as CFDictionary) == errSecSuccess
     }
 

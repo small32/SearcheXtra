@@ -771,6 +771,9 @@ struct SettingsPanel: View {
                         get: { !Shield.shared.isPaused(on: host) },
                         set: { on in
                             Shield.shared.pause(host, !on)
+                            // The rule list is already in the page's
+                            // controller: reload alone would leave it there.
+                            Shield.shared.apply(to: browser.tabs + browser.parkedTabs)
                             browser.reload()
                         }
                     ))

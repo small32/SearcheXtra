@@ -304,8 +304,12 @@ struct SRPClient {
 
     static func secureRandom(_ count: Int) -> [UInt8] {
         var bytes = [UInt8](repeating: 0, count: count)
-        let status = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
-        precondition(status == errSecSuccess, "No randomness")
+        if SecRandomCopyBytes(kSecRandomDefault, count, &bytes) != errSecSuccess {
+            // The system generator reads the same source; this keeps a
+            // failure from taking the app down in the middle of a pairing.
+            var generator = SystemRandomNumberGenerator()
+            for index in bytes.indices { bytes[index] = UInt8.random(in: .min ... .max, using: &generator) }
+        }
         return bytes
     }
 

@@ -777,7 +777,11 @@ final class Bookmarks: ObservableObject {
     }
 
     private func load() {
-        guard let data = try? Data(contentsOf: file) else { return }
+        guard FileManager.default.fileExists(atPath: file.path) else { return }
+        guard let data = try? Data(contentsOf: file) else {
+            Store.quarantine(file)
+            return
+        }
         guard let list = try? JSONDecoder().decode([Bookmark].self, from: data) else {
             Store.quarantine(file)
             return

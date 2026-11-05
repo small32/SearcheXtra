@@ -60,7 +60,13 @@ enum Pins {
     static func load() {
         guard !loaded else { return }
         loaded = true
-        if let data = try? Data(contentsOf: file), let saved = decode(data) {
+        if FileManager.default.fileExists(atPath: file.path) {
+            guard let data = try? Data(contentsOf: file), let saved = decode(data) else {
+                // There is a file, and it did not read: set it aside rather
+                // than write a rebuilt row over what may still be saved.
+                Store.quarantine(file)
+                return
+            }
             bySpace = saved.bySpace
             sharedBy = sharedLists(data)
             return

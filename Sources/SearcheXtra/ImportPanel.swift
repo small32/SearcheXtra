@@ -502,7 +502,7 @@ struct ImportPanel: View {
             Task { for id in extensions { await Extensions.shared.install(id: id) } }
             said[3] = Said(ok: true, text: extensions.count == 1 ? L10n.text("ImportPanel.1316") : L10n.text("ImportPanel.1317", String(describing: extensions.count)))
         }
-        if wantsArc, arcCounts[key(source, profile)] != nil, let sidebar = source.arcSidebar(profile: profile) {
+        if wantsArc, let sidebar = source.arcSidebar(profile: profile) {
             let (spaces, pins, tabs) = browser.takeArc(sidebar, from: source, profile: profile)
             ImportRecords.note(source.name, spaces: spaces, pinned: pins + tabs)
             func count(_ n: Int, _ one: String) -> String { L10n.isChinese ? "\(n.formatted()) \(one)" : (n == 1 ? "1 \(one)" : "\(n.formatted()) \(one)s") }

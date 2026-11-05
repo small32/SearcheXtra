@@ -97,6 +97,9 @@ final class SiteNotifications: NSObject {
                 .map { "\($0)" } ?? UUID().uuidString
             let dictionary = data.responds(to: NSSelectorFromString("dictionaryRepresentation"))
                 ? data.perform(NSSelectorFromString("dictionaryRepresentation"))?.takeUnretainedValue() as? NSDictionary : nil
+            // A worker notification nobody clicks or clears must not keep
+            // its data store for the life of the app.
+            if stores.count > 200 { stores.removeAll() }
             stores[id] = store
             post(id: id, title: text("title"), body: text("body"), origin: origin, tag: text("tag"),
                  info: ["search.kind": "worker", "search.id": id, "search.origin": origin,

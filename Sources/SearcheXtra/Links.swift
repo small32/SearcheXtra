@@ -80,6 +80,9 @@ final class Links: NSObject, NSApplicationDelegate {
         Browsers.flush()
         Profiles.flushHistories()
         Shared.curtain.flush()
+        // The icon index is written a second after the last icon: the way
+        // out does not wait that long.
+        Favicons.flush()
         // And the bookmarks or downloads list saved a moment ago, still on
         // their way to the disk.
         Disk.drain()

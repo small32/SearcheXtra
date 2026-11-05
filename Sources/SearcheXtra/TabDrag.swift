@@ -93,11 +93,18 @@ final class TabDrag: ObservableObject {
     /// carried straight across.
     static let settle: CGFloat = 6
     static let still: TimeInterval = 0.09
+    /// How long Escape's cancel keeps swallowing moves after the gesture
+    /// system stops talking about it. Long enough for the button to come up,
+    /// short enough that the next drag is never mistaken for it.
+    static let cancelHold: TimeInterval = 0.8
 
     /// Where the pointer has been lately, for whether it has settled.
     private var trail: [(point: NSPoint, at: TimeInterval)] = []
     /// A look again once the pointer may have come to rest.
     private var recheck: DispatchWorkItem?
+    /// When Escape cancelled the drag. A gesture taken away may never say
+    /// it ended, so this is what lets the next one through (see update).
+    private var cancelledAt: TimeInterval?
 
     private init() {}
 
@@ -111,6 +118,19 @@ final class TabDrag: ObservableObject {
 
     func update(browser: Browser, tab: Tab, translation: CGSize) -> Bool {
         guard browser.prefs.splitView else { return false }
+        // Escape cancels the drag, but a gesture taken away may never say
+        // it ended. Swallow its moves while the button is still down and
+        // the cancel is fresh; after that, or once the button is up, the
+        // next drag of this tab is allowed to begin again.
+        if let at = cancelledAt {
+            if NSEvent.pressedMouseButtons & 1 != 0,
+               ProcessInfo.processInfo.systemUptime - at < TabDrag.cancelHold {
+                return true
+            }
+            cancelledAt = nil
+            cancelledID = nil
+            clear()
+        }
         if sourceBrowser !== browser || gestureTab !== tab {
             let pointer = pointer(in: browser)
             let origin = NSPoint(x: pointer.x - translation.width, y: pointer.y + translation.height)
@@ -200,6 +220,7 @@ final class TabDrag: ObservableObject {
     private func begin(browser: Browser, tab: Tab, at origin: NSPoint) {
         clear()
         cancelledID = nil
+        cancelledAt = nil
         sourceBrowser = browser
         gestureTab = tab
         sourceTab = sourceHalf(browser: browser, gesture: tab, at: origin)
@@ -221,6 +242,7 @@ final class TabDrag: ObservableObject {
         removeMonitor()
         guard let gestureTab else { return }
         cancelledID = gestureTab.id
+        cancelledAt = ProcessInfo.processInfo.systemUptime
         preview = nil
         target = .cancelled
         removeMonitor()
@@ -234,6 +256,7 @@ final class TabDrag: ObservableObject {
         sourceBrowser = nil
         gestureTab = nil
         sourceTab = nil
+        cancelledAt = nil
         target = .outside
         removeMonitor()
     }

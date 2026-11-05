@@ -191,8 +191,14 @@ final class Favicons: ObservableObject {
     private func load() {
         guard !loaded else { return }
         loaded = true
-        if let data = try? Data(contentsOf: Favicons.index),
-           let kept = try? JSONDecoder().decode([String: [String: Page]].self, from: data) {
+        if FileManager.default.fileExists(atPath: Favicons.index.path) {
+            guard let data = try? Data(contentsOf: Favicons.index),
+                  let kept = try? JSONDecoder().decode([String: [String: Page]].self, from: data)
+            else {
+                // A bad index is set aside, not replaced by an empty one.
+                Store.quarantine(Favicons.index)
+                return
+            }
             pages = kept
             // An index with queries in its keys: each folded into its path.
             var folded = false
@@ -222,6 +228,24 @@ final class Favicons: ObservableObject {
             pages[site, default: [:]]["/"] = page
         }
         if !pages.isEmpty { save() }
+    }
+
+    /// Everything seen so far, written now — for the way out.
+    static func flush() {
+        shared.flushNow()
+    }
+
+    private func flushNow() {
+        saving = false
+        generation &+= 1
+        let gone = prune().map(Favicons.file)
+        guard let data = try? JSONEncoder().encode(pages) else { return }
+        let folder = Favicons.folder, index = Favicons.index
+        Favicons.disk.sync {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try? data.write(to: index, options: .atomic)
+            for file in gone { try? FileManager.default.removeItem(at: file) }
+        }
     }
 
     /// Written a moment later, so a burst of pages loading is one write.
