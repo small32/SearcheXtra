@@ -24,6 +24,37 @@ final class FaviconClearTests: XCTestCase {
 
     private var folder: URL { Store.folder.appendingPathComponent("icons", isDirectory: true) }
 
+    func testFlushingAnUnusedCacheLeavesItsDiskIndexAlone() throws {
+        let index = folder.appendingPathComponent("pages.json")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let kept = Data(#"{"old.example":{"/":{"light":"kept","seen":1}}}"#.utf8)
+        try kept.write(to: index)
+        let session = session(), icons = Favicons(session: session)
+        defer { icons.forgetAll(); session.invalidateAndCancel() }
+        icons.flushNow()
+        XCTAssertEqual(try Data(contentsOf: index), kept)
+    }
+
+    func testSinglePageForgetInvalidatesAnInFlightBookmarkRequest() async throws {
+        let session = session(), icons = Favicons(session: session)
+        defer { icons.forgetAll(); session.invalidateAndCancel() }
+        icons.forgetAll()
+        let url = URL(string: "https://single-forgotten.example/private-path")!
+        let done = expectation(description: "old request completes")
+        Task { await icons.fetch(for: url); done.fulfill() }
+        try await waitUntil { IconClearProtocol.count == 1 }
+        icons.forget(url)
+        IconClearProtocol.finishHeld()
+        await fulfillment(of: [done], timeout: 2)
+        XCTAssertEqual(IconClearProtocol.count, 1, "The stale page response cannot start an icon download")
+        XCTAssertNil(icons.cached(for: url))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("pages.json").path))
+
+        IconClearProtocol.respondImmediately()
+        await icons.fetch(for: url)
+        XCTAssertNotNil(icons.cached(for: url), "A later visit may fetch that page normally")
+    }
+
     func testLateTabIconCannotRestoreClearedHistory() async throws {
         let session = session(), icons = Favicons(session: session)
         let server = try LocalPageServer(["/forgotten/path": .init(type: "text/html", body: "<title>Ready</title>")])

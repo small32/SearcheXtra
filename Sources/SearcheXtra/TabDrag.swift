@@ -80,6 +80,7 @@ final class TabDrag: ObservableObject {
     private weak var sourceTab: Tab?
     private var target: Drop = .outside
     private var escapeMonitor: Any?
+    private var pressMonitor: Any?
 
     /// Only a page's edges split it, a band of either side about a quarter
     /// of its width, and no narrower than this: carried across the middle
@@ -93,19 +94,10 @@ final class TabDrag: ObservableObject {
     /// carried straight across.
     static let settle: CGFloat = 6
     static let still: TimeInterval = 0.09
-    /// How long Escape's cancel keeps swallowing moves after the gesture
-    /// system stops talking about it. Long enough for the button to come up,
-    /// short enough that the next drag is never mistaken for it.
-    static let cancelHold: TimeInterval = 0.8
-
     /// Where the pointer has been lately, for whether it has settled.
     private var trail: [(point: NSPoint, at: TimeInterval)] = []
     /// A look again once the pointer may have come to rest.
     private var recheck: DispatchWorkItem?
-    /// When Escape cancelled the drag. A gesture taken away may never say
-    /// it ended, so this is what lets the next one through (see update).
-    private var cancelledAt: TimeInterval?
-
     private init() {}
 
     func register(_ view: SplitDropZone.Marker) {
@@ -118,19 +110,9 @@ final class TabDrag: ObservableObject {
 
     func update(browser: Browser, tab: Tab, translation: CGSize) -> Bool {
         guard browser.prefs.splitView else { return false }
-        // Escape cancels the drag, but a gesture taken away may never say
-        // it ended. Swallow its moves while the button is still down and
-        // the cancel is fresh; after that, or once the button is up, the
-        // next drag of this tab is allowed to begin again.
-        if let at = cancelledAt {
-            if NSEvent.pressedMouseButtons & 1 != 0,
-               ProcessInfo.processInfo.systemUptime - at < TabDrag.cancelHold {
-                return true
-            }
-            cancelledAt = nil
-            cancelledID = nil
-            clear()
-        }
+        // Cancellation belongs to the mouse press, not to a timeout. A
+        // gesture removed by SwiftUI may never deliver its ending.
+        guard cancelledID == nil else { return true }
         if sourceBrowser !== browser || gestureTab !== tab {
             let pointer = pointer(in: browser)
             let origin = NSPoint(x: pointer.x - translation.width, y: pointer.y + translation.height)
@@ -219,8 +201,6 @@ final class TabDrag: ObservableObject {
 
     private func begin(browser: Browser, tab: Tab, at origin: NSPoint) {
         clear()
-        cancelledID = nil
-        cancelledAt = nil
         sourceBrowser = browser
         gestureTab = tab
         sourceTab = sourceHalf(browser: browser, gesture: tab, at: origin)
@@ -236,16 +216,22 @@ final class TabDrag: ObservableObject {
         }
     }
 
-    private func cancel() {
-        // The monitor goes first: a drag whose tab has gone has nothing to
-        // cancel, and kept, its monitor would go on asking.
-        removeMonitor()
+    func cancel() {
         guard let gestureTab else { return }
-        cancelledID = gestureTab.id
-        cancelledAt = ProcessInfo.processInfo.systemUptime
-        preview = nil
-        target = .cancelled
-        removeMonitor()
+        let id = gestureTab.id
+        clear()
+        cancelledID = id
+        // A new down is an unambiguous new press, even when the previous
+        // cancelled gesture never sends onEnded. This monitor never eats it.
+        pressMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            self?.pressBegan()
+            return event
+        }
+    }
+
+    func pressBegan() {
+        guard cancelledID != nil else { return }
+        clear()
     }
 
     private func clear() {
@@ -256,7 +242,7 @@ final class TabDrag: ObservableObject {
         sourceBrowser = nil
         gestureTab = nil
         sourceTab = nil
-        cancelledAt = nil
+        cancelledID = nil
         target = .outside
         removeMonitor()
     }
@@ -264,6 +250,8 @@ final class TabDrag: ObservableObject {
     private func removeMonitor() {
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
         escapeMonitor = nil
+        if let pressMonitor { NSEvent.removeMonitor(pressMonitor) }
+        pressMonitor = nil
     }
 
     private func match(browser: Browser, source: Tab, at point: NSPoint) -> Drop {

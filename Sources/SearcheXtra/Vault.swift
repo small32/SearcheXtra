@@ -21,8 +21,9 @@ struct Login: Identifiable, Equatable, Hashable {
     /// written down, is never handed to a page anyone on the way could have
     /// written.
     var clear = false
+    var reference: Data? = nil
 
-    var id: String { host + "\u{1}" + user }
+    var id: String { (clear ? "http" : "https") + "\u{1}" + host + "\u{1}" + user + (reference.map { "\u{1}" + $0.base64EncodedString() } ?? "") }
 }
 
 /// One item as a list needs it: the site, the account, and when it was last
@@ -39,7 +40,10 @@ struct Kept: Identifiable, Equatable, Hashable {
     /// Kept from a page sent in the clear, over plain http. See `Login`.
     var clear = false
 
-    var id: String { host + "\u{1}" + user }
+    /// The exact keychain item, including older items with no protocol.
+    var reference: Data? = nil
+
+    var id: String { (clear ? "http" : "https") + "\u{1}" + host + "\u{1}" + user + (reference.map { "\u{1}" + $0.base64EncodedString() } ?? "") }
 }
 
 enum Vault {
@@ -106,6 +110,7 @@ enum Vault {
             kSecClass as String: kSecClassInternetPassword,
             kSecAttrLabel as String: label,
             kSecReturnAttributes as String: true,
+            kSecReturnPersistentRef as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll,
         ]
         extra.forEach { query[$0] = $1 }
@@ -120,17 +125,24 @@ enum Vault {
         return rows
     }
 
-    /// One item's secret, by the two things that name it.
-    private static func secret(host: String, user: String) -> String? {
+    /// Read the item picked from the list, never another protocol's account.
+    /// Its persistent reference also preserves older protocol-less entries.
+    private static func secret(_ kept: Kept) -> String? {
         var out: CFTypeRef?
-        let status = SecItemCopyMatching([
+        var query: [String: Any] = [
             kSecClass as String: kSecClassInternetPassword,
             kSecAttrLabel as String: label,
-            kSecAttrServer as String: host,
-            kSecAttrAccount as String: user,
+            kSecAttrServer as String: kept.host,
+            kSecAttrAccount as String: kept.user,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
-        ] as CFDictionary, &out)
+        ]
+        if let reference = kept.reference {
+            query[kSecValuePersistentRef as String] = reference
+        } else {
+            query[kSecAttrProtocol as String] = kept.clear ? kSecAttrProtocolHTTP : kSecAttrProtocolHTTPS
+        }
+        let status = SecItemCopyMatching(query as CFDictionary, &out)
         guard status == errSecSuccess, let data = out as? Data else {
             if status != errSecItemNotFound { NSLog("Vault: keychain read failed (%d)", status) }
             return nil
@@ -140,7 +152,7 @@ enum Vault {
 
     /// One item's secret, where a list holds only the item: read when a
     /// password is shown or copied, and never as part of a list.
-    static func secret(of kept: Kept) -> String? { secret(host: kept.host, user: kept.user) }
+    static func secret(of kept: Kept) -> String? { secret(kept) }
 
     /// What an item's attributes say beyond its name: when it was last used,
     /// and whether it was kept from a page sent in the clear.
@@ -157,7 +169,7 @@ enum Vault {
     /// keychain read, for the one account picked.
     static func login(_ kept: Kept) -> Login? {
         guard let password = secret(of: kept) else { return nil }
-        return Login(host: kept.host, user: kept.user, password: password, used: kept.used, clear: kept.clear)
+        return Login(host: kept.host, user: kept.user, password: password, used: kept.used, clear: kept.clear, reference: kept.reference)
     }
 
     /// The account an item is kept under. A sign-in with a password box
@@ -174,7 +186,8 @@ enum Vault {
         guard let host = row[kSecAttrServer as String] as? String else { return nil }
         let user = account(of: row)
         let (used, clear) = noted(row)
-        return Kept(host: host, user: user, used: used, clear: clear)
+        return Kept(host: host, user: user, used: used, clear: clear,
+                    reference: row[kSecValuePersistentRef as String] as? Data)
     }
 
     // MARK: - writing
@@ -220,7 +233,20 @@ enum Vault {
 
     /// It was just used to sign in. Lists put it first from now on.
     static func touch(_ login: Login) {
+        if let reference = login.reference {
+            // Update the selected item, including legacy protocol-less ones,
+            // without rewriting a same-name account of another identity.
+            SecItemUpdate([kSecValuePersistentRef as String: reference] as CFDictionary,
+                          [kSecAttrComment as String: String(Date().timeIntervalSince1970)] as CFDictionary)
+            return
+        }
         save(host: login.host, user: login.user, password: login.password, used: Date(), clear: login.clear)
+    }
+
+    @discardableResult
+    static func forget(_ kept: Kept) -> Bool {
+        guard let reference = kept.reference else { return forget(host: kept.host, user: kept.user, clear: kept.clear) }
+        return SecItemDelete([kSecValuePersistentRef as String: reference] as CFDictionary) == errSecSuccess
     }
 
     /// Whether the keychain let it go: Remove All… counts only those.

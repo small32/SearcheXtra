@@ -176,6 +176,11 @@ final class PageTranslator {
 
     // MARK: - the run
 
+    private func checkCurrent() throws {
+        try Task.checkCancellation()
+        guard let tab, tab.translator === self, tab.built === web else { throw CancellationError() }
+    }
+
     private func run(_ stream: AsyncStream<WKFrameInfo?>) async {
         guard let web, let tab else { return }
         let start = Date()
@@ -183,11 +188,15 @@ final class PageTranslator {
         report = ["target": PageTranslator.code(target), "units": 0, "parts": 0, "requests": 0, "sent": 0,
                   "cached": 0, "applied": 0, "kept": 0, "chars": 0, "frames": 0, "rounds": 0, "languages": [String: Int]()]
         do {
+            try checkCurrent()
             async let hint = try? web.callAsyncJavaScript("return document.documentElement.lang || ''", contentWorld: Web.world) as? String
             let first = try await collect(nil, injecting: true)
+            try checkCurrent()
             report["collectMs"] = ms()
             let sample = String(first.prefix(400).map(\.plain).joined(separator: "\n").prefix(4000))
-            guard let from = PageTranslator.detect(sample, hint: await hint) else {
+            let languageHint = await hint
+            try checkCurrent()
+            guard let from = PageTranslator.detect(sample, hint: languageHint) else {
                 throw Failure(L10n.text("upstream.translate.unknownLanguage"))
             }
             source = from
@@ -199,9 +208,11 @@ final class PageTranslator {
                 sessions[PageTranslator.code(from)] = try await session(from: from, main: true)
             }
             try await process(first, in: nil) { self.report["firstSliceMs"] = self.report["firstSliceMs"] ?? ms() }
+            try checkCurrent()
             // Every frame that said it's there, other sites' included.
             for frame in tab.translateFrames {
                 try await frameRound(frame)
+                try checkCurrent()
             }
             report["fullMs"] = ms()
             if (report["applied"] as? Int ?? 0) == 0, PageTranslator.same(from, target) {
@@ -211,7 +222,7 @@ final class PageTranslator {
             finish()
             // Then whatever the page adds or changes, frame by frame.
             for await frame in stream {
-                if Task.isCancelled { break }
+                try checkCurrent()
                 if let frame { try await frameRound(frame) } else { try await process(collect(nil), in: nil) }
                 report["rounds"] = (report["rounds"] as? Int ?? 0) + 1
             }
@@ -235,9 +246,11 @@ final class PageTranslator {
         do {
             units = try await collect(frame, injecting: true)
         } catch {
+            try checkCurrent()
             tab?.translateFrames.removeAll { $0 === frame }
             return
         }
+        try checkCurrent()
         if !frames.contains(where: { $0 === frame }) {
             frames.append(frame)
             report["frames"] = frames.count
@@ -279,6 +292,7 @@ final class PageTranslator {
     /// Units in slices — a small one first, for what is on screen — each
     /// sorted by language, translated and put back before the next.
     private func process(_ units: [Unit], in frame: WKFrameInfo?, first: (() -> Void)? = nil) async throws {
+        try checkCurrent()
         guard !units.isEmpty, let web else { return }
         report["units"] = (report["units"] as? Int ?? 0) + units.count
         report["parts"] = (report["parts"] as? Int ?? 0) + units.reduce(0) { $0 + $1.parts.count }

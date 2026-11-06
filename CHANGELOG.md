@@ -4,6 +4,11 @@
 
 ### 简体中文
 
+- 修复 HTTP/HTTPS 同名密码读取混用与列表标识冲突；保存、更新和填充登录信息时核对实际框架及文档，避免 iframe 凭据归属错误。
+- 修复退出时空图标索引覆盖、删除单条历史后图标请求恢复记录，以及空间和窗口列表读取失败后覆盖原数据的问题。
+- 修复链接预览和外链小窗口内用户脚本的 GM 消息与连接；扩展清理数据时忽略未选中的类型，并恢复应用缓存清理。
+- 通知保留其个人资料和存储分区归属，重启后也不会回退到其他配置；取消翻译后旧任务不再恢复状态。
+- 修复 Escape 取消拖动后手势复活、小窗口跨存储保留时未确认未保存内容，以及设置页当前网站拦截开关缺失的问题。
 - 移植 Search 上游 `76bd2c1..3279d28` 的 macOS 更新；保留本地书签、超级拖拽、中英双语及 MV2/MV3 用户脚本兼容。
 - 修复分屏及重复新建标签后的地址栏焦点；地址建议统一显示已缓存的网站图标，标签悬停即时反馈。
 - 修复触控板导航后的页面偏移与白边，返回 GitHub 等页面时恢复滚动位置；关闭设置、历史等内置页面后返回原标签。
@@ -27,6 +32,11 @@
 
 ### English
 
+- Keep same-account HTTP/HTTPS passwords and list identities separate; verify the actual frame and document when saving, updating or filling credentials.
+- Fix empty favicon indexes overwriting existing data on quit, late favicon requests restoring deleted history paths, and unreadable space/window lists being overwritten without recovery copies.
+- Restore GM messaging and connections in link previews and small external-link windows; ignore unselected browsing-data types and restore app-cache removal.
+- Preserve notification profile and storage-partition routing across relaunches, and prevent cancelled translation tasks from restoring stale state.
+- Fix cancelled tab drags restarting after Escape, confirm unsaved content before moving small windows across stores, and restore the current-site blocker control in Settings.
 - Port macOS updates from Search upstream `76bd2c1..3279d28`, retaining local bookmark management, super drag, both interface languages, and MV2/MV3 user-script compatibility.
 - Fix address-field focus after new tabs and in Split View, show cached site icons in address suggestions, and make tab hover feedback instant.
 - Fix shifted pages and blank strips after swipe navigation, restore scroll positions on sites such as GitHub, and return to the previous tab after closing built-in pages.

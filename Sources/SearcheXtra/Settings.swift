@@ -35,6 +35,25 @@ struct SettingsPanel: View {
     @State private var arcBefore: Preferences.ArcSetup? = SettingsPanel.arcBefore
     @MainActor static var arcBefore: Preferences.ArcSetup?
 
+    /// Settings has its own tab. Its site control belongs to the webpage
+    /// that opened it, not to the address-less Settings page in front.
+    @MainActor static func shieldTarget(in browser: Browser) -> (tab: Tab, host: String)? {
+        let target = browser.active?.isWeb == true ? browser.active : browser.settingsSiteTab
+        guard let target, target.isWeb,
+              browser.tabs.contains(where: { $0 === target }),
+              let host = browser.curtain.host(of: target.pageAddress) else { return nil }
+        return (target, host)
+    }
+
+    @MainActor static func setShield(_ on: Bool, for tab: Tab, host: String, in browser: Browser) {
+        // A script may have navigated the old page while Settings was up.
+        guard browser.tabs.contains(where: { $0 === tab }), tab.isWeb,
+              browser.curtain.host(of: tab.pageAddress) == host else { return }
+        Shield.shared.pause(host, !on)
+        Shield.shared.apply(to: browser.tabs + browser.parkedTabs)
+        tab.reload()
+    }
+
     enum Page: String, CaseIterable, Identifiable {
         case general, appearance, tabs, browsing, spaces, passwords, privacy, extensions, keyboard, about, bookmarks, flowDrag
         var id: String { rawValue }
@@ -763,18 +782,14 @@ struct SettingsPanel: View {
                 }
                 .under()
             }
-            if !searched, let host = browser.hereHost, prefs.shielded, shield.trouble == nil {
+            if !searched, let site = Self.shieldTarget(in: browser), prefs.shielded, shield.trouble == nil {
                 Rule()
-                SettingRow(icon: "checkmark.shield", title: L10n.text("Settings.0810", String(describing: host)),
+                SettingRow(icon: "checkmark.shield", title: L10n.text("Settings.0810", site.host),
                            detail: L10n.text("upstream.settings.5766873776")) {
                     Switch(on: Binding(
-                        get: { !Shield.shared.isPaused(on: host) },
+                        get: { !Shield.shared.isPaused(on: site.host) },
                         set: { on in
-                            Shield.shared.pause(host, !on)
-                            // The rule list is already in the page's
-                            // controller: reload alone would leave it there.
-                            Shield.shared.apply(to: browser.tabs + browser.parkedTabs)
-                            browser.reload()
+                            Self.setShield(on, for: site.tab, host: site.host, in: browser)
                         }
                     ))
                 }

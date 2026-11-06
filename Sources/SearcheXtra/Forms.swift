@@ -9,6 +9,25 @@ import WebKit
 // would. Assigning to .value behind a framework's back leaves it thinking the
 // box is still empty, which is a sign-in button that stays grey.
 
+@MainActor
+struct FormSource {
+    let frame: WKFrameInfo?
+    let url: URL
+    let document: String
+
+    var origin: String { Browser.origin(url.scheme ?? "", url.host() ?? "", url.port ?? 0) }
+    var id: String { origin + "|" + document }
+
+    init?(frame: WKFrameInfo, document: String) {
+        let origin = frame.securityOrigin
+        guard ["http", "https"].contains(origin.protocol.lowercased()), !origin.host.isEmpty,
+              let url = URL(string: Browser.origin(origin.protocol, origin.host, origin.port)) else { return nil }
+        self.frame = frame.isMainFrame ? nil : frame
+        self.url = url
+        self.document = document
+    }
+}
+
 final class FormRelay: NSObject, WKScriptMessageHandler {
     static let name = "officeForms"
 
@@ -22,45 +41,55 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
               let kind = body["kind"] as? String
         else { return }
         MainActor.assumeIsolated {
+            guard let tab, message.webView === tab.built else { return }
+            let source = FormSource(frame: message.frameInfo, document: body["document"] as? String ?? "")
             switch kind {
             case "form":
-                tab?.foundSignIn()
+                if source != nil { tab.foundSignIn() }
             case "submit":
-                tab?.sentSignIn(
+                guard let source else { return }
+                tab.sentSignIn(
                     user: body["user"] as? String ?? "",
-                    password: body["password"] as? String ?? ""
+                    password: body["password"] as? String ?? "", source: source
                 )
             case "name":
-                tab?.gaveName(body["user"] as? String ?? "")
+                guard let source else { return }
+                tab.gaveName(body["user"] as? String ?? "", on: source.url)
             case "settled":
-                tab?.settleSignIn(navigated: false)
+                guard let source else { return }
+                tab.settleSignIn(navigated: false, source: source)
             case "focus":
                 // Set only when it changes: every assignment to a published
                 // value redraws whatever watches the tab, same value or not.
                 let typing = body["typing"] as? Bool ?? false
-                if tab?.typing != typing { tab?.typing = typing }
+                // A background frame's initial/scroll report must not dismiss
+                // the list belonging to the frame that actually has the caret.
+                guard typing || body["active"] as? Bool == true || source?.id == tab.formID else { return }
+                if tab.typing != typing { tab.typing = typing }
                 // Which sign-in box the caret is in, and where it sits on the
                 // page — so a list of accounts can hang from it.
                 // A box of a name and password, or one the page marks for
                 // passkeys alone ("webauthn"), which takes no password.
-                tab?.fieldFrameHost = message.frameInfo.isMainFrame ? nil : message.frameInfo.securityOrigin.host
+                guard let source else { tab.fieldFocused(nil); return }
+                tab.formSource = source
+                tab.fieldFrameHost = source.frame == nil ? nil : source.url.host()
                 if let rect = body["rect"] as? [String: Double],
                    let x = rect["x"], let y = rect["y"], let w = rect["w"], let h = rect["h"] {
                     // `wide`: a box that is clearly a sign-in's, offered the
                     // accounts of the site's other hosts too; otherwise only
                     // those kept for this very host.
-                    tab?.fieldFocused(CGRect(x: x, y: y, width: w, height: h), passwords: body["passwords"] as? Bool ?? true,
+                    tab.fieldFocused(CGRect(x: x, y: y, width: w, height: h), passwords: body["passwords"] as? Bool ?? true,
                                       name: body["name"] as? Bool ?? false, wide: body["wide"] as? Bool ?? true)
                 } else {
-                    tab?.fieldFocused(nil)
+                    tab.fieldFocused(nil)
                 }
             case "fullscreen":
                 // Late, the page's word (see immersed() below): WebKit's
                 // state has said it already. A "going" still on its way when
                 // WebKit started to give the page back is stale.
                 let on = body["on"] as? Bool ?? false
-                if on, tab?.built?.fullscreenState == .exitingFullscreen { break }
-                if tab?.immersed != on { tab?.immersed = on }
+                if on, tab.built?.fullscreenState == .exitingFullscreen { break }
+                if tab.immersed != on { tab.immersed = on }
             default:
                 break
             }
@@ -142,6 +171,12 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
     static let script = """
     (function () {
       if (window.__officeForms) return;
+
+      var documentID = Math.random().toString(36).slice(2);
+      function post(message) {
+        message.document = documentID;
+        window.webkit.messageHandlers.officeForms.postMessage(message);
+      }
 
       // The password box, and the last box before it that could hold a name.
       function pair() {
@@ -342,6 +377,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       }
 
       window.__officeForms = {
+        document: documentID,
         unsaved: unsaved,
         fill: function (user, password) {
           var both = pair();
@@ -379,11 +415,11 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         if (!both) {
           var box = named();
           var name = box ? box.value.trim() : '';
-          if (name) window.webkit.messageHandlers.officeForms.postMessage({ kind: 'name', user: name });
+          if (name) post({ kind: 'name', user: name });
           return;
         }
         if (!both.pass.value) return;
-        window.webkit.messageHandlers.officeForms.postMessage({
+        post({
           kind: 'submit',
           user: both.user ? both.user.value : '',
           password: both.pass.value
@@ -410,7 +446,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       function tell() {
         if (told || !pair()) return;
         told = true;
-        window.webkit.messageHandlers.officeForms.postMessage({ kind: 'form' });
+        post({ kind: 'form' });
       }
       if (document.readyState === 'complete') { tell(); }
       else { window.addEventListener('load', tell); }
@@ -435,7 +471,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         clearTimeout(settling);
         settling = setTimeout(function () {
           if (pair()) return;
-          window.webkit.messageHandlers.officeForms.postMessage({ kind: 'settled' });
+          post({ kind: 'settled' });
         }, 400);
       }
       new MutationObserver(function () {
@@ -478,6 +514,8 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       var judged = { el: null, verdict: null };
       function caret(scrolled) {
         var el = document.activeElement;
+        // The child reports its own field, origin and coordinates.
+        if (el && /^(iframe|frame)$/i.test(el.tagName || '')) return;
         // The boxes are only looked for with the caret in one: this runs on
         // every frame of every scroll, and looking goes through the whole page.
         if (scrolled !== true || judged.el !== el) judged = { el: el, verdict: judge(el) };
@@ -490,15 +528,28 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         var wide = !verdict || verdict.wide;
         if (passwords || forPasskeys(el)) {
           var r = el.getBoundingClientRect();
-          if (r.width > 0 && r.height > 0) rect = { x: r.left, y: r.top, w: r.width, h: r.height };
+          if (r.width > 0 && r.height > 0) {
+            var x = r.left, y = r.top, frame = window;
+            try {
+              while (frame !== frame.top) {
+                var owner = frame.frameElement;
+                if (!owner) throw new Error('Frame position unavailable');
+                var bounds = owner.getBoundingClientRect();
+                x += bounds.left + owner.clientLeft; y += bounds.top + owner.clientTop;
+                frame = frame.parent;
+              }
+              rect = { x: x, y: y, w: r.width, h: r.height };
+            } catch (e) { rect = null; }
+          }
         }
         var typing = editable(el);
         var now = typing + (rect ? ' ' + passwords + ' ' + name + ' ' + wide + ' ' + rect.x + ' ' + rect.y + ' ' + rect.w + ' ' + rect.h : '');
         if (scrolled === true && now === said) return;
         said = now;
-        window.webkit.messageHandlers.officeForms.postMessage({
+        post({
           kind: 'focus',
           typing: typing,
+          active: document.hasFocus(),
           rect: rect,
           passwords: passwords,
           name: name,
@@ -528,7 +579,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
       // started from that size.
       function immersed() {
         var on = !!(document.fullscreenElement || document.webkitFullscreenElement);
-        window.webkit.messageHandlers.officeForms.postMessage({
+        post({
           kind: 'fullscreen', on: on
         });
       }

@@ -97,25 +97,26 @@ final class SiteNotifications: NSObject {
                 .map { "\($0)" } ?? UUID().uuidString
             let dictionary = data.responds(to: NSSelectorFromString("dictionaryRepresentation"))
                 ? data.perform(NSSelectorFromString("dictionaryRepresentation"))?.takeUnretainedValue() as? NSDictionary : nil
-            // A worker notification nobody clicks or clears must not keep
-            // its data store for the life of the app.
-            if stores.count > 200 { stores.removeAll() }
-            stores[id] = store
+            // Persist the partition in the notification itself. A delivered
+            // notification can outlive this process; no store is retained.
+            guard let partition = Self.storeKey(store) else { return }
             post(id: id, title: text("title"), body: text("body"), origin: origin, tag: text("tag"),
                  info: ["search.kind": "worker", "search.id": id, "search.origin": origin,
-                        "search.data": dictionary ?? [:]])
+                        "search.data": dictionary ?? [:], "search.store": partition])
         }
     }
 
     /// What a service worker's getNotifications() finds.
     @objc(websiteDataStore:getDisplayedNotificationsForWorkerOrigin:completionHandler:)
     nonisolated func displayed(_ store: WKWebsiteDataStore, origin: WKSecurityOrigin, completionHandler: @escaping ([NSDictionary]) -> Void) {
-        let site = MainActor.assumeIsolated { Store.testing ? nil : Browser.origin(origin.protocol, origin.host, origin.port) }
-        guard let site else { return completionHandler([]) }
+        let identity = MainActor.assumeIsolated { (Browser.origin(origin.protocol, origin.host, origin.port), Self.storeKey(store)) }
+        guard let partition = identity.1, !Store.testing else { return completionHandler([]) }
+        let site = identity.0
         UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
             let found = delivered.compactMap { note -> NSDictionary? in
                 let info = note.request.content.userInfo
-                guard info["search.kind"] as? String == "worker", info["search.origin"] as? String == site else { return nil }
+                guard info["search.kind"] as? String == "worker", info["search.origin"] as? String == site,
+                      info["search.store"] as? String == partition else { return nil }
                 return info["search.data"] as? NSDictionary
             }
             completionHandler(found)
@@ -163,7 +164,8 @@ final class SiteNotifications: NSObject {
             content.attachments = [attachment]
         }
         // A tag names a notification its site means to replace.
-        let identifier = tag.isEmpty ? id : "tag|\(origin)|\(tag)"
+        let scope = (info["search.store"] as? String).map { $0 + "|" } ?? ""
+        let identifier = scope + (tag.isEmpty ? id : "tag|\(origin)|\(tag)")
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil))
     }
 
@@ -177,29 +179,54 @@ final class SiteNotifications: NSObject {
         return (try? png.write(to: file)) == nil ? nil : file
     }
 
+    /// Stable across relaunches, unlike an in-memory notification table.
+    static func storeKey(_ store: WKWebsiteDataStore) -> String? {
+        guard store.isPersistent else { return nil }
+        return store.identifier?.uuidString ?? "default"
+    }
+
+    /// Resolve only existing profiles/spaces. A notification from a removed
+    /// partition, or an older one with no routing information, cannot borrow
+    /// the default profile's cookies or service worker.
+    func store(for info: [AnyHashable: Any]) -> WKWebsiteDataStore? {
+        guard let key = info["search.store"] as? String else {
+            return (info["search.key"] as? String).flatMap { stores[$0] }
+        }
+        if Self.storeKey(Store.websites) == key { return Store.websites }
+        guard let id = UUID(uuidString: key) else { return nil }
+        if Profiles.read().contains(where: { $0.id == id }) { return Profiles.store(id) }
+        if let space = Spaces.read().first(where: { $0.id == id }) {
+            let store = Spaces.store(for: space.id)
+            return Self.storeKey(store) == key ? store : nil
+        }
+        return nil
+    }
+
     // MARK: - answered
 
     /// Clicked: the site's tab in front, and the click to its worker.
     func clicked(_ info: [AnyHashable: Any]) {
         let origin = info["search.origin"] as? String ?? ""
         let key = info["search.key"] as? String
-        let from = key.flatMap { stores.removeValue(forKey: $0) }
-        bringForward(origin, from: from)
+        let from = store(for: info)
+        if let key { stores[key] = nil }
+        if let from { bringForward(origin, from: from) }
         if info["search.kind"] as? String == "page", let id = (info["search.id"] as? String).flatMap(UInt64.init) {
             return PageNotifications.clicked(id)
         }
-        guard info["search.kind"] as? String == "worker", let data = info["search.data"] as? NSDictionary else { return }
-        SiteNotifications.tell(from ?? Store.websites, "_processPersistentNotificationClick:completionHandler:", data)
+        guard info["search.kind"] as? String == "worker", let from, let data = info["search.data"] as? NSDictionary else { return }
+        SiteNotifications.tell(from, "_processPersistentNotificationClick:completionHandler:", data)
     }
 
     /// Dismissed: the worker hears its notification closed.
     func closed(_ info: [AnyHashable: Any]) {
-        let from = (info["search.key"] as? String).flatMap { stores.removeValue(forKey: $0) }
+        let from = store(for: info)
+        if let key = info["search.key"] as? String { stores[key] = nil }
         if info["search.kind"] as? String == "page", let id = (info["search.id"] as? String).flatMap(UInt64.init) {
             return PageNotifications.closed(id)
         }
-        guard info["search.kind"] as? String == "worker", let data = info["search.data"] as? NSDictionary else { return }
-        SiteNotifications.tell(from ?? Store.websites, "_processPersistentNotificationClose:completionHandler:", data)
+        guard info["search.kind"] as? String == "worker", let from, let data = info["search.data"] as? NSDictionary else { return }
+        SiteNotifications.tell(from, "_processPersistentNotificationClose:completionHandler:", data)
     }
 
     private typealias Deliver = @convention(c) (AnyObject, Selector, NSDictionary, @escaping @convention(block) (Bool) -> Void) -> Void
@@ -212,17 +239,15 @@ final class SiteNotifications: NSObject {
 
     /// The tab showing the site in front: one signed in with the store the
     /// notification came from if there is one, never a private tab.
-    private func bringForward(_ origin: String, from store: WKWebsiteDataStore?) {
+    private func bringForward(_ origin: String, from store: WKWebsiteDataStore) {
         let found = Browsers.all.filter { !$0.isPopup }.flatMap { browser in
             browser.tabs.filter { tab in
                 guard !tab.shy, tab.store.isPersistent, let url = tab.address, let scheme = url.scheme, let host = url.host() else { return false }
                 return Browser.origin(scheme, host, url.port ?? 0) == origin
             }.map { (browser, $0) }
         }
-        // Failing that, a tab of the same profile: never one of another
-        // profile, signed in as someone else (see Profiles.swift).
-        guard let (browser, tab) = found.first(where: { $0.1.store === store })
-            ?? found.first(where: { pair in store.map { s in Spaces.stores(of: pair.0.profileID).contains { $0 === s } } ?? true })
+        guard let key = Self.storeKey(store),
+              let (browser, tab) = found.first(where: { Self.storeKey($0.1.store) == key })
         else { return }
         browser.select(tab)
         Browsers.show(browser)
@@ -418,7 +443,8 @@ enum PageNotifications {
         let id = c.id(note)
         SiteNotifications.shared.post(id: "page|\(id)", title: c.text(c.title(note)), body: c.text(c.body(note)),
                                       origin: origin, tag: c.text(c.tag(note)),
-                                      info: ["search.kind": "page", "search.id": String(id), "search.origin": origin])
+                                      info: ["search.kind": "page", "search.id": String(id), "search.origin": origin,
+                                             "search.store": SiteNotifications.storeKey(web.configuration.websiteDataStore) ?? ""])
         shown[id] = manager
         SiteNotifications.shared.stores["page|\(id)"] = web.configuration.websiteDataStore
         c.didShow(manager, id)

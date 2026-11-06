@@ -1998,12 +1998,12 @@ final class Bench {
             guard Store.testing else { answer(["error": "accounts only works on a --test run"]); return }
             if request["keep"] as? Bool == true { browser.keepOffer() }
             if request["forget"] as? Bool == true {
-                Vault.all().forEach { Vault.forget(host: $0.host, user: $0.user, clear: $0.clear) }
+                Vault.all().forEach { Vault.forget($0) }
                 browser.dropOffer()
             } else if let user = request["forget"] as? String {
                 // One account's, as Settings › Passwords forgets it: "" is
                 // the login kept under no name.
-                Vault.all().filter { $0.user == user }.forEach { Vault.forget(host: $0.host, user: $0.user, clear: $0.clear) }
+                Vault.all().filter { $0.user == user }.forEach { Vault.forget($0) }
             }
             let offer: [String: Any] = browser.offering.map { ["user": $0.login.user, "host": $0.login.host, "changed": $0.changed] } ?? [:]
             // Every account this world keeps, by name, without a secret.

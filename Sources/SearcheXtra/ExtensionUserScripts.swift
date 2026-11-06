@@ -693,6 +693,10 @@ enum ExtensionUserScripts {
         }
 
         private func selector(for tab: Tab) throws -> [String: Any] {
+            let adapter = Extensions.shared.adapter(for: tab)
+            if adapter.aside, context.openTabs.contains(adapter) {
+                return ["aside": true, "incognito": tab.shy]
+            }
             guard let browser = Extensions.shared.browser(of: tab),
                   let index = Extensions.shared.visibleTabs(of: browser, for: context).firstIndex(where: { $0 === tab }),
                   let frame = browser.window?.frame else { throw invalid("The user-script tab is no longer available") }
@@ -786,6 +790,7 @@ enum ExtensionUserScripts {
                 sourceURL = url
                 selector["marker"] = marker
                 selector["token"] = source.document
+                selector["mainFrame"] = source.frame.isMainFrame
             }
             guard authorized(source) else { throw invalid("User-script context was revoked") }
             let origin = source.frame.securityOrigin
@@ -851,9 +856,62 @@ enum ExtensionUserScripts {
     }
 
     nonisolated static let hostHTML = "<!doctype html><meta charset=utf-8><script src='../search-shim.js'></script><script src='user-script-host.js'></script>"
+    /// Reports only WebKit's own sender to the hidden user-script host.
+    /// This content script exposes no extension API to the website. Native
+    /// code first places a one-time marker in the calling frame.
+    nonisolated static let identityScript = #"""
+    (() => {
+      const report = marker => {
+        if (!marker.startsWith('data-searchextra-user-frame-')) return;
+        const token = document.documentElement?.getAttribute(marker);
+        if (!token || token.length > 128) return;
+        chrome.runtime.sendMessage({ __searchUserFrameIdentity: true, marker, token }).catch(() => {});
+      };
+      const observe = () => {
+        if (!document.documentElement) return false;
+        new MutationObserver(changes => {
+          for (const change of changes) report(change.attributeName || '');
+        }).observe(document.documentElement, { attributes: true });
+        return true;
+      };
+      if (!observe()) {
+        const waiting = new MutationObserver(() => { if (observe()) waiting.disconnect(); });
+        waiting.observe(document, { childList: true, subtree: true });
+      }
+    })();
+    """#
+
     nonisolated static let hostScript = #"""
     (() => {
       const ports = new Map();
+      const receipts = new Map(), waiting = new Map();
+      const receiptKey = (marker, token) => marker + ' ' + token;
+      globalThis.__searchUserFrameIdentity = (message, sender) => {
+        if (!sender || sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id)
+          || !Number.isInteger(sender.frameId) || sender.frameId < 0 || typeof sender.url !== 'string'
+          || typeof message.marker !== 'string' || !message.marker.startsWith('data-searchextra-user-frame-')
+          || typeof message.token !== 'string' || message.token.length > 128) return;
+        const key = receiptKey(message.marker, message.token), resolve = waiting.get(key);
+        if (resolve) { waiting.delete(key); resolve(sender); }
+        else {
+          if (receipts.size >= 64) receipts.delete(receipts.keys().next().value);
+          receipts.set(key, { sender, at: Date.now() });
+        }
+      };
+      // Attach the shim's native onMessage dispatcher in this page even
+      // when WebKit exposes userScripts itself, so no polyfill happened to
+      // install a listener for us. Its dispatcher consumes identity receipts
+      // before ordinary extension listeners see them.
+      chrome.runtime.onMessage.addListener(() => undefined);
+      const receipt = selector => {
+        const key = receiptKey(selector.marker, selector.token), known = receipts.get(key);
+        receipts.delete(key);
+        if (known && Date.now() - known.at < 5000) return Promise.resolve(known.sender);
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => { waiting.delete(key); reject(new Error('The user-script frame is no longer available')); }, 5000);
+          waiting.set(key, sender => { clearTimeout(timer); resolve(sender); });
+        });
+      };
       const emit = (port, kind, value) => webkit.messageHandlers.userScriptHost.postMessage({ port, kind, value });
       const tabFor = async selector => {
         const windows = await chrome.windows.getAll({ populate: true });
@@ -864,7 +922,13 @@ enum ExtensionUserScripts {
         return tab;
       };
       const senderFor = async (selector, sender) => {
-        const tab = await tabFor(selector);
+        // Windowless pages have a real engine tab but no geometry/index.
+        // The content script's receipt carries WebKit's authentic sender.
+        const identified = selector.aside ? await receipt(selector) : null;
+        if (identified && (identified.url !== sender.url || (identified.frameId === 0) !== selector.mainFrame)) {
+          throw new Error('The user-script frame is no longer available');
+        }
+        const tab = identified ? { ...identified.tab, incognito: selector.incognito === true } : await tabFor(selector);
         const frames = await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true },
           func: (marker, token) => {
             const matched = document.documentElement?.getAttribute(marker) === token;
@@ -873,6 +937,10 @@ enum ExtensionUserScripts {
           }, args: [selector.marker, selector.token] });
         const found = frames.filter(frame => frame.result?.matched && frame.result.url === sender.url);
         if (found.length !== 1) throw new Error('The user-script frame is no longer available');
+        if (identified && (found[0].frameId !== identified.frameId
+          || identified.documentId && found[0].documentId !== identified.documentId)) {
+          throw new Error('The user-script document changed during frame lookup');
+        }
         return { ...sender, tab, frameId: found[0].frameId, documentId: found[0].documentId || sender.documentId };
       };
       globalThis.__searchUserScriptHost = async (operation, body, selector, source) => {

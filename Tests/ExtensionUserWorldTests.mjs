@@ -145,10 +145,12 @@ const host = vm.createContext({ chrome: {
     return [{ frameId: 7, documentId: '22222222-2222-4222-8222-222222222222', result: { matched: true, url: 'https://fixture.test/frame' } }];
   } },
   runtime: {
+    id: 'fixtureExtension',
+    onMessage: listeners(),
     async sendMessage(body) { outbound.push(body); return { ok: true }; },
     connect({ name }) { nativePort = { name, onMessage: listeners(), onDisconnect: listeners(), postMessage: message => outbound.push(message), disconnect() {} }; return nativePort; },
   },
-}, webkit: { messageHandlers: { userScriptHost: { postMessage: body => events.push(body) } } } });
+}, setTimeout, clearTimeout, webkit: { messageHandlers: { userScriptHost: { postMessage: body => events.push(body) } } } });
 vm.runInContext(hostCode, host);
 host.selector = { left: 20, top: 40, width: 900, height: 600, index: 1, marker: 'native-marker', token: 'native-token' };
 host.sender = { id: 'fixtureExtension', frameId: 3, worldId: 'named-world', url: 'https://fixture.test/frame' };
@@ -176,6 +178,53 @@ assert.equal(JSON.stringify(targets.map(frame => frame.frameId)), '[7]');
 targets = await vm.runInContext('__searchUserScriptHost("targets", { target: {} }, selector, {})', host);
 assert.equal(JSON.stringify(targets.map(frame => frame.frameId)), '[0]');
 await assert.rejects(vm.runInContext('__searchUserScriptHost("targets", { target: { frameIds: [999] } }, selector, {})', host), /target document/);
+
+// A windowless native sender is not found by adding a fake tab/window to
+// queries. The identity receipt and a second native frame lookup must agree.
+const getWindows = host.chrome.windows.getAll;
+host.chrome.windows.getAll = async () => { throw Error('Windowless pages must not query window geometry'); };
+host.selector = { aside: true, incognito: true, mainFrame: false, marker: 'data-searchextra-user-frame-proof', token: 'native-token' };
+const asideSender = { ...host.sender, tab: { id: 42, index: -1, windowId: -1 }, frameId: 7,
+  documentId: '22222222-2222-4222-8222-222222222222' };
+host.__searchUserFrameIdentity({ marker: host.selector.marker, token: host.selector.token }, asideSender);
+const execute = host.chrome.scripting.executeScript;
+host.chrome.scripting.executeScript = async ({ target, args }) => {
+  assert.equal(target.tabId, 42);
+  assert.deepEqual([...args], [host.selector.marker, 'native-token']);
+  return [{ frameId: 7, documentId: asideSender.documentId, result: { matched: true, url: host.sender.url } }];
+};
+await vm.runInContext('__searchUserScriptHost("message", { message: { aside: true } }, selector, sender)', host);
+assert.equal(outbound.at(-1).__searchUserSender.tab.windowId, -1);
+assert.equal(outbound.at(-1).__searchUserSender.frameId, 7);
+assert.equal(outbound.at(-1).__searchUserSender.tab.incognito, true, 'The native private-page state survives a windowless sender');
+
+const connected = vm.runInContext('__searchUserScriptHost("connect", { port: "aside-port", name: "gm-port" }, selector, sender)', host);
+host.__searchUserFrameIdentity({ marker: host.selector.marker, token: host.selector.token }, asideSender);
+await connected;
+assert.equal(outbound.at(-1).sender.tab.id, 42);
+await vm.runInContext('__searchUserScriptHost("post", { port: "aside-port", message: { saved: 2 } }, selector, sender)', host);
+assert.equal(outbound.at(-1).saved, 2);
+
+host.__searchUserFrameIdentity({ marker: host.selector.marker, token: host.selector.token }, { ...asideSender, frameId: 0 });
+await assert.rejects(vm.runInContext('__searchUserScriptHost("message", { message: {} }, selector, sender)', host), /frame/);
+host.__searchUserFrameIdentity({ marker: host.selector.marker, token: host.selector.token }, { ...asideSender, documentId: 'replaced' });
+await assert.rejects(vm.runInContext('__searchUserScriptHost("message", { message: {} }, selector, sender)', host), /document changed/);
+host.chrome.windows.getAll = getWindows;
+host.chrome.scripting.executeScript = execute;
+
+const identityCode = swift.slice(swift.indexOf('    nonisolated static let identityScript = #"""')).match(/#"""([\s\S]*?)"""#/)[1];
+let observeChanges;
+const identities = [], attributes = new Map();
+const identityWorld = { document: { documentElement: { getAttribute: name => attributes.get(name) } },
+  MutationObserver: class { constructor(callback) { observeChanges = callback; } observe() {} },
+  chrome: { runtime: { sendMessage: value => { identities.push(value); return Promise.resolve(); } } } };
+vm.runInNewContext(identityCode, identityWorld);
+attributes.set('class', 'ordinary'); observeChanges([{ attributeName: 'class' }]);
+assert.equal(identities.length, 0);
+attributes.set(host.selector.marker, 'native-token'); observeChanges([{ attributeName: host.selector.marker }]);
+assert.equal(identities[0].token, 'native-token');
+attributes.delete(host.selector.marker); observeChanges([{ attributeName: host.selector.marker }]);
+assert.equal(identities.length, 1, 'Removing a consumed marker does not emit another request');
 
 // Include the existing own-page port numbering shim: the bridge is a real
 // extension page, and both ends must unwrap that transport before ScriptCat

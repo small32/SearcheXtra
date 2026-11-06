@@ -403,6 +403,8 @@ enum Browsers {
     /// other window whole.
     static func save(now: Bool = false) {
         guard let primary else { return }
+        let previous = stored()
+        guard previous != nil || !FileManager.default.fileExists(atPath: file.path) else { return }
         var records = [record(of: primary, rows: false)]
         records[0].rows = [:]
         for browser in saved.dropFirst() { records.append(record(of: browser, rows: true)) }
@@ -410,7 +412,7 @@ enum Browsers {
         // as they were written, not dropped. They come back once the first
         // window is on screen, and a launch for a small window can end
         // before one ever is.
-        if !restored { records += read().dropFirst() }
+        if !restored { records += (previous ?? []).dropFirst() }
         // Frozen before it goes to the Disk queue.
         let snapshot = records
         Disk.write(file, now: now) { try? JSONEncoder().encode(snapshot) }
@@ -428,8 +430,17 @@ enum Browsers {
     private static var saving = false
 
     static func read() -> [WindowRecord] {
-        guard let data = try? Data(contentsOf: file) else { return [] }
-        return (try? JSONDecoder().decode([WindowRecord].self, from: data)) ?? []
+        stored() ?? []
+    }
+
+    private static func stored() -> [WindowRecord]? {
+        guard FileManager.default.fileExists(atPath: file.path) else { return [] }
+        guard let data = try? Data(contentsOf: file),
+              let records = try? JSONDecoder().decode([WindowRecord].self, from: data) else {
+            Store.quarantine(file)
+            return nil
+        }
+        return records
     }
 
     /// Start with a fresh window (see Session.startFresh): one window, the

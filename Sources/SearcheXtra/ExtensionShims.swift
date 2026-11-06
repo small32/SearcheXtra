@@ -45,7 +45,7 @@ enum ExtensionShims {
     /// extensions prepared before are prepared again.
     nonisolated private static let preparation = "5"
     nonisolated static let version: String = {
-        SHA256.hash(data: Data((script + PasskeyRelay.page + ExtensionUserScripts.hostHTML + ExtensionUserScripts.hostScript + preparation).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() + (Store.testing ? "-test" : "")
+        SHA256.hash(data: Data((script + PasskeyRelay.page + ExtensionUserScripts.hostHTML + ExtensionUserScripts.hostScript + ExtensionUserScripts.identityScript + preparation).utf8)).prefix(8).map { String(format: "%02x", $0) }.joined() + (Store.testing ? "-test" : "")
     }()
 
     /// `fresh`: a package just unpacked or copied in. What only Search writes
@@ -72,6 +72,7 @@ enum ExtensionShims {
         try files.createDirectory(at: userScriptDirectory, withIntermediateDirectories: true)
         try ExtensionUserScripts.hostHTML.write(to: folder.appendingPathComponent(ExtensionUserScripts.hostPath), atomically: true, encoding: .utf8)
         try ExtensionUserScripts.hostScript.write(to: userScriptDirectory.appendingPathComponent("user-script-host.js"), atomically: true, encoding: .utf8)
+        try ExtensionUserScripts.identityScript.write(to: userScriptDirectory.appendingPathComponent("user-script-identity.js"), atomically: true, encoding: .utf8)
 
         // Native messaging is how the shim reaches the browser; user scripts
         // are carried out through WebKit's registered content scripts, which
@@ -138,7 +139,7 @@ enum ExtensionShims {
         // navigator.credentials as it finds it, and that has to be Search's,
         // not WebKit's (see Passkeys.swift).
         if let entries = manifest["content_scripts"] as? [[String: Any]] {
-            manifest["content_scripts"] = entries.map { entry -> [String: Any] in
+            manifest["content_scripts"] = entries.filter { !($0["js"] as? [String] ?? []).contains("_search/user-script-identity.js") }.map { entry -> [String: Any] in
                 var entry = entry
                 if var js = entry["js"] as? [String] {
                     if !js.contains(file) { js.insert(file, at: 0) }
@@ -147,6 +148,12 @@ enum ExtensionShims {
                 }
                 return entry
             }
+        }
+        if asked.union(optional).contains("userScripts") {
+            var entries = manifest["content_scripts"] as? [[String: Any]] ?? []
+            entries.append(["matches": ["http://*/*", "https://*/*", "file:///*"],
+                            "js": [file, "_search/user-script-identity.js"], "all_frames": true, "run_at": "document_start"])
+            manifest["content_scripts"] = entries
         }
 
         let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .withoutEscapingSlashes])
@@ -1107,6 +1114,12 @@ enum ExtensionShims {
           // extension (onMessageExternal) could otherwise speak as one of its
           // user scripts, or as a frame of its own.
           const fromHere = !!(sender && sender.id === runtime.id);
+          // Only the hidden user-script host uses an identity receipt. The
+          // sender is WebKit's own, never a value supplied by the website.
+          if (message && message.__searchUserFrameIdentity) {
+            if (fromHere && typeof root.__searchUserFrameIdentity === "function") root.__searchUserFrameIdentity(message, sender);
+            return;
+          }
           if (message && (message.__searchUserScript === true || message.__searchToFrame) && !fromHere) return;
           if (message && message.__searchUserScript === true) {
             const route = root.__searchUserScriptMessage;
@@ -4702,7 +4715,7 @@ enum ExtensionShims {
             // Only what clear() below actually removes: downloads and
             // passwords are the person's files and keychain, not ours.
             return ["options": ["since": 0], "dataToRemove": [:], "dataRemovalPermitted": [
-                "cache": true, "cookies": true, "history": true, "localStorage": true,
+                "cache": true, "appcache": true, "cookies": true, "history": true, "localStorage": true,
                 "indexedDB": true, "serviceWorkers": true, "cacheStorage": true, "fileSystems": true, "webSQL": true,
             ]]
         case let api where api.hasPrefix("browsingData."):
@@ -4714,12 +4727,7 @@ enum ExtensionShims {
                 let key = String(api.dropFirst("browsingData.remove".count))
                 what = [key.prefix(1).lowercased() + key.dropFirst(): true]
             }
-            let supported: Set<String> = ["cache", "cookies", "history", "localStorage", "indexedDB",
-                                          "serviceWorkers", "cacheStorage", "fileSystems", "webSQL"]
-            let unknown = Set(what.keys).subtracting(supported)
-            guard unknown.isEmpty else {
-                throw Unsupported(what: "Search can't remove: \(unknown.sorted().joined(separator: ", "))")
-            }
+            try validateRemoval(what)
             try await clear(what, options: options, browser: browser)
             return nil
 
@@ -4951,6 +4959,15 @@ enum ExtensionShims {
              "privacy.services.safeBrowsingExtendedReportingEnabled": return false
         case "proxy.settings": return ["mode": "system"]
         default: return true
+        }
+    }
+
+    static func validateRemoval(_ what: [String: Bool]) throws {
+        let supported: Set<String> = ["cache", "appcache", "cookies", "history", "localStorage", "indexedDB",
+                                      "serviceWorkers", "cacheStorage", "fileSystems", "webSQL"]
+        let unknown = Set(what.filter { $0.value }.map(\.key)).subtracting(supported)
+        guard unknown.isEmpty else {
+            throw Unsupported(what: "Search can't remove: \(unknown.sorted().joined(separator: ", "))")
         }
     }
 

@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const source = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8') : fs.readFileSync(path.join(__dirname, '../../Sources/SearcheXtra/ExtensionShims.swift'), 'utf8');
+const source = (process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8') : fs.readFileSync(path.join(__dirname, '../../Sources/SearcheXtra/ExtensionShims.swift'), 'utf8')).replace(/\r\n/g, '\n');
 const script = source.split('nonisolated static let script = #"""\n')[1].split('\n    """#')[0];
 const harness = fs.readFileSync(path.join(__dirname, 'shim-harness.js'), 'utf8');
 const fixture = vm.runInNewContext(harness + '\nrecoveryFixture', { console });
@@ -460,6 +460,38 @@ async function test(name, run) { await run(); console.log('PASS ' + name); passe
     const grants = await result;
     assert.deepEqual(Array.from(grants.permissions), ['tabs', 'history', 'downloads']);
     assert.deepEqual(Array.from(grants.origins), ['https://example.test/*']);
+  });
+  await test('Windowless user-script identity receipts arrive through the native runtime event', async () => {
+    const executions = [];
+    const state = load(false, 0, state => {
+      state.root.chrome.userScripts = {}; // No polyfill listener may attach the dispatcher for the host.
+      state.root.location.href = state.runtime.getURL('_search/user-script-host.html');
+      state.root.location.pathname = '/_search/user-script-host.html';
+      state.runtime.getManifest = () => ({ background: { service_worker: 'worker.js' }, permissions: ['userScripts'] });
+      state.runtime.sendMessage = async () => ({ ok: true });
+      state.root.chrome.windows = { getAll: async () => { throw Error('A windowless page has no window geometry'); } };
+      state.root.chrome.scripting = { executeScript: async ({ target, args }) => {
+        executions.push(target.tabId);
+        return [{ frameId: 7, documentId: 'engine-document', result: { matched: true, url: 'https://aside.test/frame' } }];
+      } };
+    });
+    assert.equal(state.runtime.onMessage.hasListeners(), false, 'The full shim alone has no native listener here');
+    const userSwift = fs.readFileSync(path.join(__dirname, '../../Sources/SearcheXtra/ExtensionUserScripts.swift'), 'utf8');
+    const hostScript = userSwift.slice(userSwift.indexOf('    nonisolated static let hostScript = #"""')).match(/#"""([\s\S]*?)"""#/)[1];
+    vm.runInNewContext(hostScript, state.root);
+    assert.equal(state.runtime.onMessage.hasListeners(), true, 'The hidden host attaches the native receiver explicitly');
+    state.root.selector = { aside: true, mainFrame: false, marker: 'data-searchextra-user-frame-native-event', token: 'native-token' };
+    state.root.sender = { id: 'fixture', url: 'https://aside.test/frame', origin: 'https://aside.test', documentId: 'user-document' };
+    const pending = vm.runInNewContext('__searchUserScriptHost("message", {message: {storage: true}}, selector, sender)', state.root);
+    await drain();
+    const receipt = { __searchUserFrameIdentity: true, marker: state.root.selector.marker, token: 'native-token' };
+    const engineSender = { id: 'fixture', url: 'https://aside.test/frame', tab: { id: 42, windowId: -1, index: -1 }, frameId: 7, documentId: 'engine-document' };
+    state.runtime.onMessage.fire(receipt, {...engineSender, id: 'another-extension'}, () => {});
+    await drain();
+    assert.equal(executions.length, 0, 'Another extension cannot supply the frame identity');
+    state.runtime.onMessage.fire(receipt, engineSender, () => {});
+    await pending;
+    assert.deepEqual(executions, [42]);
   });
   console.log(passed + ' full-shim regression cases passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

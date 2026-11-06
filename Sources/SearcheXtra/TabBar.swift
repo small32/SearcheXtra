@@ -1029,6 +1029,7 @@ struct Carried: ViewModifier {
             .simultaneousGesture(
                 DragGesture(minimumDistance: 5, coordinateSpace: .named(space))
                     .onChanged { value in
+                        guard TabDrag.shared.cancelledID == nil else { return }
                         if !held, let browser, let tab, browser.editingTab == tab.id { return }
                         if !held {
                             held = true

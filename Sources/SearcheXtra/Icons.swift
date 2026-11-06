@@ -53,7 +53,7 @@ final class Favicons: ObservableObject {
 
     private let memory = NSCache<NSString, NSImage>()
     private let session: URLSession
-    private var bookmarkQueue: [(URL, String, String, Bool, CheckedContinuation<Void, Never>)] = []
+    private var bookmarkQueue: [(URL, String, String, Bool, UInt, CheckedContinuation<Void, Never>)] = []
     private var bookmarkDownloads = 0
     private var bookmarkWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
     private var bookmarkTasks: [UUID: Task<Void, Never>] = [:]
@@ -76,6 +76,7 @@ final class Favicons: ObservableObject {
     }
     private var generation: UInt = 0
     private var shyGeneration: UInt = 0
+    private var pageGenerations: [String: UInt] = [:]
     private var busy: Set<String> = []
     private var missing: Set<String> = []
     /// Icon addresses that came back with nothing usable this session.
@@ -106,11 +107,12 @@ final class Favicons: ObservableObject {
         for task in bookmarkTasks.values { task.cancel() }
         let queued = bookmarkQueue
         bookmarkQueue.removeAll()
-        queued.forEach { $0.4.resume() }
+        queued.forEach { $0.5.resume() }
         let waiters = bookmarkWaiters.values.flatMap { $0 }
         bookmarkWaiters.removeAll()
         waiters.forEach { $0.resume() }
         busy.removeAll()
+        pageGenerations.removeAll()
         // Finish earlier writes before deleting their files. Old downloads and
         // delayed saves are invalidated above, so none can put this index back.
         let folder = Favicons.folder
@@ -134,6 +136,14 @@ final class Favicons: ObservableObject {
         guard let site = Favicons.site(url) else { return }
         load()
         let page = Favicons.page(url)
+        let key = site + page
+        pageGenerations[key, default: 0] &+= 1
+        busy.remove(key)
+        missing.remove(key)
+        bookmarkWaiters.removeValue(forKey: key)?.forEach { $0.resume() }
+        let queued = bookmarkQueue.filter { $0.1 + $0.2 == key }
+        bookmarkQueue.removeAll { $0.1 + $0.2 == key }
+        queued.forEach { $0.5.resume() }
         guard let gone = pages[site]?[page] else { return }
         pages[site]?[page] = nil
         if pages[site]?.isEmpty == true { pages[site] = nil }
@@ -235,7 +245,8 @@ final class Favicons: ObservableObject {
         shared.flushNow()
     }
 
-    private func flushNow() {
+    func flushNow() {
+        guard loaded else { return }
         saving = false
         generation &+= 1
         let gone = prune().map(Favicons.file)
@@ -418,29 +429,29 @@ final class Favicons: ObservableObject {
         }
         busy.insert(busyKey)
         await withCheckedContinuation { done in
-            bookmarkQueue.append((url, site, page, dark, done))
+            bookmarkQueue.append((url, site, page, dark, pageGenerations[busyKey, default: 0], done))
             discoverBookmarks()
         }
     }
 
     private func discoverBookmarks() {
         while bookmarkDownloads < 4, !bookmarkQueue.isEmpty {
-            let (url, site, page, dark, done) = bookmarkQueue.removeFirst()
+            let (url, site, page, dark, pageGeneration, done) = bookmarkQueue.removeFirst()
             let generation = generation
             let id = UUID()
             bookmarkDownloads += 1
             bookmarkTasks[id] = Task {
                 defer {
-                    finishRequest(site + page, generation: generation)
+                    finishRequest(site + page, generation: generation, pageGeneration: pageGeneration)
                     bookmarkTasks[id] = nil
                     bookmarkDownloads -= 1
                     done.resume()
                     discoverBookmarks()
                 }
-                guard generation == self.generation, !Task.isCancelled else { return }
+                guard generation == self.generation, pageGeneration == pageGenerations[site + page, default: 0], !Task.isCancelled else { return }
                 var candidates = Favicons.rank([], page: url, dark: dark)
                 let result = try? await session.data(from: url)
-                guard generation == self.generation, !Task.isCancelled else { return }
+                guard generation == self.generation, pageGeneration == pageGenerations[site + page, default: 0], !Task.isCancelled else { return }
                 if let (data, response) = result,
                    (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) == true,
                    data.count < 2_000_000,
@@ -448,13 +459,13 @@ final class Favicons: ObservableObject {
                     candidates = Favicons.candidates(in: html, page: response.url ?? url, dark: dark)
                 }
                 await download(candidates, site: site, page: page, dark: dark, shy: false,
-                               generation: generation, privateGeneration: shyGeneration)
+                               generation: generation, privateGeneration: shyGeneration, pageGeneration: pageGeneration)
             }
         }
     }
 
-    private func finishRequest(_ key: String, generation: UInt) {
-        guard generation == self.generation else { return }
+    private func finishRequest(_ key: String, generation: UInt, pageGeneration: UInt) {
+        guard generation == self.generation, pageGeneration == pageGenerations[key, default: 0] else { return }
         busy.remove(key)
         bookmarkWaiters.removeValue(forKey: key)?.forEach { $0.resume() }
     }
@@ -526,15 +537,16 @@ final class Favicons: ObservableObject {
         let shy = tab.shy || !tab.store.isPersistent
         let generation = generation
         let privateGeneration = shyGeneration
+        let pageGeneration = pageGenerations[busyKey, default: 0]
         tab.web.evaluateJavaScript(Favicons.probe) { [weak self] answer, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let declared = (answer as? [[String: String]]) ?? []
                 let candidates = Favicons.rank(declared, page: url, dark: dark)
                 Task {
-                    defer { self.finishRequest(busyKey, generation: generation) }
+                    defer { self.finishRequest(busyKey, generation: generation, pageGeneration: pageGeneration) }
                     await self.download(candidates, site: site, page: page, dark: dark, shy: shy,
-                                        generation: generation, privateGeneration: privateGeneration)
+                                        generation: generation, privateGeneration: privateGeneration, pageGeneration: pageGeneration)
                 }
             }
         }
@@ -553,10 +565,11 @@ final class Favicons: ObservableObject {
     }
 
     private func download(_ candidates: [URL], site: String, page: String, dark: Bool, shy: Bool,
-                          again: Bool = true, generation: UInt, privateGeneration: UInt) async {
+                          again: Bool = true, generation: UInt, privateGeneration: UInt, pageGeneration: UInt) async {
         let busyKey = site + page
         func current() -> Bool {
-            generation == self.generation && (!shy || privateGeneration == shyGeneration) && !Task.isCancelled
+            generation == self.generation && pageGeneration == pageGenerations[busyKey, default: 0]
+                && (!shy || privateGeneration == shyGeneration) && !Task.isCancelled
         }
         guard current() else { return }
         let session = self.session
@@ -611,7 +624,7 @@ final class Favicons: ObservableObject {
             if again {
                 try? await Task.sleep(for: .seconds(3))
                 await download(candidates, site: site, page: page, dark: dark, shy: shy, again: false,
-                               generation: generation, privateGeneration: privateGeneration)
+                               generation: generation, privateGeneration: privateGeneration, pageGeneration: pageGeneration)
             } else {
                 for candidate in unanswered { unreachable[candidate] = Date() + Favicons.backoff }
             }

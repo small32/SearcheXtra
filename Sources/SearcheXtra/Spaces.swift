@@ -76,11 +76,21 @@ enum Spaces {
 
     private static var file: URL { Store.file("spaces.json") }
 
+    private static func stored() -> [Space]? {
+        guard FileManager.default.fileExists(atPath: file.path) else { return [] }
+        guard let data = try? Data(contentsOf: file),
+              let saved = try? JSONDecoder().decode([Space].self, from: data) else {
+            Store.quarantine(file)
+            return nil
+        }
+        return saved
+    }
+
     /// Every space of every profile, in the order the user arranged them —
     /// made on the spot if there is no list yet. The first space is the
     /// profile's home, not necessarily the leftmost one: it can be moved.
     static func read() -> [Space] {
-        let saved = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode([Space].self, from: $0) } ?? []
+        let saved = stored() ?? []
         guard !saved.isEmpty else { return [Space.first()] }
         var foundHome = false
         var spaces = saved.compactMap { space -> Space? in
@@ -105,7 +115,7 @@ enum Spaces {
     /// One profile's spaces in their saved order: what a window of that
     /// profile shows, and all it shows.
     static func read(profile: UUID) -> [Space] {
-        let saved = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode([Space].self, from: $0) } ?? []
+        let saved = stored() ?? []
         let mine = read().filter { $0.profileID == profile }
         guard !keepsOrder(in: saved) else { return mine }
         let home = profile == Profile.personalID
@@ -133,6 +143,9 @@ enum Spaces {
 
     /// The whole list, every profile's spaces.
     static func write(_ spaces: [Space]) {
+        // A failed rename must not turn the fallback list into permission to
+        // overwrite the unreadable original.
+        guard stored() != nil || !FileManager.default.fileExists(atPath: file.path) else { return }
         guard let data = try? JSONEncoder().encode(spaces) else { return }
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: file, options: .atomic)

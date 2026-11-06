@@ -310,7 +310,37 @@ final class LittleWindow: NSObject, NSWindowDelegate {
     /// a small window brings the browser's window: the window in front, or
     /// one brought back for it.
     func keep() {
-        let browser = Browsers.ensureWindow()
+        keep(in: Browsers.ensureWindow())
+    }
+
+    /// Moving to another store rebuilds the page, just as moving a tab to
+    /// another window does. Ask before letting a draft go with that view.
+    func keep(in browser: Browser) {
+        guard !kept, !browser.isPopup else { return }
+        let space = browser.spaceID
+        let view = tab.built
+        let complete: () -> Void = { [weak self, weak browser] in
+            guard let self, let browser, !self.kept,
+                  LittleWindow.open.contains(where: { $0 === self }),
+                  browser.spaceID == space, self.tab.built === view else { return }
+            self.finishKeep(in: browser)
+        }
+        guard !tab.shy, tab.store !== Spaces.store(for: space) else { return complete() }
+        tab.unsaved { [weak self, weak browser] unsaved in
+            guard let self, let browser, !self.kept,
+                  LittleWindow.open.contains(where: { $0 === self }),
+                  browser.spaceID == space, self.tab.built === view else { return }
+            if unsaved {
+                Ask.sure(L10n.text("Browser.0340"),
+                         detail: L10n.text("Browser.0341", browser.space.name),
+                         confirm: L10n.text("Browser.0342"), then: complete)
+            } else {
+                complete()
+            }
+        }
+    }
+
+    private func finishKeep(in browser: Browser) {
         kept = true
         // In the row, back from the first page goes nowhere, as any tab's.
         tab.leave = nil

@@ -407,6 +407,8 @@ final class Browser: NSObject, ObservableObject {
     @Published var sidePanelShown = false
     @Published var sidePanel: SidePanelContent?
     /// The Settings page it opens on next.
+    weak var settingsSiteTab: Tab?
+
     var settingsPage: SettingsPanel.Page {
         get { SettingsPanel.Page.named(Store.settings.string(forKey: "settings.page") ?? "") ?? .general }
         set { Store.settings.set(newValue.rawValue, forKey: "settings.page") }
@@ -754,6 +756,7 @@ final class Browser: NSObject, ObservableObject {
         /// Hung from a box that is clearly a sign-in's, with the site's
         /// other hosts' accounts; false: this host's alone.
         var wide = true
+        var formID: String?
     }
     /// Set once you have picked, so the list doesn't come straight back for
     /// the box you are still in. Cleared when the caret leaves the boxes.
@@ -765,7 +768,7 @@ final class Browser: NSObject, ObservableObject {
     /// The page whose accounts were last looked up for the box the caret is
     /// in. The box reports where it is on every frame of a scroll so the
     /// list can follow it; the keychain is asked once per box, not per frame.
-    private var looked: (tab: Tab.ID, host: String, clear: Bool, name: Bool, wide: Bool)?
+    private var looked: (tab: Tab.ID, host: String, clear: Bool, name: Bool, wide: Bool, formID: String?)?
     /// The sign-in box the caret is in, for a list that changes while it is
     /// there: the page's passkeys arrive when they arrive.
     private var field: (tab: Tab.ID, spot: CGRect, passwords: Bool, name: Bool)?
@@ -818,27 +821,27 @@ final class Browser: NSObject, ObservableObject {
         lowering?.cancel()
         field = (tab.id, spot, passwords, name)
         guard tab.id == activeID, pickedInto != tab.id,
-              let host = curtain.host(of: tab.pageAddress)
+              let host = curtain.host(of: tab.formAddress)
         else { return }
         // A page that came over plain http can have been written by
         // anyone on the way here — a café's network, a hotel's. It is
         // offered only what was kept from plain http too, never an
         // account kept from the https site of the same name.
-        let inTheClear = tab.pageAddress?.scheme?.lowercased() == "http"
+        let inTheClear = tab.formAddress?.scheme?.lowercased() == "http"
         // The same box, moved by a scroll: the list up follows it, keeping
         // its accounts and the moment it came up (a click is refused for
         // its first half second, which every frame used to start again);
         // a box with no accounts stays without, and the keychain isn't
         // asked again until the caret leaves.
         if let looked, looked.tab == tab.id, looked.host == host, looked.clear == inTheClear, looked.name == name,
-           looked.wide == wide {
+           looked.wide == wide, looked.formID == tab.formID {
             if var up = suggesting, up.tab == tab.id, up.spot != spot {
                 up.spot = spot
                 suggesting = up
             }
             return
         }
-        looked = (tab.id, host, inTheClear, name, wide)
+        looked = (tab.id, host, inTheClear, name, wide, tab.formID)
         // Passwords only for a box that goes with one: a box for passkeys
         // alone has no password to put anywhere. A box that only might be a
         // sign-in's gets this host's own accounts, never the rest of the
@@ -858,15 +861,16 @@ final class Browser: NSObject, ObservableObject {
         // join the list when the helper answers; not yet, a row offers to
         // connect.
         let appleHost = prefs.applePasswords && prefs.fillsPasswords && passwords
-            ? ApplePasswords.offers(on: tab.pageAddress, privateTab: tab.shy) : nil
+            ? ApplePasswords.offers(on: tab.formAddress, privateTab: tab.shy) : nil
         let apple = applePasswords
         let connect = appleHost != nil && apple.state == .idle && applePairing?.tab != tab.id
         // Off, and nothing of Search's own for this site: the offer, once.
         // The row already up under this box stays up while it is there.
         let offer: String? = {
-            if let up = suggesting, up.tab == tab.id, let site = up.appleOffer, site == Vault.registrable(host) { return site }
+            if let up = suggesting, up.tab == tab.id, up.formID == tab.formID,
+               let site = up.appleOffer, site == Vault.registrable(host) { return site }
             return applePasswordsOffer.site(
-                for: .init(page: tab.pageAddress, privateTab: tab.shy, frameHost: tab.fieldFrameHost,
+                for: .init(page: tab.formAddress, privateTab: tab.shy, frameHost: tab.fieldFrameHost,
                            passwords: passwords, kept: known.count),
                 .init(appleOn: prefs.applePasswords, fills: prefs.fillsPasswords,
                       helper: ApplePasswordsOffer.benchHelper ?? ApplePasswordsOffer.helperHere,
@@ -882,20 +886,21 @@ final class Browser: NSObject, ObservableObject {
             return
         }
         // What is under the pointer changed: the half second starts again.
-        if let up = suggesting, up.tab == tab.id, up.logins == known, up.passkeys == passkeys, up.nameOnly == name,
+        if let up = suggesting, up.tab == tab.id, up.formID == tab.formID,
+           up.logins == known, up.passkeys == passkeys, up.nameOnly == name,
            up.appleConnect == connect, up.apple.isEmpty, up.wide == wide, up.appleOffer == offer {
             suggesting?.spot = spot
             return
         }
         suggesting = Suggesting(tab: tab.id, spot: spot, logins: known, passkeys: passkeys, host: host, clear: inTheClear,
-                                nameOnly: name, appleHost: appleHost, appleConnect: connect, appleOffer: offer, wide: wide)
+                                nameOnly: name, appleHost: appleHost, appleConnect: connect, appleOffer: offer, wide: wide, formID: tab.formID)
         if let offer { applePasswordsOffer.shown(on: offer) }
     }
 
     /// Asks Apple's helper for the names it keeps for the page, and adds
     /// them under the box if the caret is still in it, on the same page.
     private func lookUpApple(_ appleHost: String, in tab: Tab, host: String, name: Bool, wide: Bool) {
-        let ask = appleAsk
+        let ask = appleAsk, formID = tab.formID
         Task { [weak self] in
             // A page that moves the caret from box to box queues no backlog:
             // a question the caret has already left is never sent.
@@ -903,8 +908,8 @@ final class Browser: NSObject, ObservableObject {
             let found = await keeper.logins(for: appleHost, tab: tab.id) { [weak self] in
                 self?.appleAsk == ask
             }
-            guard let self, ask == appleAsk, let field, field.tab == tab.id, tab.id == activeID,
-                  ApplePasswords.offers(on: tab.pageAddress, privateTab: tab.shy) == appleHost
+            guard let self, ask == appleAsk, tab.formID == formID, let field, field.tab == tab.id, tab.id == activeID,
+                  ApplePasswords.offers(on: tab.formAddress, privateTab: tab.shy) == appleHost
             else { return }
             let mine = suggesting?.tab == tab.id ? suggesting?.logins ?? [] : []
             let apple = Array(found
@@ -921,7 +926,7 @@ final class Browser: NSObject, ObservableObject {
                 suggesting = up
             } else {
                 suggesting = Suggesting(tab: tab.id, spot: field.spot, logins: [], host: host, clear: false,
-                                        nameOnly: name, apple: apple, appleHost: appleHost)
+                                        nameOnly: name, apple: apple, appleHost: appleHost, formID: formID)
             }
         }
     }
@@ -932,9 +937,9 @@ final class Browser: NSObject, ObservableObject {
     func choose(_ apple: AppleLogin) {
         lowering?.cancel()
         guard let list = suggesting, let tab = tabs.first(where: { $0.id == list.tab }), let appleHost = list.appleHost else { return }
-        guard Date().timeIntervalSince(list.shown) > 0.5 else { return }
+        guard Date().timeIntervalSince(list.shown) > 0.5, tab.formID == list.formID else { return }
         suggesting = nil
-        guard ApplePasswords.offers(on: tab.pageAddress, privateTab: tab.shy) == appleHost,
+        guard ApplePasswords.offers(on: tab.formAddress, privateTab: tab.shy) == appleHost,
               ApplePasswords.belongs(apple.sites, to: appleHost)
         else { return }
         pickedInto = tab.id
@@ -954,8 +959,8 @@ final class Browser: NSObject, ObservableObject {
             }
             // Touch ID can take a while: the page must still be the one
             // asked for, in front, and the account still this site's.
-            guard tabs.contains(where: { $0 === tab }), tab.id == activeID,
-                  ApplePasswords.offers(on: tab.pageAddress, privateTab: tab.shy) == appleHost,
+            guard tabs.contains(where: { $0 === tab }), tab.id == activeID, tab.formID == list.formID,
+                  ApplePasswords.offers(on: tab.formAddress, privateTab: tab.shy) == appleHost,
                   ApplePasswords.belongs(found.sites, to: appleHost)
             else { return }
             tab.appleFill = AppleFill(host: appleHost, user: apple.user, password: found.password)
@@ -1066,13 +1071,13 @@ final class Browser: NSObject, ObservableObject {
     func choose(_ login: Kept) {
         lowering?.cancel()
         guard let list = suggesting, let tab = tabs.first(where: { $0.id == list.tab }) else { return }
-        guard Date().timeIntervalSince(list.shown) > 0.5 else { return }
+        guard Date().timeIntervalSince(list.shown) > 0.5, tab.formID == list.formID else { return }
         suggesting = nil
         // The tab may have gone somewhere else while the list was up: a
         // redirect, a script. What was offered for one site is never put
         // into another's page.
-        guard curtain.host(of: tab.pageAddress) == list.host,
-              (tab.pageAddress?.scheme?.lowercased() == "http") == list.clear
+        guard curtain.host(of: tab.formAddress) == list.host,
+              (tab.formAddress?.scheme?.lowercased() == "http") == list.clear
         else { return }
         pickedInto = tab.id
         // A first step: the name alone, the password waits for its page.
@@ -1087,7 +1092,7 @@ final class Browser: NSObject, ObservableObject {
             announce(L10n.text("Browser.0287"))
             return
         }
-        tab.fill(user: login.user, password: login.password, onlyOn: tab.pageAddress) { [weak self] worked in
+        tab.fill(user: login.user, password: login.password, onlyOn: tab.formAddress) { [weak self] worked in
             if !worked { self?.announce(L10n.text("Browser.0291")) }
         }
         Vault.touch(login)
@@ -1098,10 +1103,10 @@ final class Browser: NSObject, ObservableObject {
     func choose(_ passkey: Passkeys.Offered) {
         lowering?.cancel()
         guard let list = suggesting, let tab = tabs.first(where: { $0.id == list.tab }), let web = tab.built else { return }
-        guard Date().timeIntervalSince(list.shown) > 0.5 else { return }
+        guard Date().timeIntervalSince(list.shown) > 0.5, tab.formID == list.formID else { return }
         suggesting = nil
-        guard curtain.host(of: tab.pageAddress) == list.host,
-              (tab.pageAddress?.scheme?.lowercased() == "http") == list.clear
+        guard curtain.host(of: tab.formAddress) == list.host,
+              (tab.formAddress?.scheme?.lowercased() == "http") == list.clear
         else { return }
         pickedInto = tab.id
         Passkeys.shared.sign(in: web, with: passkey.id)
@@ -1151,7 +1156,7 @@ final class Browser: NSObject, ObservableObject {
     }
 
     func forget(_ login: Kept) {
-        Vault.forget(host: login.host, user: login.user, clear: login.clear)
+        Vault.forget(login)
         relist()
     }
 
@@ -1180,7 +1185,7 @@ final class Browser: NSObject, ObservableObject {
                 DispatchQueue.global(qos: .userInitiated).async {
                     // Counted as the keychain answers, not as asked: one
                     // it kept is not reported gone.
-                    let gone = shown.filter { Vault.forget(host: $0.host, user: $0.user, clear: $0.clear) }.count
+                    let gone = shown.filter { Vault.forget($0) }.count
                     DispatchQueue.main.async {
                         self.forgetting = false
                         self.relist()
@@ -5632,7 +5637,7 @@ final class Browser: NSObject, ObservableObject {
             if #available(macOS 15.4, *), Extensions.shared.passwordSavingTakenBy != nil { return }
             // Just filled from the Passwords app: it is kept there already.
             if tab.appleFill?.matches(host: host, user: user, password: password) == true { return }
-            let known = Vault.kept(for: host)
+            let known = Vault.kept(for: host).filter { $0.clear == clear }
             // Nothing to ask about one that is already known. Only that
             // account's secret is read, not every one kept for the site.
             if var same = known.first(where: { $0.user == user }).flatMap(Vault.login), same.password == password {
@@ -7483,6 +7488,7 @@ extension Browser {
     func show(_ page: InternalPage, foreground: Bool = true) -> Tab {
         // A pop-up window holds its one page: Search's own open beside it.
         if websitePopup { return tabDestination.show(page, foreground: foreground) }
+        if page.kind == .settings, let active, active.isWeb { settingsSiteTab = active }
         if page.kind == .settings, let detail = page.detail, let section = SettingsPanel.Page.named( detail) {
             settingsPage = section
         }

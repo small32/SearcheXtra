@@ -339,6 +339,8 @@ final class Tab: ObservableObject, Identifiable {
 
     func didCommit() {
         popupGesture.clear()
+        formSource = nil
+        fieldFrameHost = nil
         // What the old page was refused went with it.
         if !blockedPopups.isEmpty { blockedPopups = [] }
         // A translated page is gone; its frames with it.
@@ -1200,6 +1202,9 @@ final class Tab: ObservableObject, Identifiable {
     /// isn't the page itself: an offer is only made from the page's own site
     /// (ApplePasswordsOffer). Set before `fieldFocused` by FormRelay.
     var fieldFrameHost: String?
+    var formSource: FormSource?
+    var formAddress: URL? { formSource?.url ?? pageAddress }
+    var formID: String? { formSource?.id }
 
     /// `wide`: clearly a sign-in's box, so accounts kept for the site's
     /// other hosts (its registrable domain) may come; otherwise only this
@@ -1224,17 +1229,17 @@ final class Tab: ObservableObject, Identifiable {
     /// never reaches another tab, and another site never sees it.
     private var named: (site: String, user: String, at: Date)?
 
-    func gaveName(_ user: String) {
+    func gaveName(_ user: String, on source: URL? = nil) {
         guard !user.isEmpty, user.count <= 256,
-              let host = pageAddress?.host()?.lowercased()
+              let host = (source ?? formAddress)?.host()?.lowercased()
         else { return }
         named = (Vault.registrable(host), user, Date())
     }
 
     /// The name sent on the step before, if it was this site's and recent.
-    func givenName() -> String? {
+    func givenName(on source: URL? = nil) -> String? {
         guard let named, Date().timeIntervalSince(named.at) < 300,
-              let host = pageAddress?.host()?.lowercased(),
+              let host = (source ?? formAddress)?.host()?.lowercased(),
               Vault.registrable(host) == named.site
         else { return nil }
         return named.user
@@ -1244,18 +1249,19 @@ final class Tab: ObservableObject, Identifiable {
     /// Whether the sign-in worked is only known afterwards: a page that
     /// comes back without a password box took it, one that still has the
     /// box refused it, and only the first is worth remembering.
-    private var sent: (host: String, user: String, password: String, clear: Bool, at: Date)?
+    private var sent: (id: UUID, host: String, user: String, password: String, clear: Bool, at: Date, source: FormSource?)?
 
-    func sentSignIn(user: String, password: String) {
+    func sentSignIn(user: String, password: String, source: FormSource? = nil) {
         // The host now, while the page is still the sign-in page: a moment
         // later it may be somewhere else entirely, and that is not where
         // the password belongs.
-        guard let host = pageAddress?.host()?.lowercased() else { return }
+        let page = source?.url ?? pageAddress
+        guard let host = page?.host()?.lowercased() else { return }
         let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
         // A password page with no name on it: the name is the one the step
         // before was sent with.
-        let user = user.isEmpty ? givenName() ?? "" : user
-        sent = (bare, user, password, pageAddress?.scheme?.lowercased() == "http", Date())
+        let user = user.isEmpty ? givenName(on: page) ?? "" : user
+        sent = (UUID(), bare, user, password, page?.scheme?.lowercased() == "http", Date(), source)
     }
 
     /// The page has moved on — a new document has loaded, or the sign-in
@@ -1267,8 +1273,8 @@ final class Tab: ObservableObject, Identifiable {
     /// its form the instant you press the button and puts it back if the
     /// server says no — and offering in between is offering a password that
     /// may be wrong.
-    func settleSignIn(navigated: Bool = true) {
-        guard let sent else { return }
+    func settleSignIn(navigated: Bool = true, source: FormSource? = nil) {
+        guard let sent, source == nil || sent.source?.id == source?.id else { return }
         guard Date().timeIntervalSince(sent.at) < 45 else {
             self.sent = nil
             return
@@ -1278,13 +1284,15 @@ final class Tab: ObservableObject, Identifiable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 // Only if nothing newer went out in the meantime.
                 guard let self, self.sent?.at == stamp else { return }
-                self.settleSignIn(navigated: true)
+                self.settleSignIn(navigated: true, source: source)
             }
             return
         }
-        web.evaluateInSearch("!!(window.__officeForms && window.__officeForms.hasPassword())") { [weak self] still in
+        guard let built else { return }
+        built.evaluateJavaScript("!!(window.__officeForms && window.__officeForms.hasPassword())",
+                                 in: sent.source?.frame, in: Web.world) { [weak self] result in
             MainActor.assumeIsolated {
-                guard let self, let sent = self.sent else { return }
+                guard let self, self.sent?.id == sent.id, case .success(let still) = result else { return }
                 // The box is still there: a refused sign-in, or the second
                 // step of one. Kept for a moment longer, in case the page is
                 // still on its way.
@@ -1305,24 +1313,25 @@ final class Tab: ObservableObject, Identifiable {
     /// it is still that scheme and host: a document that changed after the
     /// last check on this side gets nothing.
     func fill(user: String, password: String, onlyOn page: URL? = nil, done: ((Bool) -> Void)? = nil) {
-        var still = ""
-        if let page {
-            guard let scheme = page.scheme?.lowercased(), let host = page.host()?.lowercased() else { done?(false); return }
-            still = "location.protocol === `\(escape(scheme)):` && location.hostname.toLowerCase() === `\(escape(host))` && "
-        }
-        web.evaluateInSearch(
-            "\(still)window.__officeForms && window.__officeForms.fill(`\(escape(user))`, `\(escape(password))`)"
-        ) { result in
-            done?((result as? Bool) ?? false)
-        }
+        fillForm("fill", values: [user, password], onlyOn: page, done: done)
     }
 
-    /// A first step's name alone, picked from the accounts under its box.
+    /// The selected field's own frame and document, never the top page's.
     func fillName(_ user: String, done: ((Bool) -> Void)? = nil) {
-        web.evaluateInSearch(
-            "window.__officeForms && window.__officeForms.name(`\(escape(user))`)"
-        ) { result in
-            done?((result as? Bool) ?? false)
+        fillForm("name", values: [user], onlyOn: formAddress, done: done)
+    }
+
+    private func fillForm(_ action: String, values: [String], onlyOn page: URL?, done: ((Bool) -> Void)?) {
+        guard let built, let page = page ?? formAddress, let scheme = page.scheme, let host = page.host() else {
+            done?(false); return
+        }
+        let origin = Browser.origin(scheme, host, page.port ?? 0)
+        let source = formSource
+        let args = values.map { "`\(escape($0))`" }.joined(separator: ", ")
+        let document = source.map { "window.__officeForms.document === `\(escape($0.document))` && " } ?? ""
+        let script = "location.origin === `\(escape(origin))` && window.__officeForms && \(document)window.__officeForms.\(action)(\(args))"
+        built.evaluateJavaScript(script, in: source?.frame, in: Web.world) { result in
+            if case .success(let worked) = result { done?((worked as? Bool) == true) } else { done?(false) }
         }
     }
 
@@ -1910,6 +1919,9 @@ final class Tab: ObservableObject, Identifiable {
     /// next time anyone asks for it.
     private func discard() {
         loadCheck &+= 1
+        formSource = nil
+        fieldFrameHost = nil
+        sent = nil
         needsExtensionReload = false
         popupGesture.clear()
         if !blockedPopups.isEmpty { blockedPopups = [] }
