@@ -191,7 +191,7 @@ extension Browser {
     func busy(_ tab: Tab) -> String? {
         if keepsAwake(tab) { return L10n.text("sleep.siteKeptAwake") }
         if tab.noisy { return L10n.text("Sleep.0978") }
-        if tab.floating || floating == tab.id { return L10n.text("Sleep.0979") }
+        if tab.floating || floating == tab.id || pictured == tab.id { return L10n.text("Sleep.0979") }
         if let web = tab.built {
             if web.cameraCaptureState != .none || web.microphoneCaptureState != .none { return L10n.text("Sleep.0980") }
             if #available(macOS 15.4, *), ExtensionCapture.screen(web) { return L10n.text("Sleep.0981") }

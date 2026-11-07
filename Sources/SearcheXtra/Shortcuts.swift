@@ -223,7 +223,7 @@ struct Command: Identifiable {
         },
         Command("tabs.previous", L10n.text("App.0149"), .tabs, KeyCombo("[", shift: true)) { $0.step(-1) },
         Command("tabs.search", L10n.text("App.0150"), .tabs, KeyCombo("k")) { browser in
-            if browser.editing, !browser.offers.isEmpty { browser.stepSummon() } else { browser.summon() }
+            browser.searchTabsKey()
         },
         // ⌥⌘N, Chrome's on the Mac: ⌃⌘S is the Mac's own Show Sidebar, and
         // sits beside ⌘S, which folds the tabs away.
@@ -270,7 +270,7 @@ struct Command: Identifiable {
         },
 
         Command("history.show", L10n.text("App.0178"), .history, KeyCombo("y")) { $0.recalling = true },
-        Command("history.downloads", L10n.text("App.0179"), .history, KeyCombo("j", shift: true)) { $0.hoarding = true },
+        Command("history.downloads", L10n.text("App.0179"), .history, KeyCombo("j", shift: true)) { $0.showDownloads() },
         Command("history.clearData", L10n.text("App.0180"), .history, KeyCombo("delete", shift: true)) { $0.clearBrowsingData() },
         Command("history.clear", L10n.text("App.0181"), .history, nil) { $0.clearHistory() },
     ] + (1...9).map { number in

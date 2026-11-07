@@ -10,6 +10,7 @@ swiftc \
   -swift-version 5 \
   "$repo_root/Sources/SearcheXtra/Address.swift" \
   "$repo_root/Sources/SearcheXtra/History.swift" \
+  "$repo_root/Sources/SearcheXtra/Fuzzy.swift" \
   "$repo_root/Tests/HistoryRegression/Stubs.swift" \
   "$repo_root/Tests/HistoryRegression/main.swift" \
   -o "$test_root/history-regression"

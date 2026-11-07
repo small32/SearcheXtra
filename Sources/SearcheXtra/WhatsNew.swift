@@ -32,11 +32,37 @@ enum WhatsNew {
     /// Every switch worth meeting, oldest last. The card shows this
     /// version's, and the older ones still off.
     static let toggles: [Toggle] = [
-        Toggle(title: L10n.text("Settings.0780"), detail: L10n.text("WhatsNew.1192"),
-               since: "1.0.5", get: { $0.splitView }, set: { $0.splitView = $1 }),
-        Toggle(title: L10n.text("Settings.0770"), detail: L10n.text("WhatsNew.1194"),
-               since: "1.0.5", get: { $0.searchesSites }, set: { $0.searchesSites = $1 }),
-        Toggle(title: L10n.text("Settings.0772"), detail: L10n.text("WhatsNew.1196"),
+        Toggle(title: "Profiles in one window", detail: "A space of another profile opens in the same window, with that profile's sign-ins, as in Arc.",
+               since: "1.0.9", get: { $0.profilesInOneWindow }, set: { $0.profilesInOneWindow = $1 }),
+
+        Toggle(title: "Close goes back", detail: "Closing the tab you're on takes you to the one you were on before it, as ⌃Tab would.",
+               since: "1.0.8", get: { $0.closeGoesBack }, set: { $0.closeGoesBack = $1 }),
+
+        Toggle(title: "Your Apple passwords", detail: "Accounts from Apple's Passwords app under the sign-in field, with a code from your Mac.",
+               since: "1.0.7", get: { $0.applePasswords }, set: { $0.applePasswords = $1 }),
+        Toggle(title: "Ask before quitting", detail: "⌘Q asks first, so a slip doesn't close every window.",
+               since: "1.0.7", get: { $0.confirmsQuit }, set: { $0.confirmsQuit = $1 }),
+        Toggle(title: "Tab numbers while ⌘ is held", detail: "See which tab ⌘1–⌘9 goes to.",
+               since: "1.0.7", get: { $0.showsTabShortcuts }, set: { $0.showsTabShortcuts = $1 }),
+        Toggle(title: "A column of icons only", detail: "The tabs as icons down the side, nothing that grows under the pointer.",
+               since: "1.0.7", get: { $0.sideIcons }, set: { $0.sideIcons = $1 }),
+        Toggle(title: "Escape twice to leave full screen", detail: "One Escape stays with the page, a second leaves full screen.",
+               since: "1.0.7", get: { $0.escapeTwice }, set: { $0.escapeTwice = $1 }),
+
+        Toggle(title: "Suggestions from your search engine", detail: "Searches suggested as you type. What you type is sent to your engine; never from a private tab.",
+               since: "1.0.6", get: { $0.engineSuggests }, set: { $0.engineSuggests = $1 }),
+        Toggle(title: "Pins keep their site", detail: "Links elsewhere open in a peek, and ⌘W takes a pin back to its page, as in Arc.",
+               since: "1.0.6", get: { $0.pinsKeepSite }, set: { $0.pinsKeepSite = $1 }),
+        Toggle(title: "Darken light pages", detail: "While Search is dark, pages with no dark look of their own are darkened.",
+               since: "1.0.6", get: { $0.darkensPages }, set: { $0.darkensPages = $1 }),
+        Toggle(title: "Roomier tabs", detail: "Taller rows and larger titles in the sidebar.",
+               since: "1.0.6", get: { $0.roomyTabs }, set: { $0.roomyTabs = $1 }),
+        Toggle(title: "New tab in a floating field", detail: "⌘T raises the address field over the page you are on, as in Arc.",
+               since: "1.0.6", get: { $0.floatingNewTab }, set: { $0.floatingNewTab = $1 }),
+
+        Toggle(title: "Pinned rows", detail: "Pins as rows with their names, under the squares, as in Arc. Right-click a tab to pin it as a row.",
+               since: "1.0.5", get: { $0.listsPins }, set: { $0.listsPins = $1 }),
+        Toggle(title: "Start with a fresh window", detail: "Your pinned tabs, tab groups and named tabs, and none of last time's others.",
                since: "1.0.5", get: { $0.startsFresh }, set: { $0.startsFresh = $1 }),
 
         Toggle(title: L10n.text("WhatsNew.1199"), detail: L10n.text("WhatsNew.1200"),
@@ -69,6 +95,11 @@ enum WhatsNew {
     ]
 
     static let releases: [Release] = [
+        Release(version: "1.0.9"),
+        Release(version: "1.0.8"),
+        Release(version: "1.0.7"),
+        Release(version: "1.0.6"),
+        Release(version: "1.0.5"),
         Release(version: "1.0.4"),
     ]
 
@@ -124,6 +155,51 @@ enum WhatsNew {
                     L10n.text("release100.language3"), L10n.text("release100.start1"),
                     L10n.text("release100.start2"), L10n.text("release100.start3")],
               better: [], fixed: []),
+        Notes(
+            version: "1.0.9", date: "4 November 2026",
+            headline: "Claude in the side panel, profiles in one window, and your fixes.",
+            new: [
+                "Profiles in one window, as in Arc, if you turn it on in Settings › Spaces & Pins.",
+                "Downloads can open floating by its button, or in the side panel.",
+                "Delete in a pin's right-click menu.",
+            ],
+            better: [
+                "Claude in Chrome's side panel is signed in when your tabs are.",
+                "Address suggestions match words anywhere in a page's title and forgive typos.",
+                "⌘R reloads the page in a peek, and a link's menu starts with Open Link in New Tab.",
+                "A video floats when you switch spaces, if automatic floating is on.",
+            ],
+            fixed: [
+                "Copy Image copies at once, where a big picture took up to a minute.",
+                "Google Docs and Sheets are sharp on macOS 26.3 and earlier.",
+                "A pin no longer stays stuck mid-drag, and a page no longer stays shifted after a swipe back.",
+                "A page that keeps crashing stops reloading itself and says so.",
+                "And many more, most from your messages and pull requests.",
+            ]
+        ),
+        Notes(
+            version: "1.0.8", date: "2 November 2026",
+            headline: "Your fixes, by the dozen, and a few small things.",
+            new: [
+                "Open Link in Split View, in a link's right-click menu.",
+                "Close Tabs Below, beside Close Other Tabs.",
+                "File › Save Page As… keeps a page as one web archive.",
+                "Closing a tab can take you back to the one you were on before, if you turn it on.",
+            ],
+            better: [
+                "Bookmarks in the address field as you type, by name or address.",
+                "Links opened behind a page go after it in the order you clicked them.",
+                "⌘W closes every tab picked in the column; a tab in a group is put away rather than closed.",
+                "Closing the last window lets its pages sleep, as Safari and Chrome do.",
+            ],
+            fixed: [
+                "Typing in a new tab no longer stops with a beep after the first letters.",
+                "The page under a peek no longer reacts to the pointer.",
+                "1Password no longer quits Search on macOS 15; Claude's and ChatGPT's side panels and Vimium C work again.",
+                "Picture in picture's button takes you back to the video, and a paused full-screen video takes clicks.",
+                "And many more, most from your messages and pull requests.",
+            ]
+        ),
         Notes(
             version: "1.0.4", date: L10n.text("WhatsNew.1217"),
             headline: L10n.text("WhatsNew.1218"),

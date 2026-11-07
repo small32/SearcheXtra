@@ -519,6 +519,13 @@ struct SettingsPanel: View {
         case "downloads.folder": Pill(L10n.text("Settings.0802")) { chooseFolder() }
         case "downloads.ask": Switch(on: $prefs.asksWhereToSave)
         case "downloads.button": Switch(on: $prefs.alwaysShowsDownloads)
+        case "downloads.open":
+            Picker("Open Downloads", selection: $prefs.downloadsOpening) {
+                ForEach(DownloadsOpening.allCases) { Text($0.title).tag($0) }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
         default: EmptyView()
         }
     }
@@ -677,6 +684,7 @@ struct SettingsPanel: View {
                 .opacity(arcHere ? 1 : 0.4)
         case "spaces": Switch(on: $prefs.usesSpaces)
         case "profiles": Pill(L10n.text("profiles.newAction")) { ProfileMenu.askNew() }
+        case "profiles.oneWindow": Switch(on: $prefs.profilesInOneWindow)
         case "pins.keep": Switch(on: $prefs.pinsKeepSite)
         case "pins.list": Switch(on: $prefs.listsPins)
         case "commandbar": Switch(on: $prefs.commandBar)

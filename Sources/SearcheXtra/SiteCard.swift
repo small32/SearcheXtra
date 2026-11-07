@@ -237,6 +237,7 @@ struct SiteCard: View {
             Separator()
             Row(L10n.text("App.0121"), keys: "⌘P") { after { printPage() } }
             zoom
+            blocker
             sound
             grounded
             darken
@@ -276,6 +277,18 @@ struct SiteCard: View {
     @ViewBuilder private var darken: some View {
         if browser.canDusk(tab) {
             Darken(on: Binding(get: { tab.dusked }, set: { if ownsTab { browser.dusk($0, tab) } }))
+        }
+    }
+
+    /// Whether the blocker works on this site (see Shield.pause), a switch
+    /// like the sound's. Only with the blocker on and nothing wrong with it,
+    /// and not in a private tab, which remembers nothing. The page reloads,
+    /// as the blocker is decided for a page as it starts (#861).
+    @ViewBuilder private var blocker: some View {
+        if !tab.shy, browser.prefs.shielded, Shield.shared.trouble == nil,
+           let url = tab.pageAddress, ["http", "https"].contains(url.scheme?.lowercased()),
+           let host = browser.curtain.host(of: url) {
+            Blocker(host: host) { tab.reload() }
         }
     }
 
@@ -374,6 +387,38 @@ struct SiteCard: View {
             .padding(.trailing, MenuMetrics.trailing)
             .frame(height: MenuMetrics.row)
             .onChange(of: on) { _, value in Autoplay.set(value, for: host) }
+        }
+    }
+
+    /// Its line: on is the blocker at work here.
+    private struct Blocker: View {
+        let host: String
+        let reload: () -> Void
+        @State private var on: Bool
+
+        init(host: String, reload: @escaping () -> Void) {
+            self.host = host
+            self.reload = reload
+            _on = State(initialValue: !Shield.shared.isPaused(on: host))
+        }
+
+        var body: some View {
+            HStack(spacing: 0) {
+                Text("Block Ads and Trackers")
+                    .font(MenuMetrics.font)
+                    .foregroundStyle(Color(nsColor: .labelColor))
+                    .fixedSize()
+                Spacer(minLength: 24)
+                Switch(on: $on)
+            }
+            .padding(.leading, MenuMetrics.text)
+            .padding(.trailing, MenuMetrics.trailing)
+            .frame(height: MenuMetrics.row)
+            .help("Turn off here if the site breaks; the page reloads")
+            .onChange(of: on) { _, value in
+                Shield.shared.pause(host, !value)
+                reload()
+            }
         }
     }
 
