@@ -11,6 +11,7 @@ Reported as: ⌘K over a page, an address typed, Return: the page ⌘K was
 pressed over was replaced, where ⌘T's field, which looks the same, opens a
 new tab. ⌘T, then ⌘K, did the same.
 """
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -21,6 +22,14 @@ import split_view as sv  # noqa: E402
 sv.use("switcher-address")
 KEYS = {"t": 17, "k": 40}
 HOST = sv.BASE.replace("http://", "")
+
+
+def setup(**prefs):
+    sv.setup(**prefs)
+    # The empty switcher's note is compared with its English wording. Pin the
+    # interface language so that check means the same on a Chinese Mac, as
+    # close_picked.py does.
+    subprocess.run(["defaults", "write", sv.SUITE, "interface.language", "-string", "en"], check=True)
 
 
 def press(key):
@@ -50,7 +59,7 @@ def front():
 def main():
     t = sv.T()
     try:
-        sv.setup(**{"newtab.floating": True})
+        setup(**{"newtab.floating": True})
         sv.launch()
         a, b = sv.page("alpha"), sv.page("bravo")
 

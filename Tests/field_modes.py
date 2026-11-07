@@ -10,6 +10,7 @@ Reported as: ⌘T, ⌘K and a blank tab all showed "Enter a web address", though
 Return opens a new tab after ⌘T, a page already open after ⌘K and this tab
 after ⌘L. ⌘K only ever finds open tabs.
 """
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -19,6 +20,14 @@ import split_view as sv  # noqa: E402
 
 sv.use("field-modes")
 KEYS = {"t": 17, "l": 37, "k": 40}
+
+
+def setup(**prefs):
+    sv.setup(**prefs)
+    # The probe compares the field's placeholder and VoiceOver name with their
+    # English wording. Pin the interface language so those checks mean the
+    # same thing on a Mac set to Chinese, as close_picked.py does.
+    subprocess.run(["defaults", "write", sv.SUITE, "interface.language", "-string", "en"], check=True)
 
 
 def press(key):
@@ -39,7 +48,7 @@ def look():
 def main():
     t = sv.T()
     try:
-        sv.setup(**{"newtab.floating": True})
+        setup(**{"newtab.floating": True})
         sv.launch()
         blank = next(x["id"] for x in sv.cmd({"do": "tabs"})["tabs"] if not x.get("url"))
         sv.sp("select", id=blank); time.sleep(0.6)

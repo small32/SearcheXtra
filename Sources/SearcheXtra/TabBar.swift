@@ -1501,7 +1501,7 @@ struct TabMenu: View {
             Button(L10n.text("TabBar.1101")) { browser.unpin(tab) }
             // Away for good in one go, where Unpin, finding the row and its
             // × took three (#834); ⇧⌘T brings it back as a tab.
-            Button("Delete") {
+            Button(L10n.text("site.delete")) {
                 browser.unpin(tab)
                 browser.close(tab)
             }

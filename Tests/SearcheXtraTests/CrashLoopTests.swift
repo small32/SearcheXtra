@@ -41,7 +41,9 @@ final class CrashLoopTests: XCTestCase {
 
         kill(tab.web)
         try await until("the third death in a minute is left to say so") { tab.failure != nil }
-        XCTAssertEqual(tab.failure, "This page kept crashing.")
+        // The notice over the page follows the interface language, so compare
+        // with the same key Tab uses instead of one hard-coded tongue.
+        XCTAssertEqual(tab.failure, L10n.text("upstream.merge109.thisPageKeptCrashing"))
         // Past loadAndVerify's own second look: nothing loads it behind the message.
         try await Task.sleep(nanoseconds: 2_000_000_000)
         let revived = await alive(tab.web)

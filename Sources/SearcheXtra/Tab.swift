@@ -3243,8 +3243,8 @@ enum PageEnd: Int {
     /// Over the page, once it has stopped being made again.
     var message: String {
         switch self {
-        case .memory: return "This page kept running out of memory."
-        default: return "This page kept crashing."
+        case .memory: return L10n.text("upstream.merge109.thisPageKeptRunningOut")
+        default: return L10n.text("upstream.merge109.thisPageKeptCrashing")
         }
     }
 }

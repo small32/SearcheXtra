@@ -271,14 +271,14 @@ struct DownloadsPanel: View {
     private var small: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Text("Downloads")
+                Text(L10n.text("Recall.0660"))
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(Palette.ink)
                 Spacer(minLength: 0)
-                Door(icon: "folder", help: "Open the Downloads Folder") {
+                Door(icon: "folder", help: L10n.text("upstream.merge109.openTheDownloadsFolder")) {
                     NSWorkspace.shared.open(browser.downloadsFolder)
                 }
-                if let close { Door(icon: "xmark", help: "Close", act: close) }
+                if let close { Door(icon: "xmark", help: L10n.text("site.close"), act: close) }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -290,7 +290,7 @@ struct DownloadsPanel: View {
                 Rectangle().fill(Palette.hairline).frame(height: 1)
                 HStack {
                     Spacer()
-                    Pill("Clear list") { loot.forgetAll() }
+                    Pill(L10n.text("Recall.0666")) { loot.forgetAll() }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -300,7 +300,7 @@ struct DownloadsPanel: View {
     }
 
     private var plate: some View {
-        Plate("Downloads", width: 560, close: close ?? { browser.hoarding = false }) {
+        Plate(L10n.text("Recall.0660"), width: 560, close: close ?? { browser.hoarding = false }) {
             list
         } foot: {
             HStack {
@@ -319,13 +319,13 @@ struct DownloadsPanel: View {
     @ViewBuilder
     private var list: some View {
         if fetches.entries.isEmpty && loot.kept.isEmpty {
-            Card { Nothing("Nothing downloaded yet.") }
+            Card { Nothing(L10n.text("Recall.0661")) }
         } else {
             ScrollView(showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if !fetches.entries.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Caption("Current downloads")
+                            Caption(L10n.text("Recall.0662"))
                             Card {
                                 ForEach(Array(fetches.entries.enumerated()), id: \.element.id) { index, entry in
                                     if index > 0 { Rule() }
@@ -343,7 +343,7 @@ struct DownloadsPanel: View {
 
                     if !loot.kept.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Caption("Completed")
+                            Caption(L10n.text("Recall.0663"))
                             Card {
                                 ForEach(Array(loot.kept.enumerated()), id: \.element.id) { index, keep in
                                     if index > 0 { Rule() }
@@ -535,7 +535,7 @@ struct DownloadsPanel: View {
         let address: String
 
         var body: some View {
-            Button("Copy Address") {
+            Button(L10n.text("TabBar.1115")) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(address, forType: .string)
             }

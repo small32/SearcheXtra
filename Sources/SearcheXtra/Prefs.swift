@@ -79,9 +79,9 @@ enum DownloadsOpening: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .tab: return "In a tab"
-        case .popover: return "Floating by the button"
-        case .panel: return "In the side panel"
+        case .tab: return L10n.text("upstream.merge109.inATab")
+        case .popover: return L10n.text("upstream.merge109.floatingByTheButton")
+        case .panel: return L10n.text("upstream.merge109.inTheSidePanel")
         }
     }
 }

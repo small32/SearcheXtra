@@ -404,7 +404,7 @@ struct SiteCard: View {
 
         var body: some View {
             HStack(spacing: 0) {
-                Text("Block Ads and Trackers")
+                Text(L10n.text("upstream.merge109.blockAdsAndTrackers"))
                     .font(MenuMetrics.font)
                     .foregroundStyle(Color(nsColor: .labelColor))
                     .fixedSize()
@@ -414,7 +414,7 @@ struct SiteCard: View {
             .padding(.leading, MenuMetrics.text)
             .padding(.trailing, MenuMetrics.trailing)
             .frame(height: MenuMetrics.row)
-            .help("Turn off here if the site breaks; the page reloads")
+            .help(L10n.text("upstream.settings.5766873776"))
             .onChange(of: on) { _, value in
                 Shield.shared.pause(host, !value)
                 reload()

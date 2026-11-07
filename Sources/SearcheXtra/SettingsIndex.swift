@@ -132,8 +132,8 @@ enum SettingsIndex {
               title: L10n.text("Settings.0804"), detail: L10n.text("upstream.settings.6b0a8835e7"),
               keys: ["downloads.button"]),
         .init(id: "downloads.open", group: "downloads", icon: "tray.and.arrow.down",
-              title: "Open Downloads", detail: "From its button, ⇧⌘J and History › Downloads",
-              more: "In a tab, as the side panel's card floating by the downloads button, or in the side panel beside the page.",
+              title: L10n.text("upstream.merge109.openDownloads"), detail: L10n.text("upstream.merge109.fromItsButtonJAnd"),
+              more: L10n.text("upstream.merge109.inATabAsThe"),
               keys: ["downloads.open"], words: ["downloads window", "popover", "side panel"]),
 
         // Appearance
@@ -302,8 +302,8 @@ enum SettingsIndex {
               more: L10n.text("upstream.settings.3906b51121"),
               words: ["profile", "accounts", "work", "personal"]),
         .init(id: "profiles.oneWindow", group: "spaces", icon: "macwindow",
-              title: "Profiles in one window", detail: "Every profile's spaces in one window, switched in place",
-              more: "Choosing a space of another profile brings that profile's window into this one's place, so each keeps its own sign-ins. Closing it closes them all.",
+              title: L10n.text("upstream.merge109.profilesInOneWindow"), detail: L10n.text("upstream.merge109.everyProfileSSpacesIn"),
+              more: L10n.text("upstream.merge109.choosingASpaceOfAnother"),
               keys: ["profiles.oneWindow"], words: ["arc", "profiles", "single window", "merge"], parent: "profiles"),
         .init(id: "pins.keep", group: "pins", icon: "pin.circle",
               title: L10n.text("upstream.settings.a6d370950b"), detail: L10n.text("upstream.settings.3a34d1db9a"),
@@ -488,7 +488,7 @@ enum SettingsIndex {
         case "pages.dusk": return L10n.text("upstream.settings.18b9a07d81")
         case "toolbar.left": return L10n.text("upstream.settings.e89364ed5e")
         case "sidebar.roomy": return L10n.text("upstream.88017ad.61579a8b34")
-        case "profiles.oneWindow": return "Only with more than one profile"
+        case "profiles.oneWindow": return L10n.text("upstream.merge109.onlyWithMoreThanOne")
         default: return L10n.text("upstream.settings.f2d1566f46")
         }
     }

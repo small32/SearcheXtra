@@ -479,10 +479,10 @@ struct AddressField: NSViewRepresentable {
     private static func placeholderWords(for browser: Browser) -> String {
         if let site = browser.siteChip { return "Search \(site.name)" }
         switch browser.fieldMode {
-        case .blank: return "Enter a web address"
-        case .newTab: return "New tab: enter a web address"
-        case .thisTab: return "This tab: enter a web address"
-        case .switcher: return "Switch to an open tab"
+        case .blank: return L10n.text("Omnibox.0602")
+        case .newTab: return L10n.text("upstream.merge109.newTabEnterAWeb")
+        case .thisTab: return L10n.text("upstream.merge109.thisTabEnterAWeb")
+        case .switcher: return L10n.text("upstream.merge109.switchToAnOpenTab")
         }
     }
 
@@ -490,10 +490,10 @@ struct AddressField: NSViewRepresentable {
     /// after the placeholder has gone.
     private static func accessibilityName(for browser: Browser) -> String {
         switch browser.fieldMode {
-        case .blank: return "Address"
-        case .newTab: return "Address, new tab"
-        case .thisTab: return "Address, this tab"
-        case .switcher: return "Switch to an open tab"
+        case .blank: return L10n.text("upstream.merge109.address")
+        case .newTab: return L10n.text("upstream.merge109.addressNewTab")
+        case .thisTab: return L10n.text("upstream.merge109.addressThisTab")
+        case .switcher: return L10n.text("upstream.merge109.switchToAnOpenTab")
         }
     }
 

@@ -6240,8 +6240,8 @@ final class Browser: NSObject, ObservableObject {
         let isAddress = Address.file(from: words) ?? Address.url(from: words) != nil
         let here = active?.isBlank ?? true
         let title = isAddress
-            ? (here ? "Open in this tab" : "Open in a new tab")
-            : (here ? "Search in this tab" : "Search in a new tab")
+            ? (here ? L10n.text("upstream.merge109.openInThisTab") : L10n.text("upstream.merge109.openInANewTab"))
+            : (here ? L10n.text("upstream.merge109.searchInThisTab") : L10n.text("upstream.merge109.searchInANewTab"))
         return Suggestion(key: words, title: title, url: url, kind: isAddress ? .known : .search)
     }
 
@@ -6249,7 +6249,7 @@ final class Browser: NSObject, ObservableObject {
     /// switcher reads as an answer rather than as one still working.
     var switcherNote: String? {
         guard summoning, offers.isEmpty else { return nil }
-        return typed.trimmingCharacters(in: .whitespaces).isEmpty ? "No other tabs open" : "No open tab matches"
+        return typed.trimmingCharacters(in: .whitespaces).isEmpty ? L10n.text("upstream.merge109.noOtherTabsOpen") : L10n.text("upstream.merge109.noOpenTabMatches")
     }
 
     /// What is open, most recently looked at first, filtered by what has been
