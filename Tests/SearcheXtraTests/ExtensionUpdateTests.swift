@@ -34,8 +34,8 @@ final class ExtensionUpdateTests: XCTestCase {
             (view as? NSButton).map { [$0] } ?? view.subviews.flatMap { buttons(in: $0) }
         }
         let controls = buttons(in: try XCTUnwrap(sheet.contentView))
-        let cancel = try XCTUnwrap(controls.first { $0.title == L10n.text("Extensions.0447") })
-        let confirm = try XCTUnwrap(controls.first { $0.title == L10n.text("Extensions.0446") })
+        let cancel = try XCTUnwrap(controls.first { $0.title == "Cancel" })
+        let confirm = try XCTUnwrap(controls.first { $0.title == "Add Extension" })
         XCTAssertTrue(sheet.defaultButtonCell === cancel.cell, "Return must cancel the update")
         XCTAssertEqual(confirm.keyEquivalent, "")
         cancel.performClick(nil)
@@ -74,4 +74,74 @@ final class ExtensionUpdateTests: XCTestCase {
         XCTAssertTrue(timer.isValid)
     }
 
+    func testPendingUpdateIsNotStartedTwiceAndFailureAllowsRetry() async {
+        _ = NSApplication.shared
+        let extensions = Extensions.shared
+        let item = Installed(id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", name: "Synthetic update",
+                             version: "1", enabled: false, fromStore: true, permissions: [])
+        let started = expectation(description: "First update requested")
+        let response = UpdateResponse()
+        URLProtocol.registerClass(UpdateProtocol.self)
+        // The update is fetched through Proxy.swift's session now, so that it
+        // can go through a proxy; a session made from a configuration sees
+        // only the classes that configuration names, not the registered ones.
+        ProxyNetwork.testProtocols = [UpdateProtocol.self]
+        UpdateProtocol.response = response
+        defer {
+            URLProtocol.unregisterClass(UpdateProtocol.self)
+            ProxyNetwork.testProtocols = []
+            UpdateProtocol.response = nil
+        }
+        response.started = started
+        let first = Task { await extensions.update(item) }
+        await fulfillment(of: [started], timeout: 5)
+        await extensions.update(item)
+        XCTAssertEqual(response.count, 1, "A pending request must not be duplicated")
+        response.fail()
+        await first.value
+
+        let retried = expectation(description: "Failed update can be retried")
+        response.started = retried
+        let retry = Task { await extensions.update(item) }
+        await fulfillment(of: [retried], timeout: 5)
+        XCTAssertEqual(response.count, 2)
+        await retry.value
+    }
+}
+
+private final class UpdateResponse {
+    private let lock = NSLock()
+    private var requests: [URLProtocol] = []
+    private var nextStart: XCTestExpectation?
+    var started: XCTestExpectation? {
+        get { lock.withLock { nextStart } }
+        set { lock.withLock { nextStart = newValue } }
+    }
+    var count: Int { lock.withLock { requests.count } }
+    func receive(_ request: URLProtocol) {
+        let (count, signal) = lock.withLock {
+            requests.append(request)
+            let signal = nextStart
+            nextStart = nil
+            return (requests.count, signal)
+        }
+        if count > 1 {
+            request.client?.urlProtocol(request, didFailWithError: URLError(.notConnectedToInternet))
+        }
+        signal?.fulfill()
+    }
+    func fail() {
+        let request = lock.withLock { requests.first }
+        if let request { request.client?.urlProtocol(request, didFailWithError: URLError(.notConnectedToInternet)) }
+    }
+}
+
+private final class UpdateProtocol: URLProtocol {
+    static var response: UpdateResponse?
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host == "clients2.google.com"
+    }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { Self.response?.receive(self) }
+    override func stopLoading() {}
 }

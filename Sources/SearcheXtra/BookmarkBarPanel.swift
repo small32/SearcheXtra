@@ -106,7 +106,7 @@ enum BookmarkBarPanel {
 
     private struct List: View {
         let browser: Browser
-        @ObservedObject var bookmarks: Bookmarks
+        let bookmarks: Bookmarks
         @ObservedObject private var prefs = Shared.prefs
         let folderID: Bookmark.ID
         let depth: Int

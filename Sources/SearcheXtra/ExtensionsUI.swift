@@ -49,7 +49,7 @@ struct ExtensionsPage: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
                             .background(Palette.wash, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                            if extensions.busy != nil {
+                            if !extensions.busy.isEmpty {
                                 Ring(size: 12)
                             } else {
                                 Pill(L10n.text("ExtensionsUI.0483"), filled: true, action: add)
@@ -124,10 +124,10 @@ struct StoreOffer: View {
                     Image(systemName: "puzzlepiece.extension")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Palette.muted)
-                    Text(extensions.busy == id ? L10n.text("ExtensionsUI.0509") : L10n.text("ExtensionsUI.0510"))
+                    Text(extensions.busy.contains(id) ? L10n.text("store.adding") : L10n.text("upstream.merge112.addThisExtensionToSearch"))
                         .font(.system(size: 12.5))
                         .foregroundStyle(Palette.ink)
-                    if extensions.busy == id {
+                    if extensions.busy.contains(id) {
                         Ring(size: 10)
                     } else {
                         Button(L10n.text("ExtensionsUI.0511")) { extensions.install(from: id) }

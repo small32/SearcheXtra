@@ -212,6 +212,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <string>Websites you visit can ask for your location. SearcheXtra asks you each time a site does, unless you choose Always allow for it; Settings › Privacy forgets those choices.</string>
   <key>NSDownloadsFolderUsageDescription</key>
   <string>Files you download are saved to your Downloads folder.</string>
+  <!-- Only once you turn on Settings > Passwords > Fill in your contact
+       details: your own card, never anyone else's (MeCard.swift). -->
+  <key>NSContactsUsageDescription</key>
+  <string>SearcheXtra fills in forms with the details on your own card in Contacts, once you pick them under a box. It reads no one else's card and saves no copy of yours.</string>
 </dict>
 </plist>
 PLIST
@@ -224,6 +228,7 @@ cat > "$APP/Contents/Resources/en.lproj/InfoPlist.strings" <<'STRINGS'
 "NSLocationUsageDescription" = "Websites you visit can ask for your location. SearcheXtra asks each time unless you allow the site; Settings > Privacy forgets your choices.";
 "NSLocationWhenInUseUsageDescription" = "Websites you visit can ask for your location. SearcheXtra asks each time unless you allow the site; Settings > Privacy forgets your choices.";
 "NSDownloadsFolderUsageDescription" = "Files you download are saved to your Downloads folder.";
+"NSContactsUsageDescription" = "SearcheXtra fills in forms with the details on your own card in Contacts, once you pick them under a box. It reads no one else's card and saves no copy of yours.";
 STRINGS
 cat > "$APP/Contents/Resources/zh-Hans.lproj/InfoPlist.strings" <<'STRINGS'
 "NSCameraUsageDescription" = "访问的网站可能请求使用摄像头。SearcheXtra 会单独询问各网站的权限，可在设置的隐私页面清除选择。";
@@ -231,6 +236,7 @@ cat > "$APP/Contents/Resources/zh-Hans.lproj/InfoPlist.strings" <<'STRINGS'
 "NSLocationUsageDescription" = "访问的网站可能请求你的位置。除非已允许该网站，SearcheXtra 会每次询问，可在设置的隐私页面清除选择。";
 "NSLocationWhenInUseUsageDescription" = "访问的网站可能请求你的位置。除非已允许该网站，SearcheXtra 会每次询问，可在设置的隐私页面清除选择。";
 "NSDownloadsFolderUsageDescription" = "下载的文件将保存到下载文件夹。";
+"NSContactsUsageDescription" = "启用“设置＞密码＞填写联系人信息”后，SearcheXtra 会使用通讯录中你本人的名片填写表单。不会读取他人的名片，也不会保存副本。";
 STRINGS
 
 # Signing. A Developer ID certificate, when there is one, with the hardened

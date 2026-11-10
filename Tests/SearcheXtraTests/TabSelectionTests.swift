@@ -4,54 +4,14 @@ import XCTest
 
 @MainActor
 final class TabSelectionTests: XCTestCase {
-    private var browsers: [Browser] = []
-    private var previousSession: Session.Shape?
-    private var previousPreferences: (split: Bool, spaces: Bool, groups: Bool)?
-    private var activationPolicy: NSApplication.ActivationPolicy?
-
     override class func setUp() {
         setenv("SEARCH_PROBE", "tab-selection-\(getpid())", 1)
         super.setUp()
     }
 
-    override func setUp() async throws {
-        try await super.setUp()
-        guard Store.testing else { throw XCTSkip("Run browser model tests with SEARCH_PROBE=interface-tests") }
-        _ = NSApplication.shared
-        activationPolicy = NSApp.activationPolicy()
-        NSApp.setActivationPolicy(.prohibited)
-        previousSession = Session.read(space: Space.firstID)
-        Session.write(now: true, space: Space.firstID, .init(tabs: [], active: 0))
-        let prefs = Shared.prefs
-        previousPreferences = (prefs.splitView, prefs.usesSpaces, prefs.usesTabGroups)
-        prefs.splitView = false
-        prefs.usesSpaces = false
-        prefs.usesTabGroups = false
-    }
-
-    override func tearDown() async throws {
-        for browser in browsers { browser.closeAll() }
-        // Session callbacks hold weak owners. Release them before restoring
-        // the saved row and preferences, so this test cannot write it again.
-        browsers.removeAll()
-        Disk.drain()
-        if let previousSession {
-            Session.write(now: true, space: Space.firstID, previousSession)
-        }
-        previousSession = nil
-        if let previousPreferences {
-            let prefs = Shared.prefs
-            prefs.splitView = previousPreferences.split
-            prefs.usesSpaces = previousPreferences.spaces
-            prefs.usesTabGroups = previousPreferences.groups
-        }
-        previousPreferences = nil
-        if let activationPolicy { NSApp.setActivationPolicy(activationPolicy) }
-        activationPolicy = nil
-        try await super.tearDown()
-    }
-
     func testCommandTogglesAndShiftSelectsVisibleRange() {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
         let browser = makeBrowser()
         let tabs = browser.shownTabs
         XCTAssertEqual(tabs.count, 4)
@@ -72,6 +32,8 @@ final class TabSelectionTests: XCTestCase {
     }
 
     func testBothSplitHalvesCanBeSelectedAndRangesIncludeBoth() {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
         let browser = makeBrowser()
         let tabs = browser.shownTabs
         browser.prefs.splitView = true
@@ -87,6 +49,42 @@ final class TabSelectionTests: XCTestCase {
         XCTAssertEqual(browser.selectedTabIDs, Set(tabs.map(\.id)))
         XCTAssertEqual(browser.visibleSelectedTabCount, 4)
         XCTAssertEqual(browser.selectedTabLinks.count, 4)
+    }
+
+    func testDraggingAPickedTabCarriesThePickedTabsTogether() {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        let browser = makeBrowser()
+        let tabs = browser.shownTabs
+        // ⌘-click starts with the tab on screen picked; four goes back out.
+        browser.extendTabSelection(to: tabs[0], modifiers: .command)
+        browser.extendTabSelection(to: tabs[3], modifiers: .command)
+        browser.extendTabSelection(to: tabs[2], modifiers: .command)
+        XCTAssertEqual(browser.selectedTabIDs, Set([tabs[0].id, tabs[2].id]))
+        XCTAssertTrue(browser.isPickedAmongOthers(tabs[0]))
+        XCTAssertFalse(browser.isPickedAmongOthers(tabs[1]))
+
+        browser.moveDisplayedTab(tabs[0], to: 3)
+        XCTAssertEqual(browser.shownTabs.map(\.title), ["two", "four", "one", "three"])
+        XCTAssertEqual(browser.selectedTabIDs, Set([tabs[0].id, tabs[2].id]))
+
+        // Dropped on one of its own, the block lands beside the nearest tab
+        // that stays put.
+        browser.moveDisplayedTab(tabs[2], to: 0)
+        XCTAssertEqual(browser.shownTabs.map(\.title), ["one", "three", "two", "four"])
+    }
+
+    func testDraggingAnUnpickedTabCarriesItAlone() {
+        _ = NSApplication.shared
+        NSApp.setActivationPolicy(.prohibited)
+        let browser = makeBrowser()
+        let tabs = browser.shownTabs
+        browser.extendTabSelection(to: tabs[1], modifiers: .command)
+        browser.extendTabSelection(to: tabs[2], modifiers: .command)
+        XCTAssertEqual(browser.selectedTabIDs, Set([tabs[1].id, tabs[2].id, tabs[3].id]))
+
+        browser.moveDisplayedTab(tabs[0], to: 2)
+        XCTAssertEqual(browser.shownTabs.map(\.title), ["two", "three", "one", "four"])
     }
 
     func testCloseFrontClosesSelectionAndReopensAsOneBatch() {
@@ -105,11 +103,23 @@ final class TabSelectionTests: XCTestCase {
         XCTAssertEqual(browser.shownTabs.compactMap { $0.address?.absoluteString }, original)
     }
 
+
+
     private func makeBrowser() -> Browser {
-        let browser = Browser(record: WindowRecord(), opensStartPage: false)
-        browsers.append(browser)
+        let browser = Browser(record: WindowRecord())
+        // One session serves every suite in the process, so a Browser opens
+        // with whatever tabs the last test left (see CloseTabsBelowTests).
+        browser.closeAll()
+        let prefs = browser.prefs
+        let saved = (prefs.usesTabGroups, prefs.splitView)
+        addTeardownBlock { @MainActor in
+            browser.closeAll()
+            prefs.usesTabGroups = saved.0
+            prefs.splitView = saved.1
+        }
+        prefs.usesTabGroups = false
         for word in ["one", "two", "three", "four"] {
-            if browser.tabs.last?.isBlank == false { browser.newTab() }
+            if browser.tabs.last?.isBlank != true { browser.newTab() }
             browser.tabs.last?.restore(url: URL(string: "https://\(word).example/")!, title: word)
         }
         return browser

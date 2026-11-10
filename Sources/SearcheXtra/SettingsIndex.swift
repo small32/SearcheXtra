@@ -87,6 +87,7 @@ enum SettingsIndex {
 
         .init(id: "passwords", page: .passwords, title: L10n.text("Settings.0784"), icon: "key"),
         .init(id: "apple", page: .passwords, title: L10n.text("applePasswords.name"), icon: "lock.rectangle.stack"),
+        .init(id: "forms", page: .passwords, title: L10n.text("upstream.merge112.fillingInForms"), icon: "character.cursor.ibeam"),
 
         .init(id: "blocking", page: .privacy, title: L10n.text("upstream.settings.d785c0d4b3"), icon: "shield"),
         .init(id: "permissions", page: .privacy, title: L10n.text("upstream.settings.dc5f2eb465"), icon: "checkmark.shield"),
@@ -153,6 +154,11 @@ enum SettingsIndex {
         .init(id: "sidebar.hides", group: "window", icon: "sidebar.squares.left",
               title: L10n.text("upstream.settings.b0954cf556"), detail: L10n.text("upstream.settings.2da0207a22"),
               keys: ["sidebar.hides"], words: ["auto hide", "sidebar"], parent: "tabs.layout"),
+        .init(id: "sidebar.foldIcons", group: "window", icon: "arrow.down.right.and.arrow.up.left",
+              title: L10n.text("upstream.merge112.sMakesTheColumnIconsOnly"), detail: L10n.text("upstream.merge112.theTabsStayInSightAs"),
+              more: L10n.text("upstream.merge112.offSHidesTheColumnAnd"),
+              keys: ["sidebar.foldIcons"], words: ["collapse", "collapsed", "compact", "narrow", "hide sidebar", "icons only", "favicons"],
+              parent: "tabs.layout"),
         .init(id: "layout.cards", group: "window", icon: "rectangle.inset.filled",
               title: L10n.text("sync.settings.cards"), detail: L10n.text("upstream.settings.0ad654940b"),
               more: L10n.text("upstream.settings.23eecbed74"),
@@ -163,6 +169,10 @@ enum SettingsIndex {
         .init(id: "sidebar.roomy", group: "tablook", icon: "textformat.size.larger",
               title: L10n.text("sync.settings.roomy"), detail: L10n.text("upstream.settings.7daa104ab5"),
               keys: ["sidebar.roomy"], words: ["bigger", "larger", "text size", "accessibility"], parent: "tabs.layout"),
+        .init(id: "sidebar.player", group: "tablook", icon: "play.circle",
+              title: L10n.text("upstream.merge112.whatSPlayingInOtherTabs"), detail: L10n.text("upstream.merge112.atTheFootOfTheSidebar"),
+              more: L10n.text("upstream.merge112.aTabPlayingSoundWhileYou"),
+              keys: ["sidebar.player"], words: ["media", "music", "now playing", "pause", "player", "sound", "audio"], parent: "tabs.layout"),
         .init(id: "glyph", group: "tablook", icon: "app",
               title: L10n.text("Settings.0760"), detail: L10n.text("Settings.0761"),
               keys: ["glyph"], words: ["favicon", "icons", "letters"]),
@@ -176,7 +186,7 @@ enum SettingsIndex {
               title: L10n.text("Settings.0762"), detail: L10n.text("upstream.settings.c487bf83e0"),
               keys: ["bookmarks.bar"], words: ["favorites bar"]),
         .init(id: "motion.light", group: "motion", icon: "leaf",
-              title: L10n.text("upstream.settings.323cb0f56b"), detail: L10n.text("upstream.settings.989186de64"),
+              title: L10n.text("upstream.merge112.savePowerInLowPowerMode"), detail: L10n.text("upstream.merge112.simplerMotionWhileSavingPowerOr"),
               more: L10n.text("upstream.settings.e22db26a6e"),
               keys: [Motion.lightKey], words: ["battery", "animations", "motion"]),
 
@@ -208,8 +218,12 @@ enum SettingsIndex {
               keys: ["newtab.floating"], words: ["new tab", "floating", "address"]),
         .init(id: "tabs.newPlace", group: "newtabs", icon: "arrow.right.to.line",
               title: L10n.text("sync.settings.newPlace"), detail: L10n.text("upstream.settings.7614d2c22d"),
-              more: L10n.text("sync.settings.newPlace.detail"),
+              more: "After current puts a link you ⌘-click right after its page; ⌘T's new tab and a page a link opens in front go at the end. Pins stay first; a link from a group stays in it.",
               keys: ["tabs.newPlace"], words: ["new tab", "order"]),
+        .init(id: "tabs.frontBeside", group: "newtabs", icon: "arrow.turn.down.right",
+              title: L10n.text("upstream.merge112.linksOpenedInFrontGoBeside"), detail: L10n.text("upstream.merge112.aLinkThatOpensANew"),
+              more: "In the order you click them, as ⌘-clicks do, while you go back and forth between the page and the tabs it opened. Going to any other tab starts again right after the page.",
+              keys: ["tabs.frontBeside"], words: ["target blank", "new tab", "order", "next to", "opener", "link"], parent: "tabs.newPlace"),
         .init(id: "tabs.newAfterLast", group: "newtabs", icon: "plus.rectangle.on.rectangle",
               title: L10n.text("sync.settings.afterLast"), detail: L10n.text("upstream.settings.cb5248336a"),
               keys: ["tabs.newAfterLast"], words: ["last tab"]),
@@ -245,6 +259,10 @@ enum SettingsIndex {
         .init(id: "search.engine", group: "search", icon: "magnifyingglass",
               title: L10n.text("Settings.0711"), detail: L10n.text("Settings.0749"),
               keys: ["search.engine", "search.custom"], words: ["google", "duckduckgo", "engine", "kagi", "bing"]),
+        .init(id: "search.shift", group: "search", icon: "shift",
+              title: L10n.text("upstream.merge112.shiftReturnSearchesWith"), detail: L10n.text("upstream.merge112.offShiftReturnDoesWhatReturn"),
+              more: L10n.text("upstream.merge112.aSecondEngineOneKeyAway"),
+              keys: ["search.shift", "search.shiftCustom"], words: ["shift enter", "second engine", "alternate", "google", "perplexity"]),
         .init(id: "search.suggest", group: "search", icon: "text.magnifyingglass",
               title: L10n.text("suggestions.title"), detail: L10n.text("upstream.settings.1516448a33"),
               more: L10n.text("upstream.settings.e03f7e7b86"),
@@ -255,6 +273,9 @@ enum SettingsIndex {
         .init(id: "links.little", group: "links", icon: "rectangle.on.rectangle",
               title: L10n.text("Settings.0724"), detail: L10n.text("Settings.0725"),
               keys: ["links.little"], words: ["little arc", "mini window"]),
+        .init(id: "links.little.tabs", group: "links", icon: "arrow.right.square",
+              title: L10n.text("upstream.merge112.goToATabThatHas"), detail: L10n.text("upstream.merge112.aLinkToAPageAlready"),
+              keys: ["links.little.tabs"], words: ["switch to tab", "already open", "duplicate"], parent: "links.little"),
         .init(id: "reader.twins", group: "reading", icon: "doc.text",
               title: L10n.text("upstream.settings.c57ac240ab"), detail: L10n.text("upstream.settings.107729ebd1"),
               more: L10n.text("upstream.88017ad.f654ec5618"),
@@ -277,6 +298,12 @@ enum SettingsIndex {
         .init(id: "fullscreen.escapeTwice", group: "video", icon: "escape",
               title: L10n.text("upstream.settings.e5c02af6e8"), detail: L10n.text("upstream.settings.bd656c0164"),
               keys: ["fullscreen.escapeTwice"], words: ["escape", "full screen"]),
+        .init(id: "fullscreen.keepsWindow", group: "video", icon: "macwindow",
+              title: L10n.text("upstream.merge112.keepTheWindowInUseDuring"), detail: L10n.text("upstream.merge112.itsTabsStayInReachOn"),
+              keys: ["fullscreen.keepsWindow"], words: ["full screen", "desktop", "space", "video"]),
+        .init(id: "translate.target", group: "pages", icon: "translate",
+              title: L10n.text("upstream.merge112.translationLanguage"), detail: L10n.text("upstream.merge112.pagesAreTranslatedOnThisMac"),
+              keys: ["translate.target"], words: ["translate", "language"]),
         .init(id: "pageZoom", group: "pages", icon: "plus.magnifyingglass",
               title: L10n.text("Settings.0718"), detail: L10n.text("upstream.settings.d0f97cfeef"),
               keys: ["pageZoom"], words: ["zoom", "size", "scale"]),
@@ -305,6 +332,12 @@ enum SettingsIndex {
               title: L10n.text("upstream.merge109.profilesInOneWindow"), detail: L10n.text("upstream.merge109.everyProfileSSpacesIn"),
               more: L10n.text("upstream.merge109.choosingASpaceOfAnother"),
               keys: ["profiles.oneWindow"], words: ["arc", "profiles", "single window", "merge"], parent: "profiles"),
+        .init(id: "spaces.links", group: "spaces", icon: "arrow.triangle.branch",
+              title: L10n.text("upstream.merge112.sendLinksToASpace"), detail: L10n.text("upstream.merge112.linksToSitesYouChooseOpen"),
+              more: "Links from other apps, and links a page in another space opens in a new tab. A site includes its subdomains. Typed addresses, links followed in their own tab and private tabs stay where they are. Right-click a tab to send its site to the space it is in.",
+              keys: [SpaceRoutes.key, SpaceRoutes.rulesKey],
+              words: ["arc", "air traffic control", "route", "routing", "rules", "domain", "site", "open in space", "default space", "links from other apps"],
+              parent: "spaces"),
         .init(id: "pins.keep", group: "pins", icon: "pin.circle",
               title: L10n.text("upstream.settings.a6d370950b"), detail: L10n.text("upstream.settings.3a34d1db9a"),
               more: L10n.text("upstream.settings.da76021d36"),
@@ -313,6 +346,14 @@ enum SettingsIndex {
               title: L10n.text("Settings.0778"), detail: L10n.text("upstream.settings.5635856487"),
               more: L10n.text("upstream.settings.177a9fcabd"),
               keys: ["pins.list"], words: ["arc", "pinned"], parent: "tabs.layout"),
+        .init(id: "newtab.floating", group: "opening", icon: "rectangle.and.text.magnifyingglass",
+              title: L10n.text("upstream.address.floatingNewTab"), detail: L10n.text("upstream.merge112.tRaisesTheAddressFieldOver"),
+              more: L10n.text("upstream.merge112.returnOpensWhatYouTypedIn"),
+              keys: ["newtab.floating"], words: ["command bar", "cmd t", "spotlight"]),
+        .init(id: "newtab.recent", group: "opening", icon: "clock.arrow.circlepath",
+              title: L10n.text("upstream.merge112.recentPlacesInTheNewTab"), detail: L10n.text("upstream.merge112.beforeYouTypeTSField"),
+              more: L10n.text("upstream.merge112.fromHistoryOnThisMacLeaving"),
+              keys: ["newtab.recent"], words: ["recent", "history", "suggestions", "cmd t", "last visited"], parent: "newtab.floating"),
         .init(id: "commandbar", group: "opening", icon: "chevron.right.square",
               title: L10n.text("Settings.0726"), detail: L10n.text("upstream.settings.9f78ee0aea"),
               keys: ["commandbar"], words: ["commands", "command palette"]),
@@ -333,9 +374,13 @@ enum SettingsIndex {
               title: L10n.text("Settings.0790"), detail: L10n.text("Settings.0793"),
               keys: ["passkeys"], words: ["webauthn", "touch id"]),
         .init(id: "passwords.apple", group: "apple", icon: "applelogo",
-              title: L10n.text("applePasswords.settingTitle"), detail: L10n.text("upstream.settings.aa8f556dce"),
-              more: L10n.text("upstream.settings.a43ca65dfb"),
+              title: L10n.text("applePasswords.settingTitle"), detail: L10n.text("upstream.merge112.yourPasswordsAppSAccountsAnd"),
+              more: L10n.text("upstream.merge112.searchTalksToTheHelperApple"),
               keys: ["passwords.apple"], words: ["icloud keychain", "apple"]),
+        .init(id: "contacts.fill", group: "forms", icon: "person.crop.rectangle",
+              title: L10n.text("upstream.merge112.fillInYourContactDetails"), detail: L10n.text("upstream.merge112.yourCardInContactsUnderName"),
+              more: L10n.text("upstream.merge112.aClickFillsTheRestOf"),
+              keys: ["contacts.fill"], words: ["autofill", "address", "email", "phone", "name", "contacts", "me card"]),
 
         // Privacy
         .init(id: "shield", group: "blocking", icon: "shield.lefthalf.filled",
@@ -400,8 +445,8 @@ enum SettingsIndex {
               title: L10n.text("Settings.0720"), detail: L10n.text("upstream.settings.87a65dc611"),
               keys: ["autocorrect"], words: ["autocorrect", "spelling", "spell"], findOnly: true),
         .init(id: "note.split", group: "window", icon: "rectangle.split.2x1",
-              title: L10n.text("Settings.0780"), detail: L10n.text("upstream.settings.a1c6e4d0fe"),
-              keys: ["splitView"], words: ["split", "side by side"]),
+              title: L10n.text("Settings.0780"), detail: L10n.text("upstream.merge112.alwaysThereClickATabDrag"),
+              keys: ["splitView"], words: ["split", "side by side"], kind: .note, findOnly: true),
         .init(id: "note.groups", group: "newtabs", icon: "folder",
               title: L10n.text("Settings.0776"), detail: L10n.text("upstream.settings.b8c8482afc"),
               keys: ["tabs.groups"], words: ["groups", "folders"]),
@@ -474,10 +519,15 @@ enum SettingsIndex {
     @MainActor static func applies(_ item: SettingsItem, _ prefs: Preferences) -> Bool {
         switch item.id {
         case "pages.dusk": return prefs.look != .light
-        case "sidebar.roomy": return prefs.sidebar && !prefs.sideIcons
+        case "sidebar.roomy", "sidebar.player": return prefs.sidebar && !prefs.sideIcons
         case "sidebar.hides", "layout.cards", "pins.list": return prefs.sidebar
+        case "sidebar.foldIcons": return prefs.sidebar && !prefs.sideHides
         case "toolbar.left": return !prefs.sidebar
         case "profiles.oneWindow": return Profiles.shared.several
+        case "spaces.links": return prefs.usesSpaces
+        case "tabs.frontBeside": return prefs.newTabPlace == .next
+        case "newtab.recent": return prefs.floatingNewTab
+        case "links.little.tabs": return prefs.littleLinks
         default: return true
         }
     }
@@ -485,10 +535,16 @@ enum SettingsIndex {
     /// What a dimmed dependent row says instead of its own line.
     static func needs(_ item: SettingsItem) -> String {
         switch item.id {
-        case "pages.dusk": return L10n.text("upstream.settings.18b9a07d81")
+        case "pages.dusk": return L10n.text("upstream.merge112.onlyWhileSearchIsnTSet")
         case "toolbar.left": return L10n.text("upstream.settings.e89364ed5e")
         case "sidebar.roomy": return L10n.text("upstream.88017ad.61579a8b34")
+        case "sidebar.foldIcons": return L10n.text("upstream.merge112.onlyWithTheColumnDownA")
         case "profiles.oneWindow": return L10n.text("upstream.merge109.onlyWithMoreThanOne")
+        case "spaces.links": return L10n.text("upstream.merge112.onlyWithSpacesOn")
+        case "sidebar.player": return L10n.text("upstream.merge112.onlyWithTitlesInTheSidebar")
+        case "tabs.frontBeside": return L10n.text("upstream.merge112.onlyWithNewTabPositionOn")
+        case "newtab.recent": return L10n.text("upstream.merge112.onlyWithTheNewTabIn")
+        case "links.little.tabs": return L10n.text("upstream.merge112.onlyWithLinksFromOtherApps")
         default: return L10n.text("upstream.settings.f2d1566f46")
         }
     }

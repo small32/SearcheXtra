@@ -179,6 +179,8 @@ struct SiteCard: View {
 
     /// One step in: the connection, said in full.
     @State private var deeper: Bool
+    @State private var showingPermissions = false
+    @ObservedObject private var notifications = SiteNotifications.shared
     /// Whether this Mac trusts the site's certificate. Unknown until it has
     /// been asked, off the main thread: asking can go to the network.
     @State private var section = 0
@@ -194,8 +196,8 @@ struct SiteCard: View {
 
     var body: some View {
         Group {
-            if section != 0 {
-                SiteDetails(browser: browser, tab: tab, cookiesPage: section == 1) { section = 0 }
+            if showingPermissions {
+                permissions
             } else if deeper, let safety {
                 security(safety)
             } else {
@@ -238,6 +240,9 @@ struct SiteCard: View {
             Row(L10n.text("App.0121"), keys: "⌘P") { after { printPage() } }
             zoom
             blocker
+            if let url = tab.pageAddress, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                Row(L10n.text("upstream.merge112.sitePermissions"), submenu: true) { showingPermissions = true }
+            }
             sound
             grounded
             darken
@@ -256,6 +261,52 @@ struct SiteCard: View {
                 .padding(.trailing, MenuMetrics.trailing)
                 .frame(height: MenuMetrics.row)
                 .help(tab.shy ? L10n.text("site.keepAwakePrivateHelp") : L10n.text("site.keepAwakeHelp"))
+            }
+        }
+    }
+
+    @ViewBuilder private var permissions: some View {
+        if let url = tab.pageAddress, let scheme = url.scheme, let host = url.host() {
+            let origin = Browser.origin(scheme, host, url.port ?? 0)
+            VStack(alignment: .leading, spacing: 0) {
+                Header(title: origin)
+                if tab.shy {
+                    Text(L10n.text("upstream.merge112.permissionsArenTSavedInA"))
+                        .font(.system(size: 11)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                        .padding(.horizontal, MenuMetrics.text).padding(.vertical, 8)
+                } else {
+                    ForEach([CaptureChoices.Kind.camera, .microphone, .location, .notifications]) { kind in
+                        HStack {
+                            Text(kind.title).font(MenuMetrics.font)
+                            Spacer(minLength: 24)
+                            Menu {
+                                Button(L10n.text("site.ask")) { browser.setSitePermission(nil, kind: kind, origin: origin) }
+                                Button(L10n.text("site.allow")) { browser.setSitePermission(true, kind: kind, origin: origin) }
+                                    .disabled(kind == .notifications && !prefs.siteNotifications)
+                                Button(L10n.text("upstream.merge112.refuse")) { browser.setSitePermission(false, kind: kind, origin: origin) }
+                            } label: {
+                                Text(CaptureChoices.choice(kind, origin: origin).title)
+                                    .font(MenuMetrics.font)
+                            }
+                            .accessibilityLabel("\(kind.title): \(CaptureChoices.choice(kind, origin: origin).title)")
+                            .menuStyle(.borderlessButton).fixedSize()
+                        }.padding(.horizontal, MenuMetrics.text).frame(height: MenuMetrics.row)
+                    }
+                    if !prefs.siteNotifications {
+                        Text(L10n.text("upstream.merge112.notificationsAreOffInSettingsPrivacy"))
+                            .font(.system(size: 11)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                            .frame(width: 230, alignment: .leading)
+                            .padding(.horizontal, MenuMetrics.text).padding(.vertical, 6)
+                    }
+                    if [CaptureChoices.Kind.camera, .microphone, .location, .notifications].contains(where: { CaptureChoices.choice($0, origin: origin) == .different }) {
+                        Text(L10n.text("upstream.merge112.savedTwoWaysForThisSite"))
+                            .font(.system(size: 11)).foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                            .frame(width: 230, alignment: .leading)
+                            .padding(.horizontal, MenuMetrics.text).padding(.vertical, 6)
+                    }
+                }
+                Separator()
+                Row("Back") { showingPermissions = false }
             }
         }
     }

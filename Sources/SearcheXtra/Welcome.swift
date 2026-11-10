@@ -197,7 +197,7 @@ struct WelcomePanel: View {
                 Key("⌘K", L10n.text("Welcome.1173"))
                 Key("⌘,", L10n.text("upstream.merge.c989f1ce3e"))
                 Key("⌃1", L10n.text("upstream.merge.9eaab3f001"))
-                Key("⌥⌘N", L10n.text("upstream.merge.9be6679138"))
+                Key("⌥⌘N", "Split a page in two, ⌥-click a tab to put it beside the page, or drag a tab onto a page; ⌃⌘← and ⌃⌘→ go from one page to the other, and ⌥⌘N again puts them apart.")
                 Key("⌘O", "Links from other apps can open in a small window. Settings › Browsing.")
                 Key("⌘L", L10n.text("upstream.merge.61cf7aea5e"))
                 Key("⌘", L10n.text("upstream.merge.63ccb19a4d"))

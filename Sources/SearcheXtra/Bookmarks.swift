@@ -47,10 +47,41 @@ struct Bookmark: Codable, Identifiable, Hashable {
     }
 }
 
-@MainActor
-final class Bookmarks: ObservableObject {
+/// Observable: only what reads the list hears it change, the Bookmarks
+/// menu's first item included (Tests/bookmark_menu_title.py), not every row.
+@MainActor @Observable
+final class Bookmarks {
+    private(set) var roots: [Bookmark] = [] {
+        didSet {
+            revision &+= 1
+            kept = preparedKept ?? Set(Bookmarks.urls(roots).map(\.absoluteString))
+            preparedKept = nil
+            sites = nil
+        }
+    }
+    // Kept for the list's own work, read by no view.
+    @ObservationIgnored private var revision = 0
+    @ObservationIgnored private var preparedKept: Set<String>?
+
+    /// Every address kept, for `contains` — asked on every redraw of the
+    /// button, which fills in on a page that is kept.
+    private var kept: Set<String> = []
+
+    /// Its file: bookmarks.json for Personal, one of its own for each other
+    /// profile (see Profiles.swift).
+    private let fileName: String
+    /// Its profile deleted: nothing more is written.
+    private var retired = false
+
+    /// The pasteboard carries the whole node, folders and all, so Cut, Copy
+    /// and Paste in the bookmarks bar's context menu keep their children.
+    /// SearcheXtra owns its own pasteboard type: a node copied in upstream
+    /// Search must never paste here as if it were our own. Upstream's
+    /// @Observable rewrite dropped these three commands, but the local
+    /// bookmarks bar (BookmarksBar.swift) still offers them, so they stay.
     private static let clipboardType = NSPasteboard.PasteboardType("SearcheXtra.Bookmarks")
-    private var cutBookmark: (id: Bookmark.ID, data: Data)?
+    @ObservationIgnored private var cutBookmark: (id: Bookmark.ID, data: Data)?
+
     var canPaste: Bool { NSPasteboard.general.data(forType: Self.clipboardType) != nil }
 
     func copy(_ node: Bookmark, cut: Bool = false) {
@@ -60,7 +91,6 @@ final class Bookmarks: ObservableObject {
         board.setData(data, forType: Self.clipboardType)
         if let url = node.url { board.setString(url, forType: .string) }
         cutBookmark = cut ? (node.id, data) : nil
-        objectWillChange.send()
     }
 
     func paste(into parent: Bookmark.ID?) {
@@ -79,26 +109,6 @@ final class Bookmarks: ObservableObject {
             insert(renew(node), into: parent)
         }
     }
-    @Published private(set) var roots: [Bookmark] = [] {
-        didSet {
-            revision &+= 1
-            kept = preparedKept ?? Set(Bookmarks.urls(roots).map(\.absoluteString))
-            preparedKept = nil
-            sites = nil
-        }
-    }
-    private var revision = 0
-    private var preparedKept: Set<String>?
-
-    /// Every address kept, for `contains` — asked on every redraw of the
-    /// button, which fills in on a page that is kept.
-    private var kept: Set<String> = []
-
-    /// Its file: bookmarks.json for Personal, one of its own for each other
-    /// profile (see Profiles.swift).
-    private let fileName: String
-    /// Its profile deleted: nothing more is written.
-    private var retired = false
 
     init(file: String = "bookmarks.json") {
         fileName = file
@@ -173,17 +183,18 @@ final class Bookmarks: ObservableObject {
     /// and kept: the field asks on every key, and walking a tree of a few
     /// thousand imported bookmarks to lowercase each again was work thrown
     /// away each time.
-    private var sites: [Site]?
+    @ObservationIgnored private var sites: [Site]?
 
     /// The sites for what is typed in the address field, the best `limit`
     /// first: every word, in any order, in the name or the address, allowing
     /// a typo. Kept to
     /// two letters and more: one letter is in nearly every name, and the
     /// field finishes a single letter only towards a site you have been to.
-    func places(for typed: String, limit: Int) -> [Suggestion] {
+    /// Those found only through a typo come apart, in `slips`.
+    func places(for typed: String, limit: Int) -> (found: [Suggestion], slips: [Suggestion]) {
         let needle = typed.trimmingCharacters(in: .whitespaces).lowercased()
         let words = needle.split(whereSeparator: \.isWhitespace).map(String.init)
-        guard needle.count >= 2, let first = words.first else { return [] }
+        guard needle.count >= 2, let first = words.first else { return ([], []) }
         let bare = History.stripped(needle)
         if sites == nil {
             sites = Bookmarks.sites(roots)
@@ -206,9 +217,10 @@ final class Bookmarks: ObservableObject {
             best.insert((site, score), at: at)
             if best.count > limit { best.removeLast() }
         }
-        return best.map { found in
+        func suggestion(_ found: (site: Site, score: Int)) -> Suggestion {
             Suggestion(key: Address.editable(found.site.url), title: found.site.name, url: found.site.url, kind: .bookmark)
         }
+        return (best.filter { $0.score > 0 }.map(suggestion), best.filter { $0.score == 0 }.map(suggestion))
     }
 
     private static func sites(_ nodes: [Bookmark]) -> [Site] {
@@ -811,8 +823,7 @@ final class Bookmarks: ObservableObject {
 /// for a right-click too. Used both in the small dropdown off the button and
 /// in the full manager — the interaction is the same size either way.
 struct BookmarkOutline: View {
-    @ObservedObject var bookmarks: Bookmarks
-    var browser: Browser? = nil
+    let bookmarks: Bookmarks
     /// The folders open, kept by whoever shows the outline, so the manager
     /// can open the way down to one it was asked to show.
     @Binding var expanded: Set<Bookmark.ID>
@@ -1062,7 +1073,7 @@ struct BookmarkOutline: View {
 
     private struct Row: View {
         @ObservedObject private var prefs = Shared.prefs
-        @ObservedObject var bookmarks: Bookmarks
+        let bookmarks: Bookmarks
         let node: Bookmark
         let depth: Int
         let arrows: Bool
@@ -1198,7 +1209,7 @@ struct BookmarkDoor: View {
     /// kept, so the button fills and empties with either.
     private struct Kept: View {
         let browser: Browser
-        @ObservedObject var bookmarks: Bookmarks
+        let bookmarks: Bookmarks
         @ObservedObject var tab: Tab
 
         var body: some View {
@@ -1212,7 +1223,7 @@ struct BookmarkDoor: View {
 /// is made, so Done, Return, Escape and a click elsewhere all only close it.
 struct BookmarkCard: View {
     @ObservedObject var browser: Browser
-    @ObservedObject var bookmarks: Bookmarks
+    let bookmarks: Bookmarks
     let id: Bookmark.ID
 
     @State private var title = ""
@@ -1337,7 +1348,7 @@ struct BookmarkCard: View {
 /// The button's dropdown: the tree, and the two things that aren't in it.
 struct BookmarksDropdown: View {
     @ObservedObject var browser: Browser
-    @ObservedObject var bookmarks: Bookmarks
+    let bookmarks: Bookmarks
 
     @State private var expanded: Set<Bookmark.ID>
 
@@ -1448,7 +1459,7 @@ struct BookmarksDropdown: View {
 /// The full list, for putting it in order, finding one, or bringing more in.
 struct BookmarksPanel: View {
     @ObservedObject var browser: Browser
-    @ObservedObject var bookmarks: Bookmarks
+    let bookmarks: Bookmarks
 
     @State private var expanded: Set<Bookmark.ID> = []
     @State private var query = ""
@@ -1608,7 +1619,7 @@ struct BookmarksPanel: View {
     private struct Found: View {
         @ObservedObject private var prefs = Shared.prefs
         let browser: Browser
-        @ObservedObject var bookmarks: Bookmarks
+        let bookmarks: Bookmarks
         let node: Bookmark
         let path: [String]
         /// Nil for a folder, which is shown in the tree instead.
@@ -1699,6 +1710,8 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
     }
     /// The items put in here, among SwiftUI's own.
     fileprivate static let mark = 0x5EAC
+    /// A folder's Open All, and the line above it.
+    private static let foot = 0x5EAD
 
     func start(for browser: Browser) {
         guard self.browser == nil else { return }
@@ -1809,7 +1822,8 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
             menu.addItem(empty)
         }
         for item in made { menu.addItem(item) }
-        menu.popUp(positioning: menu.items.first, at: NSEvent.mouseLocation, in: nil)
+        addOpenAll(to: menu, folder.children ?? [])
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
     private func items(for nodes: [Bookmark], barBrowser: Browser? = nil) -> [NSMenuItem] {
@@ -1888,7 +1902,7 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
             items.flatMap { item -> [(depth: Int, item: NSMenuItem)] in
                 guard let sub = item.submenu else { return [(depth, item)] }
                 menuNeedsUpdate(sub)
-                return [(depth, item)] + down(sub.items, depth + 1)
+                return [(depth, item)] + down(sub.items.filter { $0.tag != Self.foot }, depth + 1)
             }
         }
         return down(items(for: folder.children ?? []), 0)
@@ -1905,6 +1919,22 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
             menu.addItem(empty)
         }
         for item in made { menu.addItem(item) }
+        addOpenAll(to: menu, kids)
+    }
+
+    /// At the foot of a folder, as in Safari: its bookmarks, not those of
+    /// the folders in it, each in a tab of its own.
+    private func addOpenAll(to menu: NSMenu, _ kids: [Bookmark]) {
+        let urls = kids.compactMap { $0.isFolder ? nil : $0.url.flatMap(URL.init(string:)) }
+        guard urls.count > 1 else { return }
+        let line = NSMenuItem.separator()
+        line.tag = Self.foot
+        menu.addItem(line)
+        let item = NSMenuItem(title: L10n.text("upstream.merge112.openAllInNewTabs"), action: #selector(openAll(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = urls
+        item.tag = Self.foot
+        menu.addItem(item)
     }
 
     @objc private func open(_ item: NSMenuItem) {
@@ -1914,6 +1944,11 @@ final class BookmarkMenu: NSObject, NSMenuDelegate {
         } else {
             shown?.openBookmark(destination.url)
         }
+    }
+
+    @objc private func openAll(_ item: NSMenuItem) {
+        guard let urls = item.representedObject as? [URL], let browser = shown else { return }
+        for url in urls { browser.open(url, foreground: false, atEnd: true, from: browser.active, mayWait: true) }
     }
 
     /// SwiftUI's delegate, with the bookmarks put in after its update.

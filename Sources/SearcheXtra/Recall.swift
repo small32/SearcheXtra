@@ -381,9 +381,9 @@ struct DownloadsPanel: View {
         private var stateLabel: String {
             switch entry.state {
             case .downloading: return L10n.text("Recall.0667")
-            case .pausing: return L10n.text("Recall.0668")
+            case .pausing: return entry.stopping
             case .paused: return L10n.text("Recall.0669")
-            case .resuming: return L10n.text("Recall.0670")
+            case .resuming: return L10n.text("Recall.0681")
             case .failed: return L10n.text("Recall.0671")
             }
         }
@@ -455,7 +455,7 @@ struct DownloadsPanel: View {
                 }
             case .pausing:
                 HStack(spacing: 4) {
-                    Quick(L10n.text("Recall.0675"), act: {})
+                    Quick(entry.stopping, act: {})
                         .disabled(true)
                     Quick(L10n.text("Recall.0676"), act: cancel)
                 }

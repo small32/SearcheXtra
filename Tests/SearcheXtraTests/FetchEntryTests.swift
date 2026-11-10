@@ -37,6 +37,28 @@ final class FetchEntryTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(entry.errorDescription) == L10n.text("Fetching.0513"))
     }
 
+    func testACancelInFlightRedrawsTheRow() {
+        let entry = FetchEntry(name: "archive.zip", request: nil, webView: nil)
+        _ = entry.preparingToStop(.pause)
+        XCTAssertEqual(entry.stopping, L10n.text("Recall.0675"))
+        var redraws = 0
+        let watching = entry.objectWillChange.sink { redraws += 1 }
+
+        // What upgradeStopToCancel does when Cancel is pressed mid-pause.
+        entry.pendingStop = .cancel
+
+        XCTAssertEqual(redraws, 1)
+        XCTAssertEqual(entry.stopping, L10n.text("App.0211"))
+        watching.cancel()
+    }
+
+    func testCancelSaysCancellingWhileItStops() {
+        let entry = FetchEntry(name: "archive.zip", request: nil, webView: nil)
+        _ = entry.preparingToStop(.cancel)
+        XCTAssertEqual(entry.state, .pausing)
+        XCTAssertEqual(entry.stopping, L10n.text("App.0211"))
+    }
+
     func testBeginResumeRejectsDuplicateActionWhileWebKitStarts() async throws {
         let webView = makeWebView()
         let entry = FetchEntry(name: "archive.zip", request: nil, webView: webView)

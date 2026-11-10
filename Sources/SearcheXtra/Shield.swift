@@ -59,13 +59,22 @@ final class Shield: ObservableObject {
     /// doing this at the navigation is what makes "off for this site" true
     /// for the whole page rather than for the second half of it.
     func tune(_ controller: WKUserContentController, for host: String?) {
-        guard let list else {
-            if let index = waiting.firstIndex(where: { $0.controller === controller }) { waiting[index].host = host }
-            else { waiting.append((controller, host)) }
-            return
-        }
+        guard list != nil else { return }
+        set(controller, on: enabled && !isPaused(on: host))
+    }
+
+    /// Whether each page's controller has the list, as it was last given or
+    /// taken: one heading to another page with Shield on, as before, is left
+    /// as it is, rather than the list taken out and put back — sent to the
+    /// page's process both ways — on every link followed.
+    private let holding = NSMapTable<WKUserContentController, NSNumber>.weakToStrongObjects()
+
+    private func set(_ controller: WKUserContentController, on: Bool, again: Bool = false) {
+        guard let list else { return }
+        if !again, holding.object(forKey: controller)?.boolValue == on { return }
         controller.remove(list)
-        if enabled, !isPaused(on: host) { controller.add(list) }
+        if on { controller.add(list) }
+        holding.setObject(NSNumber(value: on), forKey: controller)
     }
 
     /// Third parties whose only job is to watch or to sell. First-party
@@ -168,22 +177,24 @@ final class Shield: ObservableObject {
                 }
                 self.list = compiled
                 // Tabs that opened while this was still compiling get it now.
-                self.waiting.forEach { self.tune($0.controller, for: $0.host) }
+                if self.enabled { self.waiting.forEach { self.set($0, on: true, again: true) } }
                 self.waiting = []
             }
         }
     }
 
     /// Every tab asks for it; whoever asks before it is ready is remembered.
-    func protect(_ controller: WKUserContentController, for host: String? = nil) {
-        tune(controller, for: host)
+    func protect(_ controller: WKUserContentController) {
+        if list != nil {
+            if enabled { set(controller, on: true, again: true) }
+        } else {
+            waiting.append(controller)
+        }
     }
 
     /// Switched on or off for every page that is already open.
-    func apply(to tabs: [Tab]) {
-        for tab in tabs {
-            guard let built = tab.built else { continue }
-            tune(built.configuration.userContentController, for: tab.address?.host ?? built.url?.host)
-        }
+    func apply(to controllers: [WKUserContentController]) {
+        guard list != nil else { return }
+        for controller in controllers { set(controller, on: enabled, again: true) }
     }
 }

@@ -22,6 +22,9 @@ enum WhatsNew {
         let since: String
         let get: @MainActor (Preferences) -> Bool
         let set: @MainActor (Preferences, Bool) -> Void
+        /// Whether it can do anything now: a switch that needs another one
+        /// on stays off the card until it is.
+        var shown: @MainActor (Preferences) -> Bool = { _ in true }
     }
 
     /// A version that has a card.
@@ -32,6 +35,10 @@ enum WhatsNew {
     /// Every switch worth meeting, oldest last. The card shows this
     /// version's, and the older ones still off.
     static let toggles: [Toggle] = [
+        Toggle(title: L10n.text("upstream.merge112.sendLinksToASpace"), detail: L10n.text("upstream.merge112.linksToTheSitesYouChoose"),
+               since: "1.0.11", get: { $0.sendsLinksToSpaces }, set: { $0.sendsLinksToSpaces = $1 },
+               shown: { $0.usesSpaces }),
+
         Toggle(title: L10n.text("upstream.merge109.profilesInOneWindow"), detail: L10n.text("upstream.merge109.aSpaceOfAnotherProfile"),
                since: "1.0.9", get: { $0.profilesInOneWindow }, set: { $0.profilesInOneWindow = $1 }),
 
@@ -95,6 +102,9 @@ enum WhatsNew {
     ]
 
     static let releases: [Release] = [
+        Release(version: "1.0.12"),
+        Release(version: "1.0.11"),
+        Release(version: "1.0.10"),
         Release(version: "1.0.9"),
         Release(version: "1.0.8"),
         Release(version: "1.0.7"),
@@ -156,7 +166,77 @@ enum WhatsNew {
                     L10n.text("release100.start2"), L10n.text("release100.start3")],
               better: [], fixed: []),
         Notes(
-            version: "1.0.9", date: L10n.text("upstream.merge109.d4November2026"),
+            version: "1.0.12", date: "9 November 2026",
+            headline: L10n.text("upstream.merge112.yourContactDetailsInFormsA"),
+            new: [
+                L10n.text("upstream.merge112.yourCardInContactsUnderA"),
+                L10n.text("upstream.merge112.openAllInNewTabsAt"),
+            ],
+            better: [
+                L10n.text("upstream.merge112.aTabCarriedOffItsRow"),
+                L10n.text("upstream.merge112.pagesWithManyFramesLoadQuicker"),
+            ],
+            fixed: [
+                L10n.text("upstream.merge112.aTabAcrossTheTopThat"),
+            ]
+        ),
+        Notes(
+            version: "1.0.11", date: "9 November 2026",
+            headline: L10n.text("upstream.merge112.sendLinksToASpaceA"),
+            new: [
+                L10n.text("upstream.merge112.sendLinksToASpaceAs"),
+                L10n.text("upstream.merge112.anHttpOrSocks5ProxyFor"),
+                L10n.text("upstream.merge112.bringThingsOverCanBringThe"),
+                "⌥-click a tab to put it beside the page in Split View.",
+                L10n.text("upstream.merge112.replaceAPinSPageWith"),
+            ],
+            better: [
+                L10n.text("upstream.merge112.typingInTheAddressFieldAnd"),
+                L10n.text("upstream.merge112.yourSiteShortcutsAreOfferedAs"),
+                L10n.text("upstream.merge112.theTabColumnHasNoScroll"),
+                L10n.text("upstream.merge112.showHowFarYouVeRead"),
+                L10n.text("upstream.merge112.passkeysAndSavedPasswordsAreHandled"),
+            ],
+            fixed: [
+                L10n.text("upstream.merge112.clickOpeningALinkInThe"),
+                L10n.text("upstream.merge112.theFloatingVideoFlickeringAsIt"),
+                L10n.text("upstream.merge112.closingAWindowRightAfterUsing"),
+                L10n.text("upstream.merge112.andMoreFromYourMessagesAnd"),
+            ]
+        ),
+        Notes(
+            version: "1.0.10", date: "8 November 2026",
+            headline: L10n.text("upstream.merge112.sitePermissionsInTheSiteCard2"),
+            new: [
+                L10n.text("upstream.merge112.sitePermissionsInTheSiteCard"),
+                L10n.text("upstream.merge112.codesFromAppleSPasswordsApp"),
+                L10n.text("upstream.merge112.chooseTheLanguagePagesAreTranslated"),
+                L10n.text("upstream.merge112.shiftReturnSearchesWithASecond"),
+                L10n.text("upstream.merge112.copyAddressInADownloadS"),
+                L10n.text("upstream.merge112.withASitePutInThe"),
+            ],
+            better: [
+                L10n.text("upstream.merge112.theAddressFieldSaysWhereReturn"),
+                "⇧⌘T brings a tab back with its Back and Forward, and brings back Settings, History and the other pages of Search.",
+                L10n.text("upstream.merge112.turningTheBlockerOffForOne"),
+                L10n.text("upstream.merge112.withTabsShowLettersATab"),
+                L10n.text("upstream.merge112.sSlidesTheColumnAtOnce"),
+                L10n.text("upstream.merge112.draggingOneOfSeveralSelectedTabs"),
+                L10n.text("upstream.merge112.aSpaceSDownloadsFolderIs"),
+            ],
+            fixed: [
+                "Claude in Chrome's actions, which all failed with \"No tabs to group\".",
+                L10n.text("upstream.merge112.discordSigningYouOutWhenReloaded"),
+                L10n.text("upstream.merge112.aVideoOnATvOr"),
+                L10n.text("upstream.merge112.aTabCarriedPastAnotherOr"),
+                L10n.text("upstream.merge112.aClosedTabSVideoOr"),
+                "uBlock Origin Lite leaving GitLab and similar pages half-drawn.",
+                L10n.text("upstream.merge112.aWakingTabShownZoomedIn"),
+                L10n.text("upstream.merge109.andManyMoreMostFrom"),
+            ]
+        ),
+        Notes(
+            version: "1.0.9", date: "4 November 2026",
             headline: L10n.text("upstream.merge109.claudeInTheSidePanel"),
             new: [
                 L10n.text("upstream.merge109.profilesInOneWindowAs"),
@@ -313,7 +393,7 @@ struct WhatsNewCard: View {
     /// list rather than vanishing under the hand.
     @State private var earlier: [WhatsNew.Toggle]?
 
-    private var fresh: [WhatsNew.Toggle] { WhatsNew.toggles.filter { $0.since == release.version } }
+    private var fresh: [WhatsNew.Toggle] { WhatsNew.toggles.filter { $0.since == release.version && $0.shown(prefs) } }
 
     var body: some View {
         Plate(L10n.text("WhatsNew.1278", String(describing: release.version)), width: 460, close: close) {
@@ -343,7 +423,7 @@ struct WhatsNewCard: View {
         }
         .onAppear {
             if earlier == nil {
-                earlier = WhatsNew.toggles.filter { WhatsNew.older($0.since, than: release.version) && !$0.get(prefs) }
+                earlier = WhatsNew.toggles.filter { WhatsNew.older($0.since, than: release.version) && !$0.get(prefs) && $0.shown(prefs) }
             }
         }
     }

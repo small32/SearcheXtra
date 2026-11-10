@@ -27,6 +27,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import split_view as sv  # noqa: E402
 
 sv.use("bld-tr")
+
+def setup(**prefs):
+    # The probe compares the page menu with its English wording ("Show
+    # Original"). Pin the interface language, as close_picked.py does,
+    # so that check means the same on a Mac set to Chinese.
+    sv.setup(**prefs)
+    subprocess.run(["defaults", "write", sv.SUITE, "interface.language", "-string", "en"], check=True)
+
+
 PORT = sv.srv.server_port
 SITE = f"http://127.0.0.1:{PORT}"
 OTHER = f"http://localhost:{PORT}"
@@ -183,7 +192,7 @@ def main():
     try:
         # 1: always there since 24 Oct 2026, an old "off" on disk included:
         # the menu offers it, and nothing is translated until it's chosen.
-        sv.setup(**{"translate.pages": False})
+        setup(**{"translate.pages": False})
         launch()
         page = visit("/plain")
         st = tr(page, "state")
@@ -350,6 +359,25 @@ def main():
         time.sleep(0.5)
         found = subprocess.run(["grep", "-rlE", "Zanzibarique|confidentiel", sv.SUPPORT], capture_output=True, text=True).stdout.strip()
         t.ok("nothing of the private page, translated or not, in the world's files", found == "", found)
+
+        # 11: a target chosen independently of the system language is used
+        # by the menu, manual translation and automatic translation alike.
+        setup()
+        subprocess.run(["defaults", "write", sv.SUITE, "translate.target", "-string", "ja"], check=True)
+        launch()
+        page = visit("/plain")
+        t.ok("the menu names the chosen language", menu(page) == "Translate Page to Japanese", menu(page))
+        st = tr(page, "toggle")
+        t.ok("manual translation uses the chosen language", st["mark"].get("to") == "ja" and text(page, "#p1").startswith("[fr→ja] "), st)
+        tr(page, "always", "fr")
+        other = visit("/dynamic")
+        time.sleep(1)
+        t.ok("automatic translation uses the chosen language", (text(other, "#p1") or "").startswith("[fr→ja] "), text(other, "#p1"))
+        sv.quit()
+        launch()
+        page = visit("/plain")
+        time.sleep(1)
+        t.ok("the choice and automatic translation survive restart", tr(page, "state")["mark"].get("to") == "ja", tr(page, "state"))
     finally:
         t.done()
         sv.finish()

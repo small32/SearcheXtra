@@ -175,13 +175,10 @@ final class Updater: ObservableObject {
             }
             guard let self else { return }
             checking = false
-            let checked = Date()
-            lastChecked = checked
-            Store.settings.set(checked, forKey: lastKey)
-            guard (Updater.overridden ? found.build > currentBuild : (try? ExtensionVersion.isNewer(found.version, than: currentVersion)) == true), found.runsHere else {
-                // A build already swapped in stays ready whatever the feed
-                // says now.
-                if case .ready = stage {} else { stage = .none }
+            lastChecked = Date()
+            Store.settings.set(Date(), forKey: lastKey)
+            guard let found, found.build > Updater.build, found.runsHere else {
+                stage = Updater.nothingNewer(after: stage)
                 done(nil)
                 return
             }
@@ -195,6 +192,19 @@ final class Updater: ObservableObject {
                 stage = .waiting(found)
                 say?(L10n.text("Updater.1135", String(describing: found.version)))
             }
+        }
+    }
+
+    /// What a check that found nothing newer, or couldn't read the feed,
+    /// leaves.
+    nonisolated static func nothingNewer(after stage: Stage) -> Stage {
+        switch stage {
+        // A build already swapped in stays ready whatever the feed says
+        // now, and one on its way is left to land: forgotten here, `landed`
+        // would drop it, and the next check would swap again under the
+        // bundle this process is running from (see `take`).
+        case .fetching, .ready: return stage
+        case .none, .offered, .waiting: return .none
         }
     }
 
@@ -350,7 +360,7 @@ final class Updater: ObservableObject {
         request.setValue("SearcheXtra/" + version, forHTTPHeaderField: "User-Agent")
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 12
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
+        guard let (data, response) = try? await ProxyNetwork.session.data(for: request),
               (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true,
               data.count <= limit
         else { return nil }
@@ -458,7 +468,7 @@ private enum Swap {
         request.setValue("SearcheXtra/" + Updater.version, forHTTPHeaderField: "User-Agent")
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 60
-        let (got, response) = try await URLSession.shared.download(for: request)
+        let (got, response) = try await ProxyNetwork.session.download(for: request)
         guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? true else {
             throw Refused.download
         }

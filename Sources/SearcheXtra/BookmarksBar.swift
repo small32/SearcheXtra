@@ -11,7 +11,7 @@ import SwiftUI
 
 struct BookmarksBar: View {
     @ObservedObject var browser: Browser
-    @ObservedObject var bookmarks: Bookmarks
+    let bookmarks: Bookmarks
     /// On the window's ground, above the page's card, with the tabs down the
     /// side: the ground's colour and no line of its own, the card's edge
     /// being the line (see CardEdge).
@@ -20,6 +20,7 @@ struct BookmarksBar: View {
     static let height: CGFloat = 30
 
     var body: some View {
+        let _ = Bench.count("bar")
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: browser.prefs.compactBookmarksBar ? 0 : 2) {
                 ForEach(bookmarks.roots) { node in
@@ -113,7 +114,7 @@ struct BookmarksBar: View {
 /// One menu for the bar, its folder popups and the bookmark manager.
 struct BookmarkContextMenu: View {
     let browser: Browser
-    @ObservedObject var bookmarks: Bookmarks
+    let bookmarks: Bookmarks
     let node: Bookmark?
     var close: () -> Void = {}
     @ObservedObject private var prefs = Shared.prefs
@@ -187,7 +188,7 @@ struct BookmarkContextMenu: View {
 
 /// The upstream outline's move menu, shared by every bookmark surface.
 struct BookmarkMoveMenu: View {
-    @ObservedObject var bookmarks: Bookmarks
+    let bookmarks: Bookmarks
     let node: Bookmark
     var close: () -> Void = {}
 

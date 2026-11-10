@@ -229,7 +229,7 @@ struct Command: Identifiable {
         // sits beside ⌘S, which folds the tabs away.
         Command("tabs.split", L10n.text("App.0151"), .tabs, KeyCombo("n", option: true)) { browser in
             guard browser.prefs.splitView else { return }
-            browser.startSplit()
+            browser.splitKey()
         },
         Command("tabs.focusLeftPane", L10n.text("App.0152"), .tabs, KeyCombo("left", control: true)) { browser in
             guard browser.prefs.splitView else { return }

@@ -28,8 +28,8 @@ import WebKit
 // later (a MutationObserver) follows, until Show Original, the next page,
 // or the tab going to sleep.
 //
-// Available on demand from macOS 15. Automatic translation is an explicit
-// choice for each language. A private tab can translate without saving it.
+// Off unless switched on in Settings › General, and not there before
+// macOS 15. A private tab can translate; nothing it does is remembered.
 
 /// What a tab's translation is doing, for the sign beside its title.
 struct TranslationMark: Equatable {
@@ -70,9 +70,15 @@ final class PageTranslator {
         Locale.Language(identifier: Locale.preferredLanguages.first ?? "en")
     }
 
-    /// A language name in the selected interface language.
+    static var preferredTarget: Locale.Language {
+        let choice = Shared.prefs.translateTarget
+        return choice.isEmpty ? reader : Locale.Language(identifier: choice)
+    }
+
+    /// A language as Search's menus name it ("French"): in English, as the
+    /// rest of the interface is.
     nonisolated static func name(_ code: String) -> String {
-        let english = Locale(identifier: L10n.language)
+        let english = Locale(identifier: "en")
         let language = Locale.Language(identifier: code)
         if language.script != nil, let full = english.localizedString(forIdentifier: code) { return full }
         return english.localizedString(forLanguageCode: language.languageCode?.identifier ?? code) ?? code
@@ -120,7 +126,8 @@ final class PageTranslator {
     /// Translates the tab's page into `target`, and keeps translating what
     /// the page adds until Show Original or the page goes.
     @discardableResult
-    static func start(_ tab: Tab, to target: Locale.Language = reader, done: (([String: Any]) -> Void)? = nil) -> PageTranslator? {
+    static func start(_ tab: Tab, to requested: Locale.Language? = nil, done: (([String: Any]) -> Void)? = nil) -> PageTranslator? {
+        let target = requested ?? preferredTarget
         tab.translator?.end(restore: true)
         guard enabled, tab.built != nil else {
             done?(["error": enabled ? "no page" : "off"])
@@ -145,7 +152,6 @@ final class PageTranslator {
         jobs = nil
         for lease in leases { (lease as? Closable)?.close() }
         leases = []
-        sessions = [:]
         if let tab, tab.translator === self {
             tab.translator = nil
             if tab.translation?.failed != true { tab.translation = nil }
@@ -176,11 +182,6 @@ final class PageTranslator {
 
     // MARK: - the run
 
-    private func checkCurrent() throws {
-        try Task.checkCancellation()
-        guard let tab, tab.translator === self, tab.built === web else { throw CancellationError() }
-    }
-
     private func run(_ stream: AsyncStream<WKFrameInfo?>) async {
         guard let web, let tab else { return }
         let start = Date()
@@ -188,17 +189,17 @@ final class PageTranslator {
         report = ["target": PageTranslator.code(target), "units": 0, "parts": 0, "requests": 0, "sent": 0,
                   "cached": 0, "applied": 0, "kept": 0, "chars": 0, "frames": 0, "rounds": 0, "languages": [String: Int]()]
         do {
-            try checkCurrent()
             async let hint = try? web.callAsyncJavaScript("return document.documentElement.lang || ''", contentWorld: Web.world) as? String
             let first = try await collect(nil, injecting: true)
-            try checkCurrent()
             report["collectMs"] = ms()
             let sample = String(first.prefix(400).map(\.plain).joined(separator: "\n").prefix(4000))
-            let languageHint = await hint
-            try checkCurrent()
-            guard let from = PageTranslator.detect(sample, hint: languageHint) else {
-                throw Failure(L10n.text("upstream.translate.unknownLanguage"))
+            guard let from = PageTranslator.detect(sample, hint: await hint) else {
+                throw Failure(L10n.text("upstream.merge112.searchCouldnTTellWhichLanguage"))
             }
+            // A page call comes back even after end() cancelled the run, and
+            // end() is the only way a translator loses its tab: from here a
+            // run that's been let go of writes nothing.
+            try Task.checkCancellation()
             source = from
             report["source"] = PageTranslator.code(from)
             tab.translation = TranslationMark(from: PageTranslator.code(from), to: PageTranslator.code(target), phase: .working)
@@ -208,21 +209,20 @@ final class PageTranslator {
                 sessions[PageTranslator.code(from)] = try await session(from: from, main: true)
             }
             try await process(first, in: nil) { self.report["firstSliceMs"] = self.report["firstSliceMs"] ?? ms() }
-            try checkCurrent()
             // Every frame that said it's there, other sites' included.
             for frame in tab.translateFrames {
                 try await frameRound(frame)
-                try checkCurrent()
             }
+            try Task.checkCancellation()
             report["fullMs"] = ms()
             if (report["applied"] as? Int ?? 0) == 0, PageTranslator.same(from, target) {
-                throw Failure(L10n.text("upstream.translate.already", PageTranslator.name(PageTranslator.code(target))))
+                throw Failure("This page is already in \(PageTranslator.name(PageTranslator.code(target)))")
             }
             tab.translation?.phase = .done
             finish()
             // Then whatever the page adds or changes, frame by frame.
             for await frame in stream {
-                try checkCurrent()
+                if Task.isCancelled { break }
                 if let frame { try await frameRound(frame) } else { try await process(collect(nil), in: nil) }
                 report["rounds"] = (report["rounds"] as? Int ?? 0) + 1
             }
@@ -246,11 +246,9 @@ final class PageTranslator {
         do {
             units = try await collect(frame, injecting: true)
         } catch {
-            try checkCurrent()
             tab?.translateFrames.removeAll { $0 === frame }
             return
         }
-        try checkCurrent()
         if !frames.contains(where: { $0 === frame }) {
             frames.append(frame)
             report["frames"] = frames.count
@@ -292,7 +290,6 @@ final class PageTranslator {
     /// Units in slices — a small one first, for what is on screen — each
     /// sorted by language, translated and put back before the next.
     private func process(_ units: [Unit], in frame: WKFrameInfo?, first: (() -> Void)? = nil) async throws {
-        try checkCurrent()
         guard !units.isEmpty, let web else { return }
         report["units"] = (report["units"] as? Int ?? 0) + units.count
         report["parts"] = (report["parts"] as? Int ?? 0) + units.reduce(0) { $0 + $1.parts.count }
@@ -332,7 +329,6 @@ final class PageTranslator {
             let pairs: [[Any]] = slice.map { unit in
                 [NSNumber(value: unit.id), (out[unit.id] ?? nil).map { $0 as Any } ?? NSNull()]
             }
-            try Task.checkCancellation()
             let applied = try await web.callAsyncJavaScript("return window.__searchTr ? __searchTr.apply(pairs) : 0",
                                                             arguments: ["pairs": pairs], in: frame, contentWorld: Web.world)
             report["applied"] = (report["applied"] as? Int ?? 0) + ((applied as? NSNumber)?.intValue ?? 0)
@@ -501,31 +497,56 @@ final class PageTranslator {
             return { strings in strings.map { tag + $0 } }
         }
         guard #available(macOS 15, *) else { throw Failure(L10n.text("upstream.translate.needsSystem")) }
-        let status = await LanguageAvailability().status(from: from, to: target)
+        // SDK 26.4 and later default to Apple Intelligence's higher-fidelity
+        // model. Keep page translation responsive as it was with older SDKs,
+        // while retaining the newer model for pairs the fast one cannot do.
+        #if compiler(>=6.3)
+        var fast = false
+        #else
+        let fast = false
+        #endif
+        let status: LanguageAvailability.Status
+        #if compiler(>=6.3)
+        if #available(macOS 26.4, *) {
+            let quick = await LanguageAvailability(preferredStrategy: .lowLatency).status(from: from, to: target)
+            fast = quick != .unsupported
+            status = fast ? quick : await LanguageAvailability(preferredStrategy: .highFidelity).status(from: from, to: target)
+        } else {
+            status = await LanguageAvailability().status(from: from, to: target)
+        }
+        #else
+        status = await LanguageAvailability().status(from: from, to: target)
+        #endif
         try Task.checkCancellation()
         if main { report["availability"] = "\(status)" }
         switch status {
         case .unsupported:
             if main {
-                throw Failure(L10n.text("upstream.translate.unsupported", PageTranslator.name(PageTranslator.code(from)), PageTranslator.name(PageTranslator.code(target))))
+                throw Failure("\(PageTranslator.name(PageTranslator.code(from))) to \(PageTranslator.name(PageTranslator.code(target))) can't be translated on this Mac")
             }
             return nil
         case .installed:
-            #if compiler(>=6.2)
+            #if compiler(>=6.3)
+            if #available(macOS 26.4, *) {
+                let session = TranslationSession(installedSource: from, target: target,
+                                                 preferredStrategy: fast ? .lowLatency : .highFidelity)
+                return { strings in try await PageTranslator.translate(strings, with: session) }
+            }
+            #endif
             if #available(macOS 26, *) {
                 let session = TranslationSession(installedSource: from, target: target)
                 return { strings in try await PageTranslator.translate(strings, with: session) }
             }
-            #endif
-            // Xcode 16's SDK uses the same translation through SwiftUI below.
-            break
         default:
             // To download: only for the page's own language, which you asked for.
             if !main { return nil }
         }
         guard let content = web?.window?.contentView else { throw Failure(L10n.text("upstream.translate.needsWindow")) }
-        let lease = try await SessionLease.open(from: from, to: target, in: content)
-        guard !Task.isCancelled else { lease.close(); throw CancellationError() }
+        let lease = try await SessionLease.open(from: from, to: target, fast: fast, in: content)
+        guard !Task.isCancelled else {
+            lease.close()
+            throw CancellationError()
+        }
         leases.append(lease)
         let session: TranslationSession = lease.session
         return { strings in try await PageTranslator.translate(strings, with: session) }
@@ -543,18 +564,18 @@ final class PageTranslator {
 
     /// What went wrong, said quietly in the sign's menu.
     private static func describe(_ error: Error, from: Locale.Language?, to: Locale.Language) -> String {
-        let language = from.map { name(code($0)) } ?? L10n.text("upstream.translate.pageLanguage")
+        let language = from.map { name(code($0)) } ?? "this page's language"
         if #available(macOS 15, *), let error = error as? TranslationError {
             switch error {
             case .unsupportedLanguagePairing, .unsupportedSourceLanguage, .unsupportedTargetLanguage:
-                return L10n.text("upstream.translate.unsupported", language, name(code(to)))
+                return "\(language) to \(name(code(to))) can't be translated on this Mac"
             case .unableToIdentifyLanguage:
-                return L10n.text("upstream.translate.unknownLanguage")
+                return L10n.text("upstream.merge112.searchCouldnTTellWhichLanguage")
             default:
                 break
             }
         }
-        return L10n.text("upstream.translate.downloadNeeded", language)
+        return "\(language) wasn't translated. The language may still need to be downloaded, in System Settings › General › Language & Region › Translation Languages"
     }
 
     struct Failure: LocalizedError {
@@ -820,66 +841,47 @@ private protocol Closable: AnyObject { func close() }
 /// session, and holds it open until closed.
 @available(macOS 15, *)
 @MainActor
-final class SessionLease: Closable {
+private final class SessionLease: Closable {
     private(set) var session: TranslationSession!
     private var host: NSView?
-    private var pending: CheckedContinuation<TranslationSession, Error>?
     private var hold: CheckedContinuation<Void, Never>?
     private var closed = false
 
-    static func open(from: Locale.Language, to: Locale.Language, in content: NSView) async throws -> SessionLease {
-        try await open(in: content) { receive in
-            NSHostingView(rootView: SessionHost(configuration: .init(source: from, target: to), work: receive))
-        }
-    }
-
-    /// The host factory also lets lifecycle tests delay the framework's
-    /// callback without downloading a language or opening a system sheet.
-    static func open(in content: NSView,
-                     makeHost: (@escaping @MainActor (TranslationSession) async -> Void) -> NSView) async throws -> SessionLease {
+    static func open(from: Locale.Language, to: Locale.Language, fast: Bool, in content: NSView) async throws -> SessionLease {
         let lease = SessionLease()
-        return try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            let session: TranslationSession = try await withCheckedThrowingContinuation { got in
-                guard !Task.isCancelled else { return got.resume(throwing: CancellationError()) }
-                lease.pending = got
-                let view = makeHost { [weak lease] session in
-                    guard let lease else { return }
-                    await lease.receive(session)
+        let configuration: TranslationSession.Configuration
+        #if compiler(>=6.3)
+        if #available(macOS 26.4, *) {
+            configuration = .init(source: from, target: to, preferredStrategy: fast ? .lowLatency : .highFidelity)
+        } else {
+            configuration = .init(source: from, target: to)
+        }
+        #else
+        configuration = .init(source: from, target: to)
+        #endif
+        let session: TranslationSession = await withCheckedContinuation { got in
+            var given = false
+            let view = NSHostingView(rootView: SessionHost(configuration: configuration) { session in
+                guard !given else { return }
+                given = true
+                got.resume(returning: session)
+                await withCheckedContinuation { (hold: CheckedContinuation<Void, Never>) in
+                    if lease.closed { hold.resume() } else { lease.hold = hold }
                 }
-                view.frame = NSRect(x: 0, y: 0, width: 1, height: 1)
-                view.alphaValue = 0.01
-                content.addSubview(view)
-                lease.host = view
-            }
-            guard !Task.isCancelled else { lease.close(); throw CancellationError() }
-            lease.session = session
-            return lease
-        } onCancel: {
-            Task { @MainActor in lease.close() }
+            })
+            view.frame = NSRect(x: 0, y: 0, width: 1, height: 1)
+            view.alphaValue = 0.01
+            content.addSubview(view)
+            lease.host = view
         }
-    }
-
-    private func receive(_ session: TranslationSession) async {
-        // A session may arrive after its page was closed or Show Original
-        // was chosen. It must not reopen a lease that cancellation released.
-        guard !closed, let pending else { return }
-        self.pending = nil
-        pending.resume(returning: session)
-        await withCheckedContinuation { hold in
-            if closed { hold.resume() } else { self.hold = hold }
-        }
+        lease.session = session
+        return lease
     }
 
     func close() {
-        guard !closed else { return }
         closed = true
-        let pending = pending
-        self.pending = nil
-        pending?.resume(throwing: CancellationError())
         hold?.resume()
         hold = nil
-        session = nil
         host?.removeFromSuperview()
         host = nil
     }
@@ -888,7 +890,7 @@ final class SessionLease: Closable {
 @available(macOS 15, *)
 private struct SessionHost: View {
     let configuration: TranslationSession.Configuration
-    let work: @MainActor (TranslationSession) async -> Void
+    let work: (TranslationSession) async -> Void
 
     var body: some View {
         Color.clear.frame(width: 1, height: 1)
@@ -988,7 +990,7 @@ extension Tab {
                 guard let self, self.translator == nil, self.built === web,
                       let pair = (try? result.get()) as? [String], pair.count == 2,
                       let language = PageTranslator.detect(pair[1], hint: pair[0]),
-                      !PageTranslator.same(language, PageTranslator.reader),
+                      !PageTranslator.same(language, PageTranslator.preferredTarget),
                       wanted.contains(PageTranslator.code(language)) else { return }
                 PageTranslator.start(self)
             }
@@ -1044,8 +1046,8 @@ struct TranslateMenu: View {
     static func heading(_ mark: TranslationMark) -> String {
         let from = mark.from.map(PageTranslator.name)
         switch mark.phase {
-        case .working: return from.map { L10n.text("upstream.translate.workingFrom", $0) } ?? L10n.text("upstream.translate.working")
-        case .done: return from.map { L10n.text("upstream.translate.doneFrom", $0) } ?? L10n.text("upstream.translate.done")
+        case .working: return from.map { "Translating from \($0)…" } ?? L10n.text("upstream.translate.working")
+        case .done: return from.map { "Translated from \($0)" } ?? L10n.text("upstream.translate.done")
         case .failed(let message): return message
         }
     }
@@ -1069,10 +1071,10 @@ struct TranslateMenu: View {
                     if let from = mark.from {
                         let on = tab.alwaysTranslates(from)
                         Item(symbol: on ? "checkmark" : "circle.dashed",
-                             title: tab.shy ? L10n.text("upstream.translate.privateAlways", PageTranslator.name(from)) : L10n.text("upstream.translate.always", PageTranslator.name(from))) {
+                             title: tab.shy ? "Translate \(PageTranslator.name(from)) in This Tab" : "Always Translate \(PageTranslator.name(from))") {
                             tab.setAlwaysTranslates(from, !on)
                         }
-                        .help(tab.shy ? L10n.text("upstream.translate.privateDetail") : L10n.text("upstream.translate.alwaysDetail"))
+                        .help(tab.shy ? L10n.text("popups.privateHelp") : L10n.text("upstream.translate.alwaysDetail"))
                     }
                 }
                 .padding(6)
@@ -1118,8 +1120,37 @@ struct TranslateLanguageList: View {
     var body: some View {
         ForEach(prefs.translateAlways.sorted(), id: \.self) { code in
             Rule()
-            Line(L10n.text("upstream.translate.alwaysSetting", PageTranslator.name(code)), L10n.text("upstream.translate.alwaysSettingDetail", PageTranslator.name(code))) {
+            Line("Always translate \(PageTranslator.name(code))", "Pages in \(PageTranslator.name(code)) are translated as they open") {
                 Pill(L10n.text("upstream.translate.remove")) { prefs.translateAlways.remove(code) }
+            }
+        }
+    }
+}
+
+/// Load Apple's current language list only when this settings control appears.
+struct TranslateTargetPicker: View {
+    @ObservedObject var prefs: Preferences
+    @State private var languages: [String] = []
+
+    var body: some View {
+        Picker(L10n.text("upstream.merge112.translationLanguage"), selection: $prefs.translateTarget) {
+            Text(L10n.text("upstream.merge112.systemDefault")).tag("")
+            if !prefs.translateTarget.isEmpty && !languages.contains(prefs.translateTarget) {
+                Text(PageTranslator.name(prefs.translateTarget)).tag(prefs.translateTarget)
+            }
+            ForEach(languages, id: \.self) { code in
+                Text(PageTranslator.name(code)).tag(code)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .fixedSize()
+        .task {
+            if #available(macOS 15, *) {
+                let supported = await LanguageAvailability().supportedLanguages
+                languages = Array(Set(supported.map(PageTranslator.code))).sorted {
+                    PageTranslator.name($0).localizedStandardCompare(PageTranslator.name($1)) == .orderedAscending
+                }
             }
         }
     }
