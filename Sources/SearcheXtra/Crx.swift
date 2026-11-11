@@ -236,10 +236,13 @@ enum Crx {
         var type = SecExternalItemType.itemTypePublicKey
         var items: CFArray?
         guard SecItemImport(rsaSPKI as CFData, nil, &format, &type, [], nil, nil, &items) == errSecSuccess,
-              let key = (items as? [Any])?.first as? SecKey
+              let key = (items as? [Any])?.first
         else { return false }
+        // SecKey is a CoreFoundation type: a conditional downcast to it always
+        // succeeds, which the compiler now rejects. SecItemImport with this
+        // format hands back exactly one key, so the forced cast is the contract.
         return SecKeyVerifySignature(
-            key, .rsaSignatureMessagePKCS1v15SHA256,
+            key as! SecKey, .rsaSignatureMessagePKCS1v15SHA256,
             message as CFData, signature as CFData, nil
         )
     }

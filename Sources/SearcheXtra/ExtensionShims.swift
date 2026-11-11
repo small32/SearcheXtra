@@ -4228,7 +4228,14 @@ enum ExtensionShims {
         guard let frame = value as? [String: Any], let left = frame["left"] as? Double,
               let top = frame["top"] as? Double, let width = frame["width"] as? Double,
               let height = frame["height"] as? Double else { return nil }
-        return owner.browser(windowFrame: CGRect(x: left, y: top, width: width, height: height))
+        // Extensions.browser is a property for the front window's browser, not
+        // a lookup by geometry. Match the frame against the open windows and
+        // ask Windows which browser owns it; when none matches, the front one
+        // is the answer, as the side-panel path expects.
+        let wanted = CGRect(x: left, y: top, width: width, height: height)
+        if let window = NSApp.windows.first(where: { $0.frame.equalTo(wanted) }),
+           let browser = Windows.browser(for: window) { return browser }
+        return owner.browser
     }
 
     /// Each icon drawn once; the image is held so its identity stays its own.

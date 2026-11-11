@@ -352,7 +352,9 @@ final class Bench {
         DispatchQueue.main.asyncAfter(deadline: .now() + patience) { answer(["error": "no answer within \(Int(patience)) s"]) }
         // --window N: the Nth window's browser, oldest first; the first
         // window's otherwise.
-        let picked = (request["window"] as? Int).flatMap { n in
+        // The explicit result type keeps Optional.flatMap's generic parameter
+        // inferable when the closure has more than one return site.
+        let picked = (request["window"] as? Int).flatMap { n -> Browser? in
             guard n >= 1, n <= Browsers.all.count else { return nil }
             return Browsers.all[n - 1]
         }

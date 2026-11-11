@@ -767,13 +767,14 @@ final class Extensions: NSObject, ObservableObject {
     func installForTests(crx: Data, id: String) async {
         guard Store.testing, id.count == 32, id.allSatisfy({ ("a"..."p").contains($0) }),
               !installed.contains(where: { $0.id == id }) else { return }
+        guard let token = beginPackageWork(id) else { return }
         let staged = Extensions.stagingFolder(for: id)
-        defer { try? FileManager.default.removeItem(at: staged) }
+        defer { finishPackageWork(id, token: token); try? FileManager.default.removeItem(at: staged) }
         do {
             let zip = try Crx.verifiedZip(crx, id: id)
             try Crx.unpack(zip, into: staged)
             try ExtensionShims.prepare(staged, fresh: true)
-            try await admit(staged, as: id, fromStore: true, finalFolder: Extensions.folder(for: id), confirm: false)
+            try await admit(staged, as: id, fromStore: true, finalFolder: Extensions.folder(for: id), confirm: false, token: token)
         } catch {
             browser?.announce(error.localizedDescription)
         }

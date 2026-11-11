@@ -496,7 +496,7 @@ struct AddressField: NSViewRepresentable {
         let words = Self.placeholderWords(for: browser)
         field.placeholderAttributedString = Self.placeholder(words)
         field.setAccessibilityLabel(Self.accessibilityName(for: browser))
-        context.coordinator.placeheld = words
+        coordinator.placeheld = words
         return field
     }
 
