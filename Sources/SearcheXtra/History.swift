@@ -90,7 +90,14 @@ final class History: ObservableObject {
     /// title counting its unread mail, say — drew every window and the menu
     /// bar again for a list that was the same.
     let recentChanges = PassthroughSubject<Void, Never>()
-    private var recentShown: [Trace]?
+    /// What the menu was last drawn from: which places, in order, and whether
+    /// each had a title yet (an untitled one shows its address). Not the
+    /// title itself: one that keeps ticking is the same list for the menu.
+    private struct Shown: Equatable {
+        let key: String
+        let titled: Bool
+    }
+    private var recentShown: [Shown]?
     private var recentQueued = false
     private func noteRecent() {
         guard !recentQueued else { return }
@@ -98,7 +105,7 @@ final class History: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             recentQueued = false
-            let now = recent()
+            let now = recent().map { Shown(key: $0.key, titled: !$0.title.isEmpty) }
             guard now != recentShown else { return }
             recentShown = now
             recentChanges.send()
@@ -109,6 +116,9 @@ final class History: ObservableObject {
     /// into the address field included — and sorting the whole history for
     /// it each time cost more than everything else a key press does.
     private var recentCache: [Trace]?
+    /// Something in memory the file does not have yet, including a later title.
+    private var owed = false
+    /// A cancellable write waiting out the coalescing pause.
     private var saving: DispatchWorkItem?
     private let file: URL
     private var retired = false
@@ -140,6 +150,7 @@ final class History: ObservableObject {
         retired = true
         saving?.cancel()
         saving = nil
+        owed = false
         visits = [:]
         pageText = [:]
         weights = [:]
@@ -327,7 +338,8 @@ final class History: ObservableObject {
         // The last few places stay worked out: only this one's title changed.
         // Unless it was a front door with no title, which the list leaves
         // out until it has one: then it may belong in it now.
-        let joins = seen.title.isEmpty && pageText[key]?.homepage == true
+        let first = seen.title.isEmpty
+        let joins = first && pageText[key]?.homepage == true
         seen.title = title
         let cached = joins ? nil : recentCache
         visits[key] = seen
@@ -337,7 +349,11 @@ final class History: ObservableObject {
                 : trace
         }
         remember(seen)
-        save()
+        // Only the title a page lands with is written at once. One that keeps
+        // changing after it — an inbox counting its mail — would rewrite the
+        // whole file each time, so it waits for the next visit's write, or
+        // for quitting.
+        if first { save() } else { owed = true }
     }
 
     func forget() {
@@ -674,7 +690,9 @@ final class History: ObservableObject {
     /// Coalesced: a busy minute of browsing writes the file once, not thirty
     /// times, and never on the main thread.
     private func save() {
-        guard saving == nil, !retired else { return }
+        guard !retired else { return }
+        owed = true
+        guard saving == nil else { return }
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             saving = nil
@@ -684,16 +702,18 @@ final class History: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
     }
 
-    /// A pending visit or Clear History must reach disk before the app quits.
+    /// Quitting writes both a pending visit and a later title that did not
+    /// schedule another save. Cancel the delayed write before writing now.
     func flush() {
-        guard !retired, let saving else { return }
-        saving.cancel()
-        self.saving = nil
+        guard !retired, owed else { return }
+        saving?.cancel()
+        saving = nil
         write(now: true)
     }
 
     private func write(now: Bool = false) {
-        guard !retired else { return }
+        guard !retired, owed else { return }
+        owed = false
         // The file's existing limit also bounds the live history and the
         // address matcher. Sort only when pruning, rather than on every save.
         if visits.count > Self.capacity {

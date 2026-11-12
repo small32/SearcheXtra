@@ -10,6 +10,7 @@ final class SettingsSiteControlTests: XCTestCase {
     }
 
     func testSettingsKeepsTheWebsiteThatOpenedItAndDropsClosedTargets() throws {
+        guard Store.testing else { throw XCTSkip("Requires an isolated test store") }
         _ = NSApplication.shared
         let browser = Browser(record: WindowRecord(), opensStartPage: false)
         defer { browser.closeAll() }
@@ -26,6 +27,7 @@ final class SettingsSiteControlTests: XCTestCase {
     }
 
     func testReopeningSettingsFromAnotherWebsiteChangesItsSiteContext() throws {
+        guard Store.testing else { throw XCTSkip("Requires an isolated test store") }
         _ = NSApplication.shared
         let browser = Browser(record: WindowRecord(), opensStartPage: false)
         defer { browser.closeAll() }
@@ -41,6 +43,7 @@ final class SettingsSiteControlTests: XCTestCase {
     }
 
     func testOldSiteControlCannotReloadOrChangeANavigatedPage() throws {
+        guard Store.testing else { throw XCTSkip("Requires an isolated test store") }
         _ = NSApplication.shared
         let browser = Browser(record: WindowRecord(), opensStartPage: false)
         let host = "shield-\(UUID().uuidString.lowercased()).example"

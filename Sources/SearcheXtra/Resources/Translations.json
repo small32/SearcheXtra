@@ -5302,5 +5302,8 @@
   "upstream.merge112.clickOpeningALinkInThe": {"en":"⌘-click opening a link in the same tab on some shops.","zh-Hans":"修复部分购物网站中 ⌘-点击链接却在同标签页打开的问题。"},
   "upstream.merge112.sMakesTheColumnIconsOnly": {"en":"⌘S makes the column icons only","zh-Hans":"⌘S 让标签列只显示图标"},
   "upstream.merge112.sSlidesTheColumnAtOnce": {"en":"⌘S slides the column at once, and keeping a bookmark no longer stalls a window with many tabs.","zh-Hans":"⌘S 可立即滑动标签列，收藏书签也不会再让多标签页窗口卡顿。"},
-  "upstream.merge112.tRaisesTheAddressFieldOver": {"en":"⌘T raises the address field over the page, as in Arc","zh-Hans":"⌘T 在页面上方唤起浮动地址栏，与 Arc 相同"}
+  "upstream.merge112.tRaisesTheAddressFieldOver": {"en":"⌘T raises the address field over the page, as in Arc","zh-Hans":"⌘T 在页面上方唤起浮动地址栏，与 Arc 相同"},
+  "upstream.merge118.switcherBehindFirst.title": {"en":"⌃Tab goes to a link opened behind","zh-Hans":"⌃Tab 优先切换到后台打开的链接"},
+  "upstream.merge118.switcherBehindFirst.detail": {"en":"Otherwise a quick ⌃Tab goes back to the tab you were on before","zh-Hans":"关闭后，快速按 ⌃Tab 会返回此前使用的标签页"},
+  "upstream.merge118.switcherBehindFirst.more": {"en":"A link you ⌘-click, middle-click or open with Open Link in New Tab comes right after the page in the ⌃Tab switcher, the newest first. Off, it comes after the tab you were on before.","zh-Hans":"通过 ⌘-点击、中键或“在新标签页打开链接”后台打开的页面，会紧接当前页出现在 ⌃Tab 切换器中，最新打开的排在前面。关闭后，它们排在此前使用的标签页之后。"}
 }

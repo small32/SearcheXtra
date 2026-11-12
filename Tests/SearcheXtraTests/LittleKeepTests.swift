@@ -36,6 +36,7 @@ final class LittleKeepTests: XCTestCase {
     }
 
     private func withWindow(_ body: (LittleWindow, Browser, PageView) async throws -> Void) async throws {
+        guard Store.testing else { throw XCTSkip("Requires an isolated test store") }
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
         let previousSpaces = Shared.prefs.usesSpaces

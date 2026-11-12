@@ -495,22 +495,50 @@ final class Browser: NSObject, ObservableObject {
         get { SettingsPanel.Page.named(Store.settings.string(forKey: "settings.page") ?? "") ?? .general }
         set { Store.settings.set(newValue.rawValue, forKey: "settings.page") }
     }
+    /// What is looked for and what the page answered, kept apart in
+    /// `seeking` for the find bar alone to watch: published here, every
+    /// letter typed into Find drew the whole window again, every row and pin.
+    let seeking = FindState()
     // The same words written back (the field does, as it appears) aren't
     // a Next: Return and the buttons ask for that themselves.
-    @Published var needle = "" {
-        didSet { if !resettingFind, oldValue != needle { look(forward: true) } }
+    var needle: String {
+        get { seeking.needle }
+        set {
+            let old = seeking.needle
+            seeking.needle = newValue
+            if !resettingFind, old != newValue { look(forward: true) }
+        }
     }
-    @Published var matchCase = false {
-        didSet { if !resettingFind, oldValue != matchCase { look(forward: true) } }
+    var matchCase: Bool {
+        get { seeking.matchCase }
+        set {
+            let old = seeking.matchCase
+            seeking.matchCase = newValue
+            if !resettingFind, old != newValue { look(forward: true) }
+        }
     }
-    @Published var wholeWords = false {
-        didSet { if !resettingFind, oldValue != wholeWords { look(forward: true) } }
+    var wholeWords: Bool {
+        get { seeking.wholeWords }
+        set {
+            let old = seeking.wholeWords
+            seeking.wholeWords = newValue
+            if !resettingFind, old != newValue { look(forward: true) }
+        }
     }
     /// Set when the page doesn't hold what was asked for.
-    @Published private(set) var missed = false
-    @Published private(set) var findFocus = 0
+    private(set) var missed: Bool {
+        get { seeking.missed }
+        set { seeking.missed = newValue }
+    }
+    private(set) var findFocus: Int {
+        get { seeking.focus }
+        set { seeking.focus = newValue }
+    }
     /// The count and which match is current, as the page last answered.
-    @Published private(set) var findResult: PageFind.Result?
+    private(set) var findResult: PageFind.Result? {
+        get { seeking.result }
+        set { seeking.result = newValue }
+    }
 
     private let pageFind = PageFind()
     private struct FindSpec: Equatable {
@@ -690,7 +718,8 @@ final class Browser: NSObject, ObservableObject {
     /// ⌘⇧M. Whatever is making noise in this tab stops making noise.
     func pauseMedia() {
         guard let tab = active else { return }
-        tab.web.pauseAllMediaPlayback()
+        // An empty handler, not nil: see Tab.discard (#1031).
+        tab.web.pauseAllMediaPlayback {}
         announce(L10n.text("Browser.0283"))
     }
 
@@ -1822,10 +1851,10 @@ final class Browser: NSObject, ObservableObject {
                   let url = web.url, let scheme = url.scheme, let host = url.host(),
                   Browser.origin(scheme, host, url.port ?? 0) == origin else { continue }
             if kind == .camera || kind == .cameraAndMicrophone {
-                web.setCameraCaptureState(.none, completionHandler: nil)
+                web.setCameraCaptureState(.none) {}
             }
             if kind == .microphone || kind == .cameraAndMicrophone {
-                web.setMicrophoneCaptureState(.none, completionHandler: nil)
+                web.setMicrophoneCaptureState(.none) {}
             }
         }
     }
@@ -2982,6 +3011,8 @@ final class Browser: NSObject, ObservableObject {
             out.append(tab)
         }
         for gone in pinned {
+            if editingTab == gone.id { cancelTabEdit() }
+            if editingPin == gone.id { editingPin = nil }
             // The same way out a closed tab takes: a pin that was playing
             // in the little window must not leave it holding a dead page.
             if floating == gone.id { land(covering: false) }
@@ -3459,6 +3490,13 @@ final class Browser: NSObject, ObservableObject {
     func closeAll() {
         retired = true
         cancelDisplay()
+        SiteCardPanel.hide(in: self)
+        cancelTabEdit()
+        editingPin = nil
+        suggester.stop()
+        SidePanelPages.shared.forget(in: self)
+        sidePanelShown = false
+        sidePanel = nil
         cancelCapture()
         for questions in heldDialogs.values { questions.forEach { $0.dismiss() } }
         heldDialogs = [:]
@@ -5011,6 +5049,27 @@ final class Browser: NSObject, ObservableObject {
         writeSession(now: true)
     }
 
+    /// Carried out of its group and let go among the tabs in none (#1009):
+    /// in front of `loose`, or after the last of them. What goes with it
+    /// goes too, as into a group: the tabs picked with it, a pair whole. A
+    /// group left empty goes, as with Remove from Group.
+    func move(_ tab: Tab, outOfGroupBefore loose: Tab.ID?) {
+        guard prefs.usesTabGroups, tabs.contains(where: { $0 === tab }) else { return }
+        let moving = carried(with: tab)
+        guard moving.allSatisfy({ $0.pin == nil && !$0.shy && !$0.bench }),
+              moving.contains(where: { group(of: $0) != nil }) else { return }
+        let ids = Set(moving.map(\.id))
+        var row = tabs.filter { !ids.contains($0.id) }
+        let insertion = loose.flatMap { id in row.firstIndex { $0.id == id && $0.pin == nil && group(of: $0) == nil } }
+            ?? row.count
+        let previous = Set(moving.compactMap(\.groupID))
+        for member in moving { member.groupID = nil }
+        row.insert(contentsOf: moving, at: insertion)
+        tabs = row
+        for id in previous { removeEmptyGroup(id) }
+        writeSession(now: true)
+    }
+
     /// Reorder only among peers in the displayed section. The underlying
     /// tab row remains flat for keyboard shortcuts and the top strip.
     func move(_ tab: Tab, within group: UUID?, to index: Int) {
@@ -5238,7 +5297,7 @@ final class Browser: NSObject, ObservableObject {
         guard let activeID else { return }
         tabSwitcher.partners = switcherPartners
         tabSwitcher.step(row: tabs.filter(standsInRow).map(\.id), current: activeSplit?.left ?? activeID,
-                         backwards: backwards, moons: LittleWindow.stacked)
+                         backwards: backwards, moons: LittleWindow.stacked, behindFirst: prefs.switcherBehindFirst)
     }
 
     /// A pair once, under its first page, pictured with its other one.
@@ -5249,7 +5308,8 @@ final class Browser: NSObject, ObservableObject {
     /// The row as the switcher's grid shows it, for a small window's
     /// switcher to show as its planet (see TabSwitcher.ordered).
     var switcherPlanet: [Tab.ID] {
-        tabSwitcher.ordered(row: tabs.filter(standsInRow).map(\.id), current: activeSplit?.left ?? activeID)
+        tabSwitcher.ordered(row: tabs.filter(standsInRow).map(\.id), current: activeSplit?.left ?? activeID,
+                            behindFirst: prefs.switcherBehindFirst)
     }
 
     /// A letter pressed on a card while a switcher is up (see
@@ -5874,6 +5934,10 @@ final class Browser: NSObject, ObservableObject {
 
     /// A link just opened behind `source`: the next one goes after it.
     private func noteLink(_ tab: Tab, from source: Tab?) {
+        // Every link opened behind passes here — ⌘-click, the middle button,
+        // Open Link in New Tab — so ⌃Tab finds it here too. One opened in
+        // front is on screen, and takes its place when it is left.
+        tabSwitcher.openedBehind(tab.id)
         guard let source, tabs.contains(where: { $0.id == source.id }) else { return }
         let earlier = linkRun.flatMap { $0.opener == source.id ? $0.opened : nil } ?? []
         linkRun = LinkRun(opener: source.id, last: tab.id, opened: earlier.union([tab.id]))
@@ -6080,7 +6144,11 @@ final class Browser: NSObject, ObservableObject {
         // A hero background on a studio's home page is a video too, and it
         // followed people around the desktop. Nor from one you grounded in
         // its site card. ⌘⇧P still lifts from anywhere.
-        if quietly, !Players.knows(tab.address) || tab.pageAddress?.host().map(Grounded.holds) == true {
+        // And only with a video playing there, as the page says (see
+        // MediaKeys.watch): leaving a paused one on YouTube took a picture
+        // of the page and a look through it, 20 to 30 ms, for nothing.
+        if quietly, !Players.knows(tab.address) || tab.pageAddress?.host().map(Grounded.holds) == true
+            || !(tab.playingVideo || tab.noisy) {
             if let otherwise { lift(otherwise, quietly: quietly, spaceRequest: spaceRequest) }
             else if let spaceRequest { _ = spaceFloat.finish(spaceRequest) }
             return
@@ -7266,10 +7334,12 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
             decisionHandler(.cancel)
             return
         }
+        // From popupTab, not tab(for:): a peek or a small window is not in
+        // the row, and a link from a private one must open private too.
         if action.navigationType == .linkActivated,
            ["http", "https"].contains(scheme),
            action.modifierFlags.contains(.command) {
-            openClicked(url, foreground: action.modifierFlags.contains(.shift), from: tab(for: webView), view: webView)
+            openClicked(url, foreground: action.modifierFlags.contains(.shift), from: popupTab(for: webView), view: webView)
             decisionHandler(.cancel)
             return
         }
@@ -7485,6 +7555,17 @@ extension Browser: WKNavigationDelegate, WKUIDelegate {
         tab.popup = popup
         tab.opener = from
         if clicked { opener.popupGesture.opened(tab.id) }
+        // A small window's page opening another (X's links out, by way of
+        // t.co): a small window of its own, a step down from this one, not a
+        // tab in the browser's window, which came forward over it (#1041).
+        // A window the page sizes still opens as Settings says below.
+        if !behind, !beside, !(prefs.popupWindows && (windowFeatures.width != nil || windowFeatures.height != nil)),
+           LittleWindow.holding(opener.id) != nil {
+            prepare(tab)
+            if let url = action.request.url { tab.setAddressOptimistically(url) }
+            LittleWindow.show(tab, for: self)
+            return tab.web
+        }
         if prefs.popupWindows, windowFeatures.width != nil || windowFeatures.height != nil {
             let sourceSpace = parked.first { $0.value.tabs.contains { $0 === opener } }?.key ?? spaceID
             let popup = Browser(record: WindowRecord(space: sourceSpace), websitePopup: true)

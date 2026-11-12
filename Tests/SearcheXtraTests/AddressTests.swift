@@ -88,6 +88,21 @@ final class AddressTests: XCTestCase {
             XCTAssertNil(Address.file(from: text), text)
         }
     }
+
+    func testDataDocumentsCannotBeOpenedFromTypedOrDroppedText() {
+        for text in [
+            "data:text/html,<script>alert(1)</script>",
+            "DATA:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+            " \ndata:text/html,https://example.com/\t",
+            "data://example.com/payload",
+            "data:text/plain,example.com",
+        ] {
+            XCTAssertNil(Address.url(from: text), text)
+            XCTAssertNil(Address.file(from: text), text)
+        }
+        XCTAssertEqual(Address.url(from: "about:blank")?.absoluteString, "about:blank")
+        XCTAssertEqual(Address.url(from: "https://example.com/")?.scheme, "https")
+    }
 }
 
 @MainActor

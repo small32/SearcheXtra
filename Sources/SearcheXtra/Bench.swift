@@ -26,9 +26,14 @@ final class Bench {
     private var awake: NSObjectProtocol?
 
     private weak var browser: Browser?
+    // Keep command policy separate from the data world so regression tests
+    // can exercise shipped-mode restrictions without touching a user's data.
+    private let testRun: Bool
     private var listener: Int32 = -1
     private var accepting: DispatchSourceRead?
     private var clients: [Int32: Client] = [:]
+
+    init(testRun: Bool = Store.testing) { self.testRun = testRun }
 
     /// Where the socket is. Beside the session file, so a test run's bench is
     /// as separate from the real one as everything else it keeps.
@@ -159,9 +164,9 @@ final class Bench {
     func start(for browser: Browser) {
         guard !running else { return }
         self.browser = browser
-        if Store.testing { Bench.watchScreens() }
+        if self.testRun { Bench.watchScreens() }
         // Nor App Nap, which a test run behind other windows falls into.
-        if Store.testing, !Store.measuring, awake == nil {
+        if self.testRun, !Store.measuring, awake == nil {
             awake = ProcessInfo.processInfo.beginActivity(options: .userInitiated, reason: "Bench")
         }
         let path = Bench.socket.path
@@ -235,9 +240,6 @@ final class Bench {
             close(fd)
             return
         }
-        // A write to a client that has gone must not take the app with it.
-        var noPipe: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noPipe, socklen_t(MemoryLayout<Int32>.size))
         let client = Client(fd: fd) { [weak self] request, answer in
             self?.handle(request, answer)
         } gone: { [weak self] fd in
@@ -249,13 +251,14 @@ final class Bench {
     // MARK: - one connection
 
     /// Reads until a newline, hands the line up, writes the answer, closes.
-    private final class Client {
+    final class Client {
         let fd: Int32
         private var bytes = Data()
         private let source: DispatchSourceRead
         private let handle: ([String: Any], @escaping ([String: Any]) -> Void) -> Void
         private let gone: (Int32) -> Void
         private var answered = false
+        private var closed = false
 
         init(
             fd: Int32,
@@ -265,6 +268,8 @@ final class Bench {
             self.fd = fd
             self.handle = handle
             self.gone = gone
+            var noPipe: Int32 = 1
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noPipe, socklen_t(MemoryLayout<Int32>.size))
             fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
             source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .main)
             source.setEventHandler { [weak self] in self?.read() }
@@ -272,6 +277,7 @@ final class Bench {
         }
 
         private func read() {
+            guard !closed else { return }
             var chunk = [UInt8](repeating: 0, count: 65536)
             let count = Darwin.read(fd, &chunk, chunk.count)
             if count <= 0 {
@@ -296,7 +302,7 @@ final class Bench {
         }
 
         private func say(_ answer: [String: Any]) {
-            guard !answered else { return }
+            guard !answered, !closed else { return }
             answered = true
             var answer = answer
             // The socket's queue is the main one.
@@ -327,6 +333,8 @@ final class Bench {
         }
 
         func drop() {
+            guard !closed else { return }
+            closed = true
             if !source.isCancelled { source.cancel() }
             close(fd)
             gone(fd)
@@ -335,7 +343,13 @@ final class Bench {
 
     // MARK: - the commands
 
-    private func handle(_ request: [String: Any], _ given: @escaping ([String: Any]) -> Void) {
+    static func responseTimeout(for request: [String: Any]) -> Double {
+        let asked: Double = (request["do"] as? String) == "wait" ? (request["seconds"] as? Double ?? 30) + 5 :
+            (request["do"] as? String) == "import-file" ? (request["timeout"] as? Double ?? 120) : 25
+        return asked.isFinite ? min(max(asked, 1), 600) : 25
+    }
+
+    func handle(_ request: [String: Any], _ given: @escaping ([String: Any]) -> Void) {
         // One answer, and always one: a page that never replies to a script
         // would otherwise hold the bench — every later command waits behind it.
         var answered = false
@@ -344,11 +358,9 @@ final class Bench {
             answered = true
             given(reply)
         }
-        let asked: Double = (request["do"] as? String) == "wait" ? (request["seconds"] as? Double ?? 30) + 5 :
-            (request["do"] as? String) == "import-file" ? (request["timeout"] as? Double ?? 120) : 25
         // Anything a script sends: clamped so neither DispatchTime nor the
         // message below can trap on an absurd number.
-        let patience = asked.isFinite ? min(max(asked, 1), 600) : 25
+        let patience = Self.responseTimeout(for: request)
         DispatchQueue.main.asyncAfter(deadline: .now() + patience) { answer(["error": "no answer within \(Int(patience)) s"]) }
         // --window N: the Nth window's browser, oldest first; the first
         // window's otherwise.
@@ -385,7 +397,7 @@ final class Bench {
             // word that it is going or back would (Forms.swift); nothing goes
             // full screen. How many times a change of chrome moves the page
             // (Tests/fullscreen_exit.py).
-            guard Store.testing else { answer(["error": "layouts is for test runs"]); return }
+            guard self.testRun else { answer(["error": "layouts is for test runs"]); return }
             let seconds = min(10, max(0, request["seconds"] as? Double ?? 1.5))
             let record = LayoutRecord(browser: browser)
             record.look()
@@ -402,7 +414,7 @@ final class Bench {
         case "tabs":
             // A private tab is nobody's business but yours: a test run has none
             // of yours, so there every tab is listed.
-            answer(["tabs": browser.tabs.filter { Store.testing || !$0.shy }.map(describe)])
+            answer(["tabs": browser.tabs.filter { self.testRun || !$0.shy }.map(describe)])
 
         case "open":
             guard let url = (request["url"] as? String).flatMap(Address.url(from:)) else {
@@ -411,7 +423,7 @@ final class Bench {
             }
             // private: a private tab, on a SEARCH_PROBE run only.
             let shy = request["private"] as? Bool == true
-            guard !shy || Store.testing else { answer(["error": "open private only works on a --test run"]); return }
+            guard !shy || self.testRun else { answer(["error": "open private only works on a --test run"]); return }
             let tab = browser.benchOpen(url, shy: shy)
             house(tab)
             answer(describe(tab))
@@ -453,14 +465,14 @@ final class Bench {
 
         case "openmark":
             // A bookmark opened as the bar opens one. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "openmark only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "openmark only works on a --test run"]); return }
             guard let text = request["url"] as? String, let url = URL(string: text) else { answer(["error": "openmark needs a url"]); return }
             browser.visitBookmarkBar(url)
             answer(["active": browser.active?.id.uuidString ?? ""])
 
         case "pin":
             // Pin a tab, or unpin it with "off". Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "pin only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "pin only works on a --test run"]); return }
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             // "listed": pinned as a row, or an existing pin made a row
             // (true) or a square (false).
@@ -494,7 +506,7 @@ final class Bench {
         case "select":
             // Picking a tab takes the window over, which the bench never does
             // to someone using it: only on a SEARCH_PROBE run.
-            guard Store.testing else {
+            guard self.testRun else {
                 answer(["error": "select only works on a --test run — it would take your window over"])
                 return
             }
@@ -520,7 +532,7 @@ final class Bench {
             // keys and AirPods taps go to, as WebKit has it for the tab's
             // page (#512). WebKit's own tests ask the same way; a test run
             // only, since it is WebKit's private side.
-            guard Store.testing else { answer(["error": "nowplaying only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "nowplaying only works on a --test run"]); return }
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             let ask = NSSelectorFromString("_requestActiveNowPlayingSessionInfo:")
             guard tab.web.responds(to: ask), let imp = tab.web.method(for: ask) else {
@@ -556,7 +568,7 @@ final class Bench {
             // A tab's whole user agent, as another browser's would read, until
             // it is set back with none. Only on a SEARCH_PROBE run: a page
             // answers to it.
-            guard Store.testing else { answer(["error": "agent only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "agent only works on a --test run"]); return }
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             tab.web.customUserAgent = request["ua"] as? String
             answer(["ua": tab.web.customUserAgent ?? ""])
@@ -565,7 +577,7 @@ final class Bench {
             // A sleeping tab's picture, as kept for its waking, written to a
             // file: its size in pixels, what NSImage makes of it, and the
             // page's own size. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "kept only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "kept only works on a --test run"]); return }
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             var out: [String: Any] = ["asleep": tab.asleep, "page": tab.built.map { NSStringFromSize($0.bounds.size) } ?? "none"]
             if let data = tab.keptPicture {
@@ -583,7 +595,7 @@ final class Bench {
             // play or away — or "go", a click on it, which takes the window
             // over: a test run only, as select is.
             if let act = request["act"] as? String {
-                guard Store.testing else { answer(["error": "player's act only works on a --test run"]); return }
+                guard self.testRun else { answer(["error": "player's act only works on a --test run"]); return }
                 guard let tab = browser.player else { answer(["error": "nothing plays out of sight"]); return }
                 switch act {
                 case "still": tab.still()
@@ -605,7 +617,7 @@ final class Bench {
             if request["world"] as? String == "search" {
                 // Search's own world carries its native bridges: a script
                 // outside a test run must not speak through them.
-                guard Store.testing else { answer(["error": "search world needs a test run"]); return }
+                guard self.testRun else { answer(["error": "search world needs a test run"]); return }
                 tab.web.evaluateJavaScript(js, in: nil, in: Web.world) { result in
                     switch result {
                     case .success(let value): answer(["value": Bench.plain(value)])
@@ -627,7 +639,7 @@ final class Bench {
             // element.click() in the page, which a password manager, for one,
             // is right to ignore. `text=Sign in` picks a button or link by its
             // words. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "tap only works on a --test run — it would click in your page"]); return }
+            guard self.testRun else { answer(["error": "tap only works on a --test run — it would click in your page"]); return }
             guard let tab = find(request, in: browser), let selector = request["selector"] as? String else { answer(missing(request)); return }
             house(tab)
             let view = tab.web
@@ -690,7 +702,7 @@ final class Bench {
         case "towindow":
             // A tab to another window, as its menu's Move to Window does: to
             // the Nth, or a new one. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "towindow only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "towindow only works on a --test run"]); return }
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             if let at = request["at"] as? [Double], at.count == 2 {
                 // Let go at a point of the screen, as a drag out of the row.
@@ -709,7 +721,7 @@ final class Bench {
             // to a PNG — the newest release's, whatever this build's version —
             // or every version's notes; "on" shows the card in the window, and
             // false puts it away.
-            guard Store.testing else { answer(["error": "news only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "news only works on a --test run"]); return }
             guard let release = WhatsNew.releases.first else { answer(["error": "no release has a card"]); return }
             if let on = request["on"] as? Bool {
                 browser.newsShowing = on
@@ -739,7 +751,7 @@ final class Bench {
         case "quit":
             // ⌘Q, on a test run: the app ends the way it does for you, the
             // session and windows.json written on the way out.
-            guard Store.testing else { answer(["error": "quit only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "quit only works on a --test run"]); return }
             answer(["quitting": true])
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
 
@@ -749,7 +761,7 @@ final class Bench {
             // closed tab or window should leave nothing behind here
             // (Tests/memory_close.py). Read a turn later, once whatever the
             // close let go of has been released. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "alive only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "alive only works on a --test run"]); return }
             DispatchQueue.main.async {
                 let pages = Web.pages.allObjects
                 let pids = Set(pages.compactMap { $0.value(forKey: "_webProcessIdentifier") as? Int }.filter { $0 > 0 })
@@ -774,7 +786,7 @@ final class Bench {
         case "windows":
             // The windows, oldest first, and what the tests do to them. Only
             // on a SEARCH_PROBE run: it opens and closes windows.
-            guard Store.testing else { answer(["error": "windows only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "windows only works on a --test run"]); return }
             let n = (request["n"] as? Int).map { $0 - 1 }
             switch request["action"] as? String {
             case "new": Browsers.newWindow()
@@ -823,7 +835,7 @@ final class Bench {
             // own points from the top left), handed to its view as AppKit
             // would: the page sees trusted mousedown, mouseup and auxclick.
             // Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "middle only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "middle only works on a --test run"]); return }
             guard let tab = find(request, in: browser), let x = request["x"] as? Double, let y = request["y"] as? Double
             else { answer(missing(request)); return }
             house(tab)
@@ -851,7 +863,7 @@ final class Bench {
             // A right-click at X Y of a tab's page (its own points from the
             // top left), and the item named "pick" chosen from the menu that
             // comes up. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "linkmenu only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "linkmenu only works on a --test run"]); return }
             guard let tab = find(request, in: browser), let x = request["x"] as? Double, let y = request["y"] as? Double,
                   let pick = request["pick"] as? String
             else { answer(missing(request)); return }
@@ -884,7 +896,7 @@ final class Bench {
             // A path of the script's own is a test run's: the shipped
             // browser writes where it would have written anyway, never over
             // a file the person has.
-            let path = Store.testing ? ((request["path"] as? String) ?? fallback) : fallback
+            let path = self.testRun ? ((request["path"] as? String) ?? fallback) : fallback
             let width = request["width"] as? Double
             shoot(tab, to: URL(fileURLWithPath: path), width: width, answer)
 
@@ -933,8 +945,11 @@ final class Bench {
             } else {
                 out["responderIsAddress"] = false
             }
-            // What the address field shows, typed and offered ending alike.
-            out["fieldText"] = Bench.addressField(in: (browser.window ?? Links.window)?.contentView)?.stringValue ?? ""
+            // What the address field shows, typed and offered ending alike;
+            // over a private tab, only in a test run, as in `tabs`.
+            let hidden = { (tab: Tab?) in !self.testRun && tab?.shy == true }
+            out["fieldText"] = hidden(browser.active) ? ""
+                : Bench.addressField(in: (browser.window ?? Links.window)?.contentView)?.stringValue ?? ""
             // What the empty field asks for, and its name for VoiceOver.
             let shown = Bench.addressField(in: (browser.window ?? Links.window)?.contentView)
             out["placeholder"] = shown?.placeholderAttributedString?.string ?? shown?.placeholderString ?? ""
@@ -971,7 +986,7 @@ final class Bench {
                 return FrameRate.prefersNear60(preferences)
             }
             // The column folded away, out for a look, and the lights with it (see Fold.swift).
-            out["peek"] = browser.peekTab?.address?.absoluteString ?? ""
+            out["peek"] = hidden(browser.peekTab) ? "" : browser.peekTab?.address?.absoluteString ?? ""
             out["peekFrom"] = browser.peekFrom?.uuidString ?? ""
             // The size the peek's page is drawn at (see Tab.applyRememberedZoom).
             out["peekZoom"] = Double(browser.peekTab?.built?.pageZoom ?? 0)
@@ -1012,7 +1027,7 @@ final class Bench {
             // A key pressed on the app as a whole, through its event queue —
             // so its own shortcuts see it first, as they do a real press;
             // `key` goes straight to a page instead. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "press only works on a --test run — it would press keys in your browser"]); return }
+            guard self.testRun else { answer(["error": "press only works on a --test run — it would press keys in your browser"]); return }
             guard let code = request["code"] as? Int, let chars = request["chars"] as? String
             else { answer(["error": "press needs a key code and the characters it types"]); return }
             var flags: NSEvent.ModifierFlags = []
@@ -1056,7 +1071,7 @@ final class Bench {
             // Keys pressed on a tab, as real key events handed to its view —
             // for what the page does with them, and what comes back unused.
             // Only on a SEARCH_PROBE run: it types into a page.
-            guard Store.testing else { answer(["error": "key only works on a --test run — it would type into your page"]); return }
+            guard self.testRun else { answer(["error": "key only works on a --test run — it would type into your page"]); return }
             guard let tab = find(request, in: browser), let text = request["text"] as? String else { answer(missing(request)); return }
             house(tab)
             let view = tab.web
@@ -1092,7 +1107,7 @@ final class Bench {
             // The window taken to another size in steps, a frame apart, the
             // way a hand drags its corner — for what that does to the title
             // bar. It moves the window, so only on a SEARCH_PROBE run.
-            guard Store.testing else {
+            guard self.testRun else {
                 answer(["error": "resize only works on a --test run — it would move your window"])
                 return
             }
@@ -1127,7 +1142,7 @@ final class Bench {
             // probe's window gets no pointer, so each step calls the rows'
             // own hover answers, the one left and then the one entered, as
             // AppKit hands them over in one pass. Test runs only.
-            guard Store.testing else { answer(["error": "hoversweep is for test runs"]); return }
+            guard self.testRun else { answer(["error": "hoversweep is for test runs"]); return }
             guard let window = browser.window ?? Links.window, browser.prefs.sidebar else {
                 answer(["error": "hoversweep needs the tabs down the side"])
                 return
@@ -1176,7 +1191,7 @@ final class Bench {
             // the press, the page's width at its end, and the rows built in
             // it. The first pass is the press itself, whatever it costs
             // before the slide can start. Test runs only.
-            guard Store.testing else { answer(["error": "foldtime is for test runs"]); return }
+            guard self.testRun else { answer(["error": "foldtime is for test runs"]); return }
             guard let web = browser.active?.built else { answer(["error": "foldtime needs a page on screen"]); return }
             var passes: [[String: Any]] = []
             var woke: CFAbsoluteTime = 0
@@ -1209,7 +1224,7 @@ final class Bench {
             // bookmarks bars were built again along the way, and how long
             // each pass of the main run loop carrying an edit took. Test
             // runs only: it writes the world's bookmarks.
-            guard Store.testing else { answer(["error": "bookmarksweep is for test runs"]); return }
+            guard self.testRun else { answer(["error": "bookmarksweep is for test runs"]); return }
             let count = request["count"] as? Int ?? 10
             let interval = request["interval"] as? Double ?? 1.0 / 60
             let urls = (0..<count).compactMap { URL(string: "https://bookmarksweep.test/\($0)") }
@@ -1247,7 +1262,7 @@ final class Bench {
             // would open, a moment later, and how many times the bookmarks
             // bar was built meanwhile. Test runs only: it writes the world's
             // bookmarks.
-            guard Store.testing else { answer(["error": "keeppage is for test runs"]); return }
+            guard self.testRun else { answer(["error": "keeppage is for test runs"]); return }
             guard let tab = browser.active, let url = tab.address else { answer(["error": "no page on screen"]); return }
             Bench.bodies = [:]
             if request["keep"] as? Bool == false {
@@ -1270,7 +1285,7 @@ final class Bench {
             // the page's view whatever lies over it there (see PageView's
             // covered). The window never sees them, the probe being hidden.
             // Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "pointer only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "pointer only works on a --test run"]); return }
             guard let tab = find(request, in: browser), let web = tab.built, let window = web.window,
                   let x = request["x"] as? Double, let y = request["y"] as? Double
             else { answer(["error": "pointer needs a tab's id, an x and a y"]); return }
@@ -1324,7 +1339,7 @@ final class Bench {
                 // is hidden and takes no events through the app, so they are
                 // handed to the view that catches the middle button over the
                 // tabs (MiddleClick in TabBar.swift), the topmost one there.
-                guard Store.testing else { answer(["error": "hit … middle only works on a --test run"]); return }
+                guard self.testRun else { answer(["error": "hit … middle only works on a --test run"]); return }
                 func catcher(in view: NSView) -> NSView? {
                     for sub in view.subviews.reversed() { if let found = catcher(in: sub) { return found } }
                     guard String(describing: type(of: view)).contains("Catch") else { return nil }
@@ -1353,7 +1368,7 @@ final class Bench {
                 // the window it would never arrive, the probe being in the
                 // back. On a test run only, and meant for a probe started
                 // hidden, where the window changing size shows on no screen.
-                guard Store.testing else { answer(["error": "hit … double only works on a --test run"]); return }
+                guard self.testRun else { answer(["error": "hit … double only works on a --test run"]); return }
                 let before = window.frame
                 func event(_ type: NSEvent.EventType, _ clicks: Int) -> NSEvent? {
                     NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
@@ -1385,7 +1400,7 @@ final class Bench {
             // at a time, each timed from the moment it goes in to the moment
             // the run loop next rests: the list worked out, SwiftUI's update
             // and Core Animation's commit included. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "field only works on a --test run — it would type into your browser"]); return }
+            guard self.testRun else { answer(["error": "field only works on a --test run — it would type into your browser"]); return }
             guard let text = request["text"] as? String, !text.isEmpty else { answer(["error": "field needs some text"]); return }
             let pieces = request["type"] as? Bool == true ? text.map(String.init) : [text]
             if browser.fieldShowing { browser.askFocus() } else { browser.edit() }
@@ -1457,7 +1472,7 @@ final class Bench {
             // ExtensionCapture would, a page lent to it, what it shows, and a
             // picture of it drawn off every screen. A test run never puts
             // the pill itself on a screen. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "recording only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "recording only works on a --test run"]); return }
             let pill = RecordingIndicator.shared
             func state(_ extra: [String: Any] = [:]) -> [String: Any] {
                 var out: [String: Any] = [
@@ -1505,7 +1520,7 @@ final class Bench {
             // the rows, how many questions went out, were let go of or were
             // too slow, and a row taken as a click takes it. Only on a
             // SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "suggest only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "suggest only works on a --test run"]); return }
             func kind(_ offer: Suggestion) -> String {
                 switch offer.kind {
                 case .suggested: "suggested"
@@ -1558,7 +1573,7 @@ final class Bench {
             // Search a site from the address field (SiteSearch.swift): what
             // it offers and holds, Tab, ⌫ in an empty field, Esc, Return,
             // and the sites it has learned. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "sitesearch only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "sitesearch only works on a --test run"]); return }
             func state(_ extra: [String: Any] = [:]) -> [String: Any] {
                 var out: [String: Any] = [
                     "offer": browser.siteOffer?.name ?? "", "chip": browser.siteChip?.name ?? "",
@@ -1600,7 +1615,7 @@ final class Bench {
             // A bookmark picked from the button's list, through the same
             // call the list makes: how long until WebKit is loading it, and
             // until the run loop rests. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "bookmark only works on a --test run — it would load a page in your tab"]); return }
+            guard self.testRun else { answer(["error": "bookmark only works on a --test run — it would load a page in your tab"]); return }
             guard let url = (request["url"] as? String).flatMap(Address.url(from:)) else { answer(["error": "bookmark needs a url"]); return }
             // "new": into a new tab, whose page has yet to be built.
             if request["new"] as? Bool == true { browser.newTab() }
@@ -1652,7 +1667,7 @@ final class Bench {
             // bar's Bookmarks menu, every folder in them opened; and the
             // button's list, row by row — each with what it reads and
             // whether it wears the site's icon or a letter in its place.
-            guard Store.testing else { answer(["error": "marks only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "marks only works on a --test run"]); return }
             // "rename": [url, name] — typed into the ⇧⌘B card's Name field.
             if let pair = request["rename"] as? [String], pair.count == 2,
                let url = URL(string: pair[0]), let kept = browser.bookmarks.bookmark(for: url) {
@@ -1716,7 +1731,7 @@ final class Bench {
             // through the same calls the Welcome and the panels make. Only on
             // a SEARCH_PROBE run, which reads made-up profiles from its own
             // folder's Import/ (see Chromium.base), never a real browser.
-            guard Store.testing else { answer(["error": "import only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "import only works on a --test run"]); return }
             let found = ImportSource.installed()
             guard let source = found.first(where: { $0.name == request["from"] as? String }) else {
                 answer(["found": found.map(\.name)])
@@ -1782,7 +1797,7 @@ final class Bench {
             // its profiles, the one used most recently, and what that one
             // and all of them hold — through the same call the sheet makes,
             // which never asks for a key. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "import-preview only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "import-preview only works on a --test run"]); return }
             let asked = Chromium.keyAsks
             func counts(_ preview: ImportSource.Preview) -> [String: Any] {
                 [L10n.text("Browser.0307"): preview.bookmarks, L10n.text("Browser.0310"): preview.places, L10n.text("Browser.0312"): preview.passwords,
@@ -1804,7 +1819,7 @@ final class Bench {
         case "import-file":
             // A file another browser exported, through the same call the
             // File… buttons make after their chooser. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "import-file only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "import-file only works on a --test run"]); return }
             guard let path = request["path"] as? String else { answer(["error": "import-file needs a path"]); return }
             Task { @MainActor in
                 let took = await browser.takeFile(URL(fileURLWithPath: path))
@@ -1817,7 +1832,7 @@ final class Bench {
             // The bookmarks list's Remove on a top-level folder, question and
             // all: the real sheet, which `press` with "sheet" answers. Only on
             // a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "remove-folder only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "remove-folder only works on a --test run"]); return }
             guard let title = request["title"] as? String,
                   let folder = browser.bookmarks.roots.first(where: { $0.isFolder && $0.title == title })
             else { answer(["error": "no top-level folder by that title"]); return }
@@ -1828,7 +1843,7 @@ final class Bench {
             // narrow it, and with "remove" its Remove All… / Remove N…, which
             // `ui confirm` answers. Only on a SEARCH_PROBE run: it takes
             // passwords out of the keychain (the test world's own, by label).
-            guard Store.testing else { answer(["error": "passwords only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "passwords only works on a --test run"]); return }
             if let filter = request["filter"] as? String { browser.hunting = filter }
             // "shown": the list as the page holds it now, not read again,
             // so a route to the page that never read it shows as empty.
@@ -1849,7 +1864,7 @@ final class Bench {
             // History on a --test run: "take" puts an address in as an import
             // would, since a bench tab's visits never enter it; "forget" drops
             // one as the panel's cross does. Answers with every address kept.
-            guard Store.testing else { answer(["error": "history only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "history only works on a --test run"]); return }
             if let text = request["take"] as? String, let url = Address.url(from: text) {
                 browser.history.take(url, title: text, count: request["count"] as? Int ?? 1, last: Date())
                 browser.history.settle()
@@ -1860,21 +1875,21 @@ final class Bench {
             answer(["history": browser.history.everything().map(\.url.absoluteString)])
 
         case "import-file-start":
-            guard Store.testing else { answer(["error": "import-file only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "import-file only works on a --test run"]); return }
             guard let path = request["path"] as? String else { answer(["error": "import-file needs a path"]); return }
             guard browser.fileImport == nil else { answer(["error": "import already running"]); return }
             Task { @MainActor in _ = await browser.takeFile(URL(fileURLWithPath: path)) }
             answer(["started": true])
 
         case "import-file-status":
-            guard Store.testing else { answer(["error": "import-file only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "import-file only works on a --test run"]); return }
             if let job = browser.fileImport {
                 answer(["running": true, "filename": job.filename, "message": job.message,
                         "completed": job.completed, "total": job.total ?? -1, "cancelling": job.cancelling])
             } else { answer(["running": false]) }
 
         case "import-file-cancel":
-            guard Store.testing else { answer(["error": "import-file only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "import-file only works on a --test run"]); return }
             browser.cancelFileImport()
             answer(["cancelling": browser.fileImport?.cancelling ?? false])
 
@@ -1883,7 +1898,7 @@ final class Bench {
             // every row with its section, group and keys; what Find a
             // setting finds for some words; a merged control moved as its
             // row moves it; the merged values read back. Test runs only.
-            guard Store.testing else { answer(["error": "settings only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "settings only works on a --test run"]); return }
             if let id = request["set"] as? String {
                 guard let value = request["value"], SettingsIndex.apply(id, value, to: browser.prefs) else {
                     answer(["error": "settings set ID VALUE: unknown id or value"]); return
@@ -1902,7 +1917,7 @@ final class Bench {
         case "menus":
             // Every menu of the menu bar, by title, after SwiftUI has filled
             // it. Reads only.
-            guard Store.testing else { answer(["error": "menus only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "menus only works on a --test run"]); return }
             var menus: [String: [String]] = [:]
             for item in NSApp.mainMenu?.items ?? [] {
                 guard let menu = item.submenu else { continue }
@@ -1920,7 +1935,7 @@ final class Bench {
             // which writes WebKit's default in the app's standard domain —
             // the real Search's, for a probe of the real app — so only in a
             // copy under a bundle id of its own (Tests/text_replacement.py).
-            guard Store.testing else { answer(["error": "textcheck only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "textcheck only works on a --test run"]); return }
             let web = find(request, in: browser)?.built ?? browser.active?.built
             if let name = request["toggle"] as? String {
                 guard Store.ownContainer else {
@@ -1956,7 +1971,7 @@ final class Bench {
             // told it is being tracked, SwiftUI's own update run on it, its
             // first folder opened — then what each holds. Only on a
             // SEARCH_PROBE run; nothing is drawn.
-            guard Store.testing else { answer(["error": "menu only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "menu only works on a --test run"]); return }
             guard let main = NSApp.mainMenu, let menu = main.items.first(where: { $0.title == L10n.text("Bookmarks.0231") })?.submenu
             else { answer(["error": "no Bookmarks menu"]); return }
             // "peek": only what is in it now, nothing opened or filled — to
@@ -2000,7 +2015,7 @@ final class Bench {
             // AppKit does with a key window — which a hidden probe hasn't.
             // Reports what Search did and what the page saw. Only on a
             // SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "keyeq only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "keyeq only works on a --test run"]); return }
             guard let tab = browser.active, let web = tab.built, let window = web.window,
                   let chars = request["chars"] as? String, let code = request["code"] as? Int
             else { answer(["error": "keyeq needs a loaded tab, the characters and the key code"]); return }
@@ -2031,7 +2046,7 @@ final class Bench {
         case "image-data":
             // What Copy Image would put on the pasteboard, without putting it
             // there: the picture at an address, read as the menu reads it.
-            guard Store.testing else { answer(["error": "image-data only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "image-data only works on a --test run"]); return }
             guard let tab = (request["id"] as? String).flatMap({ id in browser.tabs.first { $0.id.uuidString.lowercased().hasPrefix(id) } }) ?? browser.active,
                   let text = request["url"] as? String, let url = URL(string: text)
             else { answer(["error": "image-data needs a url"]); return }
@@ -2044,7 +2059,7 @@ final class Bench {
         case "find":
             // Find on Page as typed into its bar, then Next or Previous
             // pressed, and what the bar says once the page has answered.
-            guard Store.testing else { answer(["error": "find only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "find only works on a --test run"]); return }
             let start = Date()
             browser.finding = true
             browser.matchCase = request["case"] as? Bool ?? false
@@ -2071,7 +2086,7 @@ final class Bench {
             // sign's Always Translate. Changing anything: test runs only.
             guard let tab = find(request, in: browser) else { answer(missing(request)); return }
             let action = request["action"] as? String ?? "start"
-            guard Store.testing || ["state", "start", "original"].contains(action) else {
+            guard self.testRun || ["state", "start", "original"].contains(action) else {
                 answer(["error": "translate \(action) only works on a --test run"]); return
             }
             let state: () -> [String: Any] = {
@@ -2126,12 +2141,12 @@ final class Bench {
 
         case "notifications":
             // What a test run would have posted, and every site's answer.
-            guard Store.testing else { answer(["error": "notifications only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "notifications only works on a --test run"]); return }
             answer(["recorded": SiteNotifications.shared.recorded, "choices": SiteNotifications.choices,
                     "asking": browser.asking.map { "\($0.host) \($0.wants)" } ?? ""])
 
         case "answer":
-            guard Store.testing else { answer(["error": "answer only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "answer only works on a --test run"]); return }
             switch request["with"] as? String {
             case "once": browser.allowCaptureOnce()
             case "always": browser.allowCapture()
@@ -2152,7 +2167,7 @@ final class Bench {
             // with "forget", every login this test world kept — its own
             // label's, never another world's or the real one's. "keep" is
             // the save question's Save.
-            guard Store.testing else { answer(["error": "accounts only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "accounts only works on a --test run"]); return }
             if request["keep"] as? Bool == true { browser.keepOffer() }
             if request["forget"] as? Bool == true {
                 Vault.all().forEach { Vault.forget($0) }
@@ -2209,7 +2224,7 @@ final class Bench {
             // off as Settings' Icons only does; the answer is every tile the
             // column has drawn — where, in the window from its top-left, and
             // its tooltip — and the pairs among them. Test runs only.
-            guard Store.testing else { answer(["error": "icons only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "icons only works on a --test run"]); return }
             if let on = request["on"] as? Bool { browser.prefs.tabsLayout = on ? .icons : .left }
             DispatchQueue.main.asyncAfter(deadline: .now() + (request["on"] == nil ? 0 : 0.6)) {
                 let named = Dictionary(uniqueKeysWithValues: browser.tabs.map { ($0.id, Bench.short($0)) })
@@ -2234,7 +2249,7 @@ final class Bench {
             // "helper": false, as on a Mac without it. "show"/"drop": the row
             // up under the tab in front, or the list taken down. "use",
             // "never": its row or its ✕ clicked. "forget": never offered.
-            guard Store.testing else { answer(["error": "appleoffer only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "appleoffer only works on a --test run"]); return }
             if let on = request["asks"] as? Bool {
                 ApplePasswordsOffer.benchAsks = on
                 if on, browser.applePasswords.standIn == nil {
@@ -2271,7 +2286,7 @@ final class Bench {
             // of where it is, STEPS times, 8 ms apart, each timed until the
             // run loop rests again — SwiftUI's update and Core Animation's
             // commit included. For the reading fill and what watches the tab.
-            guard Store.testing else { answer(["error": "fill only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "fill only works on a --test run"]); return }
             guard let tab = browser.active else { answer(["error": "no tab"]); return }
             let steps = max(1, request["steps"] as? Int ?? 200)
             var times: [Double] = []
@@ -2297,7 +2312,7 @@ final class Bench {
             // A link's page in the peek panel over the tab in front, as a
             // shift-click on it would open it (see Peek.swift); "close" puts
             // it away. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "peek only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "peek only works on a --test run"]); return }
             if request["url"] as? String == "close" {
                 browser.closePeek()
                 answer(["peek": ""])
@@ -2313,7 +2328,7 @@ final class Bench {
             // events spread over MS milliseconds, with a trackpad's phases,
             // handed to the page's view — for the swipe back and forward.
             // Reports where the tab is after. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "pull only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "pull only works on a --test run"]); return }
             guard let tab = browser.active, let web = tab.built, let dx = request["dx"] as? Double
             else { answer(["error": "pull needs a loaded tab and a distance"]); return }
             let steps = max(2, request["steps"] as? Int ?? 10)
@@ -2350,7 +2365,7 @@ final class Bench {
             // The trackpad's pinch, as WebKit ends it: the page's scale set
             // around a point (in the view, from its top left), or read back
             // with no scale given. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "magnify only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "magnify only works on a --test run"]); return }
             guard let tab = find(request, in: browser), let web = tab.built else { answer(missing(request)); return }
             // ⌘+ and ⌘−'s kind: the page's own zoom, as View › Zoom In sets it.
             if let zoom = request["zoom"] as? Double { tab.magnify(to: CGFloat(zoom)) }
@@ -2368,7 +2383,7 @@ final class Bench {
             // Two fingers on the trackpad over the page, any way: DX, DY
             // points in STEPS events over MS milliseconds, with a trackpad's
             // phases and, if asked, a glide after. Only on a SEARCH_PROBE run.
-            guard Store.testing else { answer(["error": "wheel only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "wheel only works on a --test run"]); return }
             guard let tab = find(request, in: browser), let web = tab.built else { answer(missing(request)); return }
             let dx = request["dx"] as? Double ?? 0, dy = request["dy"] as? Double ?? 0
             let steps = max(2, request["steps"] as? Int ?? 10)
@@ -2415,7 +2430,7 @@ final class Bench {
             // ("y" from the window's top) as AppKit would hand it, so a row
             // that swallowed the wheel would show. Positive goes down the
             // list. Nothing is shown or brought forward. Test runs only.
-            guard Store.testing else { answer(["error": "columnscroll only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "columnscroll only works on a --test run"]); return }
             guard let window = browser.window ?? Links.window, let frame = window.contentView?.superview,
                   browser.prefs.sidebar
             else { answer(["error": "columnscroll needs the tabs down the side"]); return }
@@ -2481,7 +2496,7 @@ final class Bench {
         case L10n.text("Browser.0309"):
             // A tab put at another place in the row, as a drag would.
             guard let id = request["id"] as? String, let to = request["to"] as? Int,
-                  let tab = browser.tabs.first(where: { Bench.short($0) == id && (Store.testing || $0.bench) })
+                  let tab = browser.tabs.first(where: { Bench.short($0) == id && (self.testRun || $0.bench) })
             else { answer(["error": "place needs a tab id and an index"]); return }
             browser.move(tab, to: to)
             answer(["at": browser.tabs.firstIndex { $0.id == tab.id } ?? -1])
@@ -2490,7 +2505,7 @@ final class Bench {
             // Tab groups, as their menus make and change them (TabGroups.swift):
             // a tab into a new group or an existing one, or out; a group
             // folded or opened. Test runs only: it rearranges your tabs.
-            guard Store.testing else { answer(["error": "group only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "group only works on a --test run"]); return }
             let named = request["name"] as? String ?? ""
             let group = browser.tabGroups.first { $0.name == named || $0.id.uuidString.lowercased().hasPrefix(named.lowercased()) && !named.isEmpty }
             if let id = request["id"] as? String {
@@ -2555,7 +2570,7 @@ final class Bench {
 
         case "tospace":
             // Move to Space from a tab's menu, to the Nth space. Test runs only.
-            guard Store.testing else { answer(["error": "tospace only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "tospace only works on a --test run"]); return }
             // "group": a group by name, as its menu's Move Group to Space.
             if let name = request["group"] as? String, let index = request["index"] as? Int,
                browser.spaces.indices.contains(index - 1) {
@@ -2577,7 +2592,7 @@ final class Bench {
         case "window":
             // The browser's window, when a probe started hidden came up
             // without one: the Window menu's own item for it.
-            guard Store.testing else { answer(["error": "window only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "window only works on a --test run"]); return }
             if (browser.window ?? Links.window)?.contentView != nil, NSApp.windows.contains(where: { $0 === (browser.window ?? Links.window) }) {
                 answer(["window": "there"])
                 return
@@ -2598,7 +2613,7 @@ final class Bench {
             // once its windows are all off the screen — the browser's own put
             // away, the bench's room far off every screen. Anything of the
             // app's that would show on a screen and the app is hidden again.
-            guard Store.testing, let window = browser.window ?? Links.window else { answer(["error": "pages only works on a --test run"]); return }
+            guard self.testRun, let window = browser.window ?? Links.window else { answer(["error": "pages only works on a --test run"]); return }
             func onScreen(_ w: NSWindow) -> Bool { NSScreen.screens.contains { $0.frame.intersects(w.frame) } }
             if request["on"] as? Bool == true {
                 _ = room ?? makeRoom()
@@ -2625,7 +2640,7 @@ final class Bench {
             // page on screen put in as WebKit pictures it — from a probe
             // started hidden, so nothing shows on anybody's screen. For the
             // images on the site.
-            guard Store.testing else { answer(["error": "picture only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "picture only works on a --test run"]); return }
             guard let window = browser.window ?? Links.window, let frame = window.contentView?.superview,
                   let path = request["path"] as? String, !path.isEmpty
             else { answer(["error": "picture needs a path"]); return }
@@ -2751,7 +2766,7 @@ final class Bench {
             // ones: where a flick, a pull at a side, a dock and a click on
             // the sliver leave it. Test runs only, with the window off every
             // screen (after `film float`), and nothing shown.
-            guard Store.testing else { answer(["error": "float only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "float only works on a --test run"]); return }
             guard Float.benchAway != nil,
                   let panel = NSApp.windows.first(where: { "\(type(of: $0))" == "Panel" && $0.isVisible }),
                   let controls = panel.contentView?.subviews.first(where: { "\(type(of: $0))" == "Controls" })
@@ -2872,7 +2887,7 @@ final class Bench {
             // with the browser's window moved off the screens, put that
             // window back on one: a titled window is put on a screen as it
             // is shown.)
-            guard Store.testing else { answer(["error": "film only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "film only works on a --test run"]); return }
             guard NSApp.isHidden else { answer(["error": "film float needs a probe started hidden"]); return }
             guard let window = Links.window, let path = request["path"] as? String, !path.isEmpty
             else { answer(["error": "film float needs the browser's window (bench window) and a path"]); return }
@@ -3125,7 +3140,7 @@ final class Bench {
             // would see of it, from a probe started hidden that nobody sees.
             // The lights' own slide is a Core Animation one, which a drawing
             // doesn't show: where they are is reported beside each frame.
-            guard Store.testing else { answer(["error": "film only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "film only works on a --test run"]); return }
             guard let window = browser.window ?? Links.window, let frame = window.contentView?.superview,
                   let path = request["path"] as? String, !path.isEmpty
             else { answer(["error": "film needs something to do and a path"]); return }
@@ -3220,7 +3235,7 @@ final class Bench {
             // The page on screen as File › Export as PDF… makes it, without
             // a save panel. A test path only: a real browser never lets the
             // bench write a file chosen behind its person's back.
-            guard Store.testing else { answer(["error": "pdf only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "pdf only works on a --test run"]); return }
             guard let path = request["path"] as? String, !path.isEmpty else {
                 answer(["error": "pdf needs a path"])
                 return
@@ -3234,7 +3249,7 @@ final class Bench {
         case "update":
             // The updater, for a test run pointed at its own feed: `check`
             // is the menu's Check for Updates…, `disk` the Download button.
-            guard Store.testing else { answer(["error": "update only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "update only works on a --test run"]); return }
             let updater = Updater.shared
             switch request["action"] as? String {
             case "check": updater.checkByHand()
@@ -3249,7 +3264,7 @@ final class Bench {
         case "consent":
             // The mark the Settings switch leaves (see Consent), in this test
             // world's own account: given, then granted or revoked if asked.
-            guard Store.testing else { answer(["error": "consent only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "consent only works on a --test run"]); return }
             let before = Consent.given
             switch request["action"] as? String {
             case "grant": Consent.grant()
@@ -3263,7 +3278,7 @@ final class Bench {
             // folded (see Fold.swift), drawn off screen over red: whatever of
             // the page would show through it shows red. `picture` can't say —
             // it lays the page's own picture over everything drawn above it.
-            guard Store.testing else { answer(["error": "fold only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "fold only works on a --test run"]); return }
             guard let path = request["path"] as? String else { answer(["error": "fold needs a path"]); return }
             guard browser.folded, browser.peeking else { answer(["error": "fold and peek first: ui folded on, ui peek on"]); return }
             let width = request["width"] as? Double ?? 1100
@@ -3320,14 +3335,16 @@ final class Bench {
                 "said": LittleWindow.all.last?.said ?? "",
                 "zoom": LittleWindow.all.last?.tab.built.map { Double($0.pageZoom) } ?? 0,
                 "failures": LittleWindow.all.map { $0.tab.failure ?? "" },
-                "tabs": browser.tabs.map { ($0.pin != nil ? "PIN " : "") + ($0.address?.host() ?? "blank") },
-                "active": browser.active?.address?.host() ?? "",
+                // Private tabs left out of a real run's, as in `tabs`.
+                "tabs": browser.tabs.filter { self.testRun || !$0.shy }
+                    .map { ($0.pin != nil ? "PIN " : "") + ($0.address?.host() ?? "blank") },
+                "active": browser.active.flatMap { self.testRun || !$0.shy ? $0.address?.host() : nil } ?? "",
             ])
 
         case "site":
             // The site card for the tab on screen, or one step in on its
             // connection, drawn off screen (see SiteCard.swift).
-            guard Store.testing else { answer(["error": "site only works on a --test run — it would picture your tab"]); return }
+            guard self.testRun else { answer(["error": "site only works on a --test run — it would picture your tab"]); return }
             guard let path = request["path"] as? String else { answer(["error": "site needs a path"]); return }
             guard let tab = browser.active, !tab.isBlank else { answer(["error": "no page on screen"]); return }
             let deeper = request["security"] as? Bool == true
@@ -3352,7 +3369,7 @@ final class Bench {
         case "column":
             // The column of tabs, drawn off screen at its width, with what the
             // browser has now — the rows, the card for a new space, the dots.
-            guard Store.testing else { answer(["error": "column only works on a --test run — it would picture your tabs"]); return }
+            guard self.testRun else { answer(["error": "column only works on a --test run — it would picture your tabs"]); return }
             guard let path = request["path"] as? String else { answer(["error": "column needs a path"]); return }
             let height = request["height"] as? Double ?? 600
             let width = Double(browser.prefs.columnWidth)
@@ -3375,7 +3392,7 @@ final class Bench {
         case "profile":
             // The profiles (see Profiles.swift), for a test of what one keeps
             // apart. Test runs only: it makes and deletes profiles and windows.
-            guard Store.testing else { answer(["error": "profile only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "profile only works on a --test run"]); return }
             let profiles = Profiles.shared
             let named = (request["name"] as? String).flatMap { name in profiles.list.first { $0.name == name } }
             switch request["action"] as? String ?? "list" {
@@ -3418,7 +3435,7 @@ final class Bench {
         case "space":
             // The spaces, and switching between them, for a test of what a
             // space keeps apart. Test runs only: it moves your tabs about.
-            guard Store.testing else { answer(["error": "space only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "space only works on a --test run"]); return }
             switch request["action"] as? String ?? "" {
             case "new": browser.addSpace(named: request["name"] as? String ?? "Test", sharesSignIns: request["fresh"] as? Bool != true)
             case "go": browser.switchSpace(index: (request["index"] as? Int ?? 1) - 1)
@@ -3509,9 +3526,9 @@ final class Bench {
             // Open or close the app's own panels, to reproduce what a person
             // did without a person. It drives the browser the person is
             // using, so it is a test run's alone.
-            guard Store.testing else { answer(["error": "ui needs a test run"]); return }
+            guard self.testRun else { answer(["error": "ui needs a test run"]); return }
             if let on = request["settings"] as? Bool { browser.tuning = on }
-            if let on = request[L10n.text("Browser.0312")] as? Bool, Store.testing { browser.managing = on }
+            if let on = request[L10n.text("Browser.0312")] as? Bool, self.testRun { browser.managing = on }
             if let on = request["welcome"] as? Bool { browser.welcoming = on }
             if let on = request["history"] as? Bool { browser.recalling = on }
             if let on = request["downloads"] as? Bool { browser.hoarding = on }
@@ -3543,27 +3560,27 @@ final class Bench {
             if let on = request["dusk"] as? Bool { browser.prefs.darkensPages = on }
             if let on = request["sidebar"] as? Bool { browser.prefs.sidebar = on }
             // Swipe between pages, standing in for the Mac's own setting.
-            if let on = request["swipepages"] as? Bool, Store.testing { Swipe.testing = on }
+            if let on = request["swipepages"] as? Bool, self.testRun { Swipe.testing = on }
             // Ask.sure answered without a sheet: yes or no to every question
             // from now on, until "ask".
-            if let yes = request["confirm"] as? Bool, Store.testing { Ask.testing = yes }
+            if let yes = request["confirm"] as? Bool, self.testRun { Ask.testing = yes }
             // "ask": the real question again, as a person gets it.
             if request["confirm"] as? String == "ask" { Ask.testing = nil }
             if let on = request["spaces"] as? Bool { browser.prefs.usesSpaces = on }
-            if let on = request["groups"] as? Bool, Store.testing { browser.prefs.usesTabGroups = on }
+            if let on = request["groups"] as? Bool, self.testRun { browser.prefs.usesTabGroups = on }
             if let on = request["sharedpins"] as? Bool { browser.prefs.sharesPins = on }
             if let on = request["hides"] as? Bool { browser.prefs.sideHides = on }
             if let on = request["cards"] as? Bool { browser.prefs.cards = on }
             if let on = request["address"] as? Bool { browser.prefs.showsAddress = on }
             // Settings › Videos wait for a click, moved as its switch moves it.
-            if let on = request["waits"] as? Bool, Store.testing { browser.prefs.waitsForPlay = on }
+            if let on = request["waits"] as? Bool, self.testRun { browser.prefs.waitsForPlay = on }
             // Settings › Privacy's two switches (see Privacy.swift).
-            if let on = request["gpc"] as? Bool, Store.testing { browser.prefs.sendsPrivacySignal = on }
-            if let on = request["clickids"] as? Bool, Store.testing { browser.prefs.removesClickIDs = on }
+            if let on = request["gpc"] as? Bool, self.testRun { browser.prefs.sendsPrivacySignal = on }
+            if let on = request["clickids"] as? Bool, self.testRun { browser.prefs.removesClickIDs = on }
             if let on = request["folded"] as? Bool { browser.folded = on }
             // The window's own full screen as the chrome sees it, without
             // the window going there: a test run never takes the screen.
-            if let on = request["fullscreen"] as? Bool, Store.testing { browser.fullScreen = on }
+            if let on = request["fullscreen"] as? Bool, self.testRun { browser.fullScreen = on }
             if let on = request["peek"] as? Bool { browser.peeking = on }
             // A peek at a link (Peek.swift): its two buttons.
             if let what = request["peeklink"] as? String {
@@ -3622,7 +3639,7 @@ final class Bench {
             state["tabs"] = browser.tabs.count
             switch request["action"] as? String ?? "state" {
             case "eval":
-                guard Store.testing else { answer(["error": "sidepanel eval only works on a --test run"]); return }
+                guard self.testRun else { answer(["error": "sidepanel eval only works on a --test run"]); return }
                 guard let web, let js = request["js"] as? String else { answer(["error": "no panel page"]); return }
                 web.evaluateJavaScript(js) { value, error in
                     if let error { answer(["error": error.localizedDescription]) } else { answer(["value": Bench.plain(value)]) }
@@ -3630,17 +3647,17 @@ final class Bench {
             case "touch":
                 // A real click in the panel's page, as the event watcher
                 // records one (Extensions.touched). Test runs only.
-                guard Store.testing else { answer(["error": "sidepanel touch only works on a --test run"]); return }
+                guard self.testRun else { answer(["error": "sidepanel touch only works on a --test run"]); return }
                 if #available(macOS 15.4, *), case .page(let id, _, _) = browser.sidePanel { Extensions.touched[id] = Date() }
                 answer(state)
             case "close":
-                guard Store.testing else { answer(["error": "sidepanel close only works on a --test run"]); return }
+                guard self.testRun else { answer(["error": "sidepanel close only works on a --test run"]); return }
                 browser.closeSidePanel()
                 answer(["shown": browser.sidePanelShown])
             case "site":
                 // A website into the panel, as View › Side Panel puts one
                 // there (or the tab's menu, with "tab"). Test runs only.
-                guard Store.testing else { answer(["error": "sidepanel site only works on a --test run"]); return }
+                guard self.testRun else { answer(["error": "sidepanel site only works on a --test run"]); return }
                 if let id = request["tab"] as? String, let tab = browser.tabs.first(where: { $0.id.uuidString.lowercased().hasPrefix(id.lowercased()) }) {
                     browser.openInSidePanel(tab)
                 } else if let url = (request["url"] as? String).flatMap(URL.init(string:)) {
@@ -3650,11 +3667,11 @@ final class Bench {
             case "crash":
                 // The panel's website told its process is gone, as WebKit
                 // tells a crash. Test runs only.
-                guard Store.testing else { answer(["error": "sidepanel crash only works on a --test run"]); return }
+                guard self.testRun else { answer(["error": "sidepanel crash only works on a --test run"]); return }
                 SidePanelPages.shared.siteCrashed(in: browser)
                 answer(SidePanelPages.shared.siteReport(in: browser))
             case "totab":
-                guard Store.testing else { answer(["error": "sidepanel totab only works on a --test run"]); return }
+                guard self.testRun else { answer(["error": "sidepanel totab only works on a --test run"]); return }
                 browser.sitePanelToTab()
                 answer(["shown": browser.sidePanelShown, "tabs": browser.tabs.count])
             default:
@@ -3667,7 +3684,7 @@ final class Bench {
             // 0), allow and remove do what the sign and Settings › Privacy
             // do: test runs only, they open tabs and change settings.
             let action = request["action"] as? String ?? "state"
-            guard Store.testing || ["state", "sites"].contains(action) else {
+            guard self.testRun || ["state", "sites"].contains(action) else {
                 answer(["error": "popups \(action) only works on a --test run"]); return
             }
             let sites: () -> [String: Any] = { ["allowed": browser.prefs.popupSites.sorted()] }
@@ -3742,7 +3759,7 @@ final class Bench {
         browser: Browser,
         _ answer: @escaping ([String: Any]) -> Void
     ) {
-        guard Store.testing else {
+        guard self.testRun else {
             answer(["error": "split only works on a --test run"])
             return
         }
@@ -4185,7 +4202,7 @@ final class Bench {
     @available(macOS 15.4, *)
     private func extensionCommand(_ verb: String, _ request: [String: Any], browser: Browser, _ answer: @escaping ([String: Any]) -> Void) {
         let extensions = Extensions.shared
-        let skip = Store.testing && (request["yes"] as? Bool ?? false)
+        let skip = self.testRun && (request["yes"] as? Bool ?? false)
         switch verb {
         case "extensions":
             answer(["started": extensions.started, "busy": extensions.busy.sorted(), "extensions": extensions.installed.map { item -> [String: Any] in
@@ -4211,7 +4228,7 @@ final class Bench {
             answer(["started": true])
         case "ext-crx":
             // Test runs only: a store package on disk, verified against its id.
-            guard Store.testing else { answer(["error": "ext-crx only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "ext-crx only works on a --test run"]); return }
             guard let path = request["path"] as? String, let id = request["id"] as? String,
                   let data = FileManager.default.contents(atPath: path)
             else { answer(["error": "ext-crx needs a path and an id"]); return }
@@ -4220,7 +4237,7 @@ final class Bench {
         case "ext-fetches":
             // Test runs only: what went through ExtensionFetch — addresses,
             // statuses, cookie names, never a value.
-            guard Store.testing else { answer(["error": "ext-fetches only works on a --test run"]); return }
+            guard self.testRun else { answer(["error": "ext-fetches only works on a --test run"]); return }
             answer(["trace": ExtensionFetch.trace, "on": ExtensionFetch.on])
             if request["clear"] as? Bool == true { ExtensionFetch.trace.removeAll() }
         case "ext-folder":
@@ -4236,7 +4253,7 @@ final class Bench {
             extensions.setEnabled(id, request["on"] as? Bool ?? true)
             answer(["enabled": request["on"] as? Bool ?? true])
         case "ext-private":
-            guard Store.testing else { answer(["error": "only in a test run"]); return }
+            guard self.testRun else { answer(["error": "only in a test run"]); return }
             guard let id = request["id"] as? String, let context = extensions.contexts[id] else {
                 answer(["error": "ext-private needs a loaded extension's id"]); return
             }
@@ -4253,7 +4270,7 @@ final class Bench {
         case "ext-answer":
             // In a test run: answer every extension's question yes or no
             // without asking, or go back to asking.
-            guard Store.testing else { answer(["error": "only in a test run"]); return }
+            guard self.testRun else { answer(["error": "only in a test run"]); return }
             switch request["answer"] as? String {
             case "yes": extensions.answerForTests = true
             case "no": extensions.answerForTests = false
@@ -4262,19 +4279,19 @@ final class Bench {
             answer(["answer": request["answer"] as? String ?? "ask", "asked": extensions.asked])
         case "ext-shot":
             // A picture of the extension's popup, while it is open.
+            guard self.testRun, let path = request["path"] as? String else {
+                answer(["error": "ext-shot needs a test run and a path"])
+                return
+            }
             guard let id = request["id"] as? String, ExtensionPopup.shared.extensionID == id,
                   let web = ExtensionPopup.shared.view
             else { answer(["error": "no popup open for that extension"]); return }
             // A picture goes where a test asked; a shipped browser has no
             // reason to write a file of the script's choosing.
-            guard Store.testing, let path = request["path"] as? String else {
-                answer(["error": "ext-shot needs a test run and a path"])
-                return
-            }
             shoot(web, to: URL(fileURLWithPath: path), width: nil, answer)
         case "ext-menu":
             // The list behind the puzzle button, as a picture.
-            guard Store.testing, let path = request["path"] as? String,
+            guard self.testRun, let path = request["path"] as? String,
                   let data = extensionMenuPicture()?.representation(using: .png, properties: [:]) else {
                 answer(["error": "ext-menu needs a test run and a path"])
                 return
@@ -4329,7 +4346,7 @@ final class Bench {
     /// `window.open` carries no flask and would be out of reach otherwise.
     private func find(_ request: [String: Any], in browser: Browser) -> Tab? {
         guard let ref = (request["id"] as? String)?.lowercased(), !ref.isEmpty else { return nil }
-        return browser.tabs.first { (Store.testing || $0.bench) && $0.id.uuidString.lowercased().hasPrefix(ref) }
+        return browser.tabs.first { (self.testRun || $0.bench) && $0.id.uuidString.lowercased().hasPrefix(ref) }
     }
 
     private func missing(_ request: [String: Any]) -> [String: Any] {
@@ -4690,7 +4707,7 @@ private final class LayoutRecord {
 /// Each pass of the main run loop, from waking to going back to sleep, in
 /// milliseconds: the ones that carried a pointer move ("hoversweep") apart
 /// from the rest (timers, animation, anything else).
-private final class LoopClock: @unchecked Sendable {
+final class LoopClock: @unchecked Sendable {
     private(set) var marked: [Double] = []
     private(set) var unmarked: [Double] = []
     private var woke: CFAbsoluteTime = 0

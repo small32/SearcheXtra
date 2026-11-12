@@ -4,6 +4,10 @@
 
 ### 简体中文
 
+- 合并 Search 上游 `e60aaab..b0f57a6` 的 18 个 macOS 修复与性能优化，保留中文界面、书签增强、超级拖拽及本地安全修复。
+- 修复 macOS 14/15 关闭标签或结束媒体时的崩溃，以及无痕预览链接、扩展字体权限和多窗口扩展菜单问题；图片右键菜单保留扩展操作。
+- 扩展后台进程共享 WebKit 进程池，重启 worker 时清理旧原生辅助进程；减少查找栏、标签和侧栏的不必要刷新，侧栏宽度松手后保存，动态标题不再反复重写历史文件。
+- 改善标签拖出分组与批量分组、后台链接的 ⌃Tab 切换、全屏视频标签快捷键、小窗口链接及空间切换布局。
 - 修复 HTTP/HTTPS 同名密码读取混用与列表标识冲突；保存、更新和填充登录信息时核对实际框架及文档，避免 iframe 凭据归属错误。
 - 修复退出时空图标索引覆盖、删除单条历史后图标请求恢复记录，以及空间和窗口列表读取失败后覆盖原数据的问题。
 - 修复链接预览和外链小窗口内用户脚本的 GM 消息与连接；扩展清理数据时忽略未选中的类型，并恢复应用缓存清理。
@@ -32,6 +36,10 @@
 
 ### English
 
+- Merge 18 macOS fixes and performance improvements from Search upstream `e60aaab..b0f57a6`, preserving localization, bookmark enhancements, super drag, and local security fixes.
+- Fix crashes when closing tabs or stopping media on macOS 14/15, private peek links, extension font permissions, and multiwindow extension menus; preserve extension actions in image context menus.
+- Share the WebKit process pool with extension workers and stop their old native helpers on restart. Reduce find-bar, tab, and sidebar redraws, save dragged widths on release, and avoid rewriting history for every title change.
+- Improve dragging tabs out of groups, grouping selected tabs, ⌃Tab navigation to background links, tab shortcuts over fullscreen video, small-window links, and space-switching layouts.
 - Keep same-account HTTP/HTTPS passwords and list identities separate; verify the actual frame and document when saving, updating or filling credentials.
 - Fix empty favicon indexes overwriting existing data on quit, late favicon requests restoring deleted history paths, and unreadable space/window lists being overwritten without recovery copies.
 - Restore GM messaging and connections in link previews and small external-link windows; ignore unselected browsing-data types and restore app-cache removal.

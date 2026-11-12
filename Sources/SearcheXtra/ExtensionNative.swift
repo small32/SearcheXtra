@@ -99,6 +99,7 @@ enum ExtensionNative {
                 // The shim's answer to "alive" (below) is only the worker
                 // keeping itself: nothing to say back.
                 guard (word as? String) == "here?" else { return }
+                Live.pipes[ObjectIdentifier(pipe)]?.worker = true
                 port.sendMessage(["__searchNative": "here"], completionHandler: nil)
                 // Asked, it is a worker's port, and WebKit unloads a worker
                 // that hasn't posted on a port for two minutes: iCloud
@@ -119,7 +120,7 @@ enum ExtensionNative {
         }
         port.disconnectHandler = { _ in beating?.invalidate(); beating = nil; pipe.stop() }
         // Install both ends before launching a host that may answer at once.
-        Live.keep(pipe, for: port)
+        Live.keep(pipe, for: port, of: extensionID)
         do { try pipe.start() } catch { pipe.stop(); throw error }
     }
 
@@ -132,14 +133,32 @@ enum ExtensionNative {
     /// connected keeps its own.
     @MainActor
     static func stopOrphans() {
-        for (pipe, port) in Live.pipes.values where port.isDisconnected { pipe.stop() }
+        for live in Live.pipes.values where live.port.isDisconnected { live.pipe.stop() }
+    }
+
+    /// A worker's ports go with it, yet WebKit, stopping an idle worker and
+    /// starting it again on the next page, neither calls their disconnect
+    /// handlers nor always has them read as disconnected: each new worker
+    /// of 1Password's opened a host and the last one's ran on, dozens in an
+    /// afternoon (#1036). So as an extension's worker starts again, the
+    /// hosts its last worker opened are stopped, as Chrome stops a host
+    /// whose worker has gone. Only a worker's ports ask "here?" (see the
+    /// shim), so its pages' ports are left as they are.
+    @MainActor
+    static func stopWorkerHosts(of extensionID: String) {
+        for live in Live.pipes.values where live.worker && live.extensionID == extensionID {
+            let cleanup = live.port.disconnectHandler
+            live.port.disconnectHandler = nil
+            cleanup?(nil)
+            if !live.port.isDisconnected { live.port.disconnect() }
+        }
     }
 
     /// Hosts that are connected, held until they end.
     private enum Live {
-        nonisolated(unsafe) static var pipes: [ObjectIdentifier: (pipe: HostPipe, port: WKWebExtension.MessagePort)] = [:]
-        static func keep(_ pipe: HostPipe, for port: WKWebExtension.MessagePort) {
-            pipes[ObjectIdentifier(pipe)] = (pipe, port)
+        nonisolated(unsafe) static var pipes: [ObjectIdentifier: (pipe: HostPipe, port: WKWebExtension.MessagePort, extensionID: String, worker: Bool)] = [:]
+        static func keep(_ pipe: HostPipe, for port: WKWebExtension.MessagePort, of extensionID: String) {
+            pipes[ObjectIdentifier(pipe)] = (pipe, port, extensionID, false)
             let previous = pipe.onExit
             pipe.onExit = {
                 previous?()

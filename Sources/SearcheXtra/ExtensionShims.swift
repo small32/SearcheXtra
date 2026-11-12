@@ -4184,6 +4184,7 @@ enum ExtensionShims {
         "power": "power",
         "tts": "tts",
         "tabGroups": "tabGroups",
+        "fontSettings": "fontSettings",
         // The family is "tabs", but these three are tabGroups' own: without
         // this, an extension that never asked for tabGroups could still
         // make, join and leave groups by calling through "tabs".
@@ -4197,6 +4198,13 @@ enum ExtensionShims {
         "system.storage": "system.storage",
         "system.display": "system.display",
     ]
+
+    /// The family a call belongs to: `system.*` are each their own
+    /// permission in Chrome, so they keep two parts.
+    static func family(of api: String) -> String {
+        let parts = api.split(separator: ".")
+        return parts.prefix(parts.first == "system" ? 2 : 1).joined(separator: ".")
+    }
 
     /// What this extension asked for: the names in its manifest and any
     /// optional ones granted since. The checks inside the shim are a
@@ -4308,8 +4316,7 @@ enum ExtensionShims {
         // "system.cpu.getInfo" asks for). The longest name that fits wins,
         // so a sensitive corner can ask for another permission than the
         // rest of its family.
-        let family = String(api.prefix(while: { $0 != "." }))
-        let needed = gates[api] ?? gates[family] ?? gates
+        let needed = gates[api] ?? gates[family(of: api)] ?? gates
             .filter { api.hasPrefix($0.key + ".") }
             .max { $0.key.count < $1.key.count }?.value
         if let needed, !allowed(id, context: context).contains(needed) {

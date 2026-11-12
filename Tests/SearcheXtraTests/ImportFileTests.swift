@@ -307,6 +307,17 @@ final class ImportFileTests: XCTestCase {
         XCTAssertEqual(afterMissing.bookmarks, originalRecord.bookmarks)
         XCTAssertEqual(afterMissing.bookmarkIDs, originalRecord.bookmarkIDs)
 
+        // The profile is still discoverable through History, but its
+        // Bookmarks file disappeared between imports. This is not a clean
+        // empty import and must not authorize withdrawing the previous one.
+        try Data().write(to: usual.appendingPathComponent("History"))
+        try FileManager.default.removeItem(at: usual.appendingPathComponent("Bookmarks"))
+        XCTAssertFalse(Chromium.bookmarkRead(in: source, profile: "Default").complete)
+        let vanished = browser.takeBookmarks(from: .chromium(source), profile: "Default", replacing: true)
+        XCTAssertTrue(vanished.kept)
+        XCTAssertTrue(Bookmarks.urls(bookmarks.roots).map(\.absoluteString).contains(originalURL))
+        XCTAssertEqual(ImportRecords.of(source.name)?.bookmarkIDs, originalRecord.bookmarkIDs)
+
         let readableURL = "https://readable-profile.example/"
         try writeChromiumBookmarks([chromiumURL("Updated", readableURL)], to: usual)
         try Data("malformed profile bookmarks".utf8).write(to: broken.appendingPathComponent("Bookmarks"))

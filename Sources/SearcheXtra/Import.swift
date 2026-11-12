@@ -308,9 +308,9 @@ enum Chromium {
 
     /// The same, and whether every profile asked for read cleanly: false
     /// when there was no profile to read, or a Bookmarks file there didn't
-    /// read. A profile with no Bookmarks file has none — Chromium writes it
-    /// with the first — and reads cleanly. Replace takes nothing out unless
-    /// this is true (#375).
+    /// read. A missing Bookmarks file is incomplete too: it may have been
+    /// removed since the last import. Replace takes nothing out unless this
+    /// is true (#375).
     static func bookmarkRead(in source: Source, profile: String? = nil) -> (nodes: [Bookmark], complete: Bool) {
         var out: [Bookmark] = []
         let profiles = source.profiles(only: profile)
