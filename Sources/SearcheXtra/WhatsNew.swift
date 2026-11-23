@@ -35,6 +35,34 @@ enum WhatsNew {
     /// Every switch worth meeting, oldest last. The card shows this
     /// version's, and the older ones still off.
     static let toggles: [Toggle] = [
+        Toggle(title: L10n.text("upstream.319.settings.spaces.commandNumbers.title"), detail: "As in Arc: the tabs move to ⌃1–⌃9.",
+               since: "1.0.15", get: { $0.spacesOnCommand }, set: { $0.spacesOnCommand = $1 },
+               shown: { $0.usesSpaces }),
+        Toggle(title: L10n.text("upstream.319.settings.tabs.mirror.title"), detail: "Every window lists the same open tabs, as Arc's sidebar does.",
+               since: "1.0.15", get: { $0.mirrorsTabs }, set: { $0.mirrorsTabs = $1 }),
+        Toggle(title: L10n.text("upstream.319.settings.links.optionSplit.title"), detail: "Beside the page you're reading.",
+               since: "1.0.15", get: { $0.optionClickSplits }, set: { $0.optionClickSplits = $1 }),
+        Toggle(title: L10n.text("upstream.319.settings.pages.bounce.title"), detail: "Pages stretch past their ends and spring back, as in Safari.",
+               since: "1.0.15", get: { $0.bounces }, set: { $0.bounces = $1 }),
+        Toggle(title: L10n.text("upstream.319.settings.sidebar.slides.title"), detail: "An eased slide for ⌘S and the column that hides.",
+               since: "1.0.15", get: { $0.slidesColumn }, set: { $0.slidesColumn = $1 }),
+
+        Toggle(title: L10n.text("upstream.319.settings.sites.styles.title"), detail: "Edit Site Style… in the View menu: your CSS for the site you're on, as Arc's Boosts.",
+               since: "1.0.14", get: { $0.sitesStyles }, set: { $0.sitesStyles = $1 }),
+        Toggle(title: L10n.text("upstream.319.settings.layout.cardsFullScreen.title"), detail: "The page keeps its room and rounded corners when the window fills the screen.",
+               since: "1.0.14", get: { $0.cardsInFullScreen }, set: { $0.cardsInFullScreen = $1 },
+               shown: { $0.sidebar && $0.cards }),
+        Toggle(title: L10n.text("upstream.319.settings.pins.commandNewTab.title"), detail: "As in Arc, or takes a page that wandered off into the loose tabs.",
+               since: "1.0.14", get: { $0.pinCommandOpensTab }, set: { $0.pinCommandOpensTab = $1 }),
+
+        Toggle(title: "Commands in the address field", detail: "Type the name of any menu command or setting, as in Arc's Command Bar.",
+               since: "1.0.13", get: { $0.commandBar }, set: { $0.commandBar = $1 }),
+        Toggle(title: "Capture", detail: "View › Capture… takes a picture of part of a page, or all of it.",
+               since: "1.0.13", get: { $0.capturesPages }, set: { $0.capturesPages = $1 }),
+        Toggle(title: L10n.text("upstream.319.settings.pins.folders.title"), detail: "Pinned rows in folders that fold, as in Arc.",
+               since: "1.0.13", get: { $0.pinFolders }, set: { $0.pinFolders = $1 },
+               shown: { $0.listsPins }),
+
         Toggle(title: L10n.text("upstream.merge112.sendLinksToASpace"), detail: L10n.text("upstream.merge112.linksToTheSitesYouChoose"),
                since: "1.0.11", get: { $0.sendsLinksToSpaces }, set: { $0.sendsLinksToSpaces = $1 },
                shown: { $0.usesSpaces }),
@@ -102,6 +130,9 @@ enum WhatsNew {
     ]
 
     static let releases: [Release] = [
+        Release(version: "1.0.15"),
+        Release(version: "1.0.14"),
+        Release(version: "1.0.13"),
         Release(version: "1.0.12"),
         Release(version: "1.0.11"),
         Release(version: "1.0.10"),
@@ -165,6 +196,72 @@ enum WhatsNew {
                     L10n.text("release100.language3"), L10n.text("release100.start1"),
                     L10n.text("release100.start2"), L10n.text("release100.start3")],
               better: [], fixed: []),
+        Notes(
+            version: "1.0.15", date: "18 November 2026",
+            headline: "Space gradients, extensions that work, coding agents, and a day of your fixes.",
+            new: [
+                "A gradient or a stronger colour for a space. The space's menu › Colour….",
+                "The same tabs in every window. Settings › Tabs.",
+                "⌘1–⌘9 switch spaces, as in Arc. Settings › Spaces & Pins.",
+                "Email links open in Gmail, Outlook.com, Fastmail or Proton Mail. Settings › General.",
+                "Choose where each extension runs: all sites, some, or on click. Settings › Extensions.",
+                "Claude Code or Codex can browse in tabs of their own while you watch. Settings › About › Developer.",
+            ],
+            better: [
+                "Pages load faster with extensions on.",
+                "Spread two fingers on a peek to open it as a tab.",
+                "A right-click anywhere in the tab column has a menu.",
+            ],
+            fixed: [
+                "Eagle, Cosmos, Raindrop.io, Language Reactor and Voice-over-Translation.",
+                "Signing in to X with passkeys off, and 1Password passkeys.",
+                "Claude's side panel once signed in.",
+                "Extensions reopening their welcome tab at every launch.",
+            ]
+        ),
+        Notes(
+            version: "1.0.14", date: "17 November 2026",
+            headline: "Live folders, your own style for a site, space colours on the window, and your fixes.",
+            new: [
+                "Live folders: a folder in the pinned rows that fills itself from a feed. Right-click a pinned row › New Live Folder….",
+                "Your own CSS for a site, as Arc's Boosts. Turn it on in Settings › Browsing.",
+                "Keep the page as a card in full screen. Settings › Appearance › Window.",
+                "⌘-click on a pin opens a new tab, as in Arc. Settings › Spaces & Pins.",
+            ],
+            better: [
+                "A space with a colour gives the window a faint wash of it.",
+            ],
+            fixed: [
+                "⌘1–⌘9 counting a group's closed tabs.",
+                "⌫ leaving the page you were typing in.",
+                "Extension popups that open themselves, such as Inoreader's.",
+            ]
+        ),
+        Notes(
+            version: "1.0.13", date: "17 November 2026",
+            headline: "Folders in pinned rows, Split View with four pages, sync between your Macs, and your fixes.",
+            new: [
+                "Sync your spaces, pins, bookmarks and a few settings between your Macs, through a folder they share. Settings › General.",
+                "Folders in pinned rows, as in Arc. Settings › Spaces & Pins.",
+                "Capture… in the View menu: a picture of part of a page, or all of it.",
+                "Commands in the address field, as Arc's Command Bar.",
+                "History › Archived Tabs: the tabs Search closed by itself, for 30 days.",
+                "A colour for each space, from the space's menu.",
+                "The address field from any app, with a key of your own. Settings › Keyboard & Mouse.",
+            ],
+            better: [
+                "Split View holds up to four pages.",
+                "Switching tabs shows the page sooner.",
+                "A new install starts with the tabs down the side, and links from other apps in a small window.",
+            ],
+            fixed: [
+                "⌘T opening its page in a group, from an empty tab left there.",
+                "A window opened with ⌘N that the menus didn't act on.",
+                "Control Panel for YouTube not saving its switches.",
+                "The floating video coming back small in its tab.",
+                "A link from another app bringing up the browser's window beside its small one.",
+            ]
+        ),
         Notes(
             version: "1.0.12", date: "9 November 2026",
             headline: L10n.text("upstream.merge112.yourContactDetailsInFormsA"),

@@ -4,6 +4,9 @@
 
 ### 简体中文
 
+- 同步 Search 上游 `b0f57a6..319ef8b` 的 macOS 更新。新增最多四页分屏、固定标签文件夹和 RSS 动态文件夹、跨窗口共享标签，以及通过自选文件夹同步空间、固定标签和书签。
+- 改善扩展站点授权、首次安装事件、消息回复、侧栏登录和启动错误提示；保留本地 MV2/MV3 用户脚本、无痕权限和扩展后台启动修复。
+- 改善多标签空间切换、侧栏折叠恢复、登录账号键盘选择、历史记录加载与独立空间隔离。清除缓存时同时清除 Service Worker 的 Cache Storage。
 - 合并 Search 上游 `e60aaab..b0f57a6` 的 18 个 macOS 修复与性能优化，保留中文界面、书签增强、超级拖拽及本地安全修复。
 - 修复 macOS 14/15 关闭标签或结束媒体时的崩溃，以及无痕预览链接、扩展字体权限和多窗口扩展菜单问题；图片右键菜单保留扩展操作。
 - 扩展后台进程共享 WebKit 进程池，重启 worker 时清理旧原生辅助进程；减少查找栏、标签和侧栏的不必要刷新，侧栏宽度松手后保存，动态标题不再反复重写历史文件。
@@ -36,6 +39,9 @@
 
 ### English
 
+- Port macOS updates from Search upstream `b0f57a6..319ef8b`. Split View can hold up to four pages. Add pinned folders, RSS live folders, shared tabs across windows, and optional folder-based sync for spaces, pins, and bookmarks.
+- Improve extension site permissions, install events, message replies, side-panel sign-in, and startup error reporting while retaining local MV2/MV3 user-script, private browsing, and startup fixes.
+- Improve space switching with many tabs, restore folded sidebars, support keyboard selection in the account list, and isolate history for spaces with separate sign-ins. Clear Cache now includes service-worker Cache Storage.
 - Merge 18 macOS fixes and performance improvements from Search upstream `e60aaab..b0f57a6`, preserving localization, bookmark enhancements, super drag, and local security fixes.
 - Fix crashes when closing tabs or stopping media on macOS 14/15, private peek links, extension font permissions, and multiwindow extension menus; preserve extension actions in image context menus.
 - Share the WebKit process pool with extension workers and stop their old native helpers on restart. Reduce find-bar, tab, and sidebar redraws, save dragged widths on release, and avoid rewriting history for every title change.

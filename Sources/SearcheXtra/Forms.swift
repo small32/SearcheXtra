@@ -91,7 +91,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
                     // `wide` then means it says so, rather than a guess.
                     // A box for a detail of your own: what hangs from it is
                     // your card in Contacts, not an account.
-                    tab?.fieldFocused(CGRect(x: x, y: y, width: w, height: h), passwords: body["passwords"] as? Bool ?? true,
+                    tab.fieldFocused(CGRect(x: x, y: y, width: w, height: h), passwords: body["passwords"] as? Bool ?? true,
                                       name: body["name"] as? Bool ?? false, wide: body["wide"] as? Bool ?? true,
                                       code: body["code"] as? Bool ?? false,
                                       fill: (body["contact"] as? String).map { .contact($0, box: body["box"] as? Int ?? 0) })
@@ -116,9 +116,10 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
     /// A build without Apple's browser entitlement can't do them: WebKit then
     /// answers isUserVerifyingPlatformAuthenticatorAvailable() with false,
     /// yet the API object exists, so sites offer the passkey path and strand
-    /// you there. Taken away, they go straight to the password. Signed with
-    /// the entitlement, as releases are, this is on, and Search carries out
-    /// the sites' requests itself (see Passkeys.swift).
+    /// you there. Told there are none, they go straight to the password
+    /// (see withoutPasskeys). Signed with the entitlement, as releases are,
+    /// this is on, and Search carries out the sites' requests itself (see
+    /// Passkeys.swift).
     ///
     /// Held here, not read from the store: a build of your own running beside
     /// a release shares the store, and its first run writes passkeys off into
@@ -127,15 +128,28 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
     /// first page, and so does every flip of the switch.
     static var passkeysOffered = false
 
-    /// Only the passkey object goes. navigator.credentials itself stays: sites
-    /// use it for stored passwords too, and that half still works.
+    /// The passkey object stays, and says there are none here, as Safari's
+    /// does on a Mac with nothing to sign in with: isConditionalMediation
+    /// Available() and isUserVerifyingPlatformAuthenticatorAvailable() are
+    /// false, getClientCapabilities() offers none, and a passkey asked for
+    /// or made is refused at once (NotAllowedError), under the name field
+    /// too. Sites take that to mean the password. navigator.credentials
+    /// keeps its other half — stored passwords, identities — untouched.
+    ///
+    /// It used to be taken away, its name left on the window with nothing
+    /// in it: a site that looks for a method on it (X's sign-in asks
+    /// `'isUserVerifyingPlatformAuthenticatorAvailable' in
+    /// window.PublicKeyCredential`) threw there and never went on to the
+    /// password, and a request under the field never ended.
     ///
     /// Unless an extension answers passkey requests itself — a password
     /// manager with your passkeys in it, as 1Password is. It puts its own get
     /// and create on navigator.credentials, and reaches for the passkey object
-    /// from its own script as it does; from then on sites see the object, and
-    /// the extension is the one they ask. Whatever it leaves to the browser is
-    /// refused at once, as if you had said no, where WebKit would try and fail.
+    /// from its own script as it does; from then on sites hear WebKit's own
+    /// answers to those questions, or the extension's where it gives its own,
+    /// and the extension is the one they ask. Whatever it leaves to the
+    /// browser is refused at once, as if you had said no, where WebKit would
+    /// try and fail.
     static let withoutPasskeys = """
     (function () {
       var real = window.PublicKeyCredential;
@@ -149,37 +163,43 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         } catch (e) {}
         return claimed;
       }
-      try {
-        Object.defineProperty(window, 'PublicKeyCredential', {
-          configurable: true,
-          get: function () { return answered() ? real : undefined; },
-          set: function (value) { real = value; }
-        });
-      } catch (e) {
-        try { delete window.PublicKeyCredential; } catch (ignored) {}
-        return;
-      }
+      function refused() { return new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError'); }
+      // Methods, not arrow functions: their names and lengths are WebKit's.
+      var none = {
+        isConditionalMediationAvailable() { return Promise.resolve(false); },
+        isUserVerifyingPlatformAuthenticatorAvailable() { return Promise.resolve(false); },
+        getClientCapabilities() {
+          var native = none.native.getClientCapabilities;
+          return Promise.resolve(native ? native.call(real) : {}).then(function (caps) {
+            var told = {};
+            Object.keys(caps || {}).forEach(function (key) { told[key] = caps[key]; });
+            ['conditionalCreate', 'conditionalGet', 'hybridTransport', 'passkeyPlatformAuthenticator',
+             'userVerifyingPlatformAuthenticator'].forEach(function (key) { told[key] = false; });
+            return told;
+          });
+        },
+        native: {}
+      };
+      ['isConditionalMediationAvailable', 'isUserVerifyingPlatformAuthenticatorAvailable', 'getClientCapabilities'].forEach(function (name) {
+        var native = real[name];
+        if (typeof native !== 'function') return;
+        none.native[name] = native;
+        var ours = none[name];
+        var wrapped = { [name]() { return answered() ? native.apply(this, arguments) : ours.apply(this, arguments); } }[name];
+        try { Object.defineProperty(real, name, { configurable: true, writable: true, enumerable: true, value: wrapped }); } catch (e) {}
+      });
       var proto = CredentialsContainer.prototype;
       ['get', 'create'].forEach(function (name) {
         var native = proto[name];
         try {
           Object.defineProperty(proto, name, {
             configurable: true, writable: true,
-            value: function (options) {
+            value: { [name](options) {
               if (!options || !options.publicKey) return native.apply(this, arguments);
               var signal = options.signal;
-              // Under the name field: nothing to offer, so it waits, as it
-              // would while nobody picks one, until the page lets it go.
-              if (name === 'get' && options.mediation === 'conditional') {
-                return new Promise(function (resolve, reject) {
-                  if (!signal) return;
-                  var aborted = function () { return signal.reason || new DOMException('The operation was aborted.', 'AbortError'); };
-                  if (signal.aborted) return reject(aborted());
-                  signal.addEventListener('abort', function () { reject(aborted()); }, { once: true });
-                });
-              }
-              return Promise.reject(new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError'));
-            }
+              if (signal && signal.aborted) return Promise.reject(signal.reason || new DOMException('The operation was aborted.', 'AbortError'));
+              return Promise.reject(refused());
+            } }[name]
           });
         } catch (e) {}
       });
@@ -195,6 +215,49 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         message.document = documentID;
         window.webkit.messageHandlers.officeForms.postMessage(message);
       }
+      // Fields that hold a secret, kept in Search's own world where no page
+      // reaches: a password box from the moment it is focused or typed in,
+      // and every box Search fills with a password or a code. A coding
+      // agent's reads, checks and pictures (PageScripts, AgentControl)
+      // keep their values back for good, even after a "show password"
+      // button turns one into a text box.
+      var secrets = globalThis.__searchSecrets || (globalThis.__searchSecrets = new WeakSet());
+      function keepSecret(box) { try { if (box) secrets.add(box); } catch (e) {} }
+      function passwordBox(el) { return !!el && el.tagName === 'INPUT' && (el.type || '').toLowerCase() === 'password'; }
+      // The box itself, inside an open shadow root too: the event's target
+      // is only its host from out here.
+      function boxOf(e) { var path = e.composedPath ? e.composedPath() : []; return path[0] || e.target; }
+      ['focusin', 'input', 'change'].forEach(function (kind) {
+        document.addEventListener(kind, function (e) {
+          var box = boxOf(e);
+          if (passwordBox(box)) return keepSecret(box);
+          // A code typed in by hand: a one-time-code box, or one of a row
+          // of one-character boxes.
+          if (kind !== 'focusin' && box && box.tagName === 'INPUT') {
+            try { if ((box.getAttribute('autocomplete') || '').indexOf('one-time-code') >= 0 || saysCode(box) || cells(box)) keepSecret(box); } catch (err) {}
+          }
+        }, true);
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('input[type="password"]'), keepSecret);
+      // A "show password" that swaps the box for a new one holding the
+      // same value: the new one is as secret as the one it replaced.
+      try {
+        new MutationObserver(function (changes) {
+          var gone = [], came = [];
+          function inputs(node, into) {
+            if (!node || node.nodeType !== 1) return;
+            if (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA') into.push(node);
+            if (node.querySelectorAll) Array.prototype.push.apply(into, node.querySelectorAll('input, textarea'));
+          }
+          changes.forEach(function (c) {
+            Array.prototype.forEach.call(c.removedNodes, function (n) { inputs(n, gone); });
+            Array.prototype.forEach.call(c.addedNodes, function (n) { inputs(n, came); });
+          });
+          var held = gone.filter(function (b) { return secrets.has(b) && b.value; }).map(function (b) { return b.value; });
+          if (!held.length) return;
+          came.forEach(function (b) { if (held.indexOf(b.value) >= 0) keepSecret(b); });
+        }).observe(document, { childList: true, subtree: true });
+      } catch (err) {}
 
       // The password box, and the last box before it that could hold a name.
       function pair() {
@@ -720,6 +783,7 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           var both = pair();
           if (!both) return false;
           if (both.user && !both.user.value) put(both.user, user);
+          keepSecret(both.pass);
           put(both.pass, password);
           return true;
         },
@@ -737,9 +801,9 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           var box = codeBox(document.activeElement) ? document.activeElement : codeAt;
           if (!box || !box.isConnected || !codeBox(box)) return false;
           var row = cells(box);
-          if (!row) { put(box, value); return true; }
+          if (!row) { keepSecret(box); put(box, value); return true; }
           if (row.length !== value.length) return false;
-          row.forEach(function (b, i) { put(b, value.charAt(i)); });
+          row.forEach(function (b, i) { keepSecret(b); put(b, value.charAt(i)); });
           return true;
         },
         // Whether a box is offered codes, for the tests.

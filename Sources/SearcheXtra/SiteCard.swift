@@ -235,9 +235,9 @@ struct SiteCard: View {
             Row(L10n.text("site.data"), submenu: true) { section = 1 }
             Row(L10n.text("site.settings"), submenu: true) { section = 2 }
             Row(L10n.text("site.close")) { close() }
-            Row(L10n.text("App.0165"), keys: "⇧⌘C") { after { copyAddress() } }
+            Row(L10n.text("App.0165"), keys: ShortcutStore.shared.key(for: "tabs.copyAddress")?.display ?? "") { after { copyAddress() } }
             Separator()
-            Row(L10n.text("App.0121"), keys: "⌘P") { after { printPage() } }
+            Row(L10n.text("App.0121"), keys: ShortcutStore.shared.key(for: "file.print")?.display ?? "") { after { printPage() } }
             zoom
             blocker
             if let url = tab.pageAddress, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {

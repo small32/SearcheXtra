@@ -20,8 +20,9 @@ import WebKit
 struct Space: Codable, Identifiable, Equatable {
     var id: UUID
     var name: String
-    /// Which of `Spaces.colours` — from before spaces had icons; kept so an
-    /// older list still reads.
+    /// Which of `Spaces.colours` its icon wears, so a glance at the dot
+    /// says which space this is. 0 is none, the grey every space had: the
+    /// field dates from before icons, and every list from then reads 0.
     var colour: Int
     /// Its icon, one of `Spaces.icons`.
     var icon: String?
@@ -35,6 +36,13 @@ struct Space: Codable, Identifiable, Equatable {
     /// The profile it belongs to (see Profiles.swift); nil for Personal,
     /// which every space from before profiles is in.
     var profile: UUID?
+    /// Two or three colours in place of the one (see SpaceGradient.swift);
+    /// nil, as every space from before has, for the colour alone. Its
+    /// colour is kept beside it, and comes back when it is removed.
+    var gradient: SpaceGradient? = nil
+    /// How strongly its colour or gradient washes the chrome (see
+    /// SpaceStrength); nil, as every space from before has, for Subtle.
+    var strength: SpaceStrength? = nil
 
     var profileID: UUID { profile ?? Profile.personalID }
 
@@ -46,11 +54,20 @@ struct Space: Codable, Identifiable, Equatable {
     /// The icon it shows: its own, or a house for the first and a
     /// briefcase for any other that has none yet.
     var symbol: String { icon.flatMap { Spaces.icons.contains($0) ? $0 : nil } ?? (isFirst ? "house" : "briefcase") }
+
+    /// Its colour, or nil for none — an index out of range from a newer
+    /// Search included. With a gradient, the gradient's first colour.
+    var tint: Color? {
+        if let gradient, gradient.usable { return gradient.lead }
+        return colour > 0 && Spaces.colours.indices.contains(colour) ? Spaces.colours[colour] : nil
+    }
 }
 
 enum Spaces {
+    /// A handful, picked to read on the light ground and the dark one
+    /// alike. The first stands for none and is never drawn.
     static let colours: [Color] = [
-        Color(red: 0.45, green: 0.47, blue: 0.52), // slate
+        Color(red: 0.45, green: 0.47, blue: 0.52), // none
         Color(red: 0.26, green: 0.52, blue: 0.96), // blue
         Color(red: 0.20, green: 0.66, blue: 0.45), // green
         Color(red: 0.96, green: 0.62, blue: 0.20), // orange
@@ -58,6 +75,32 @@ enum Spaces {
         Color(red: 0.62, green: 0.40, blue: 0.90), // violet
     ]
     static let colourNames = [L10n.text("Spaces.1002"), L10n.text("Spaces.1003"), L10n.text("Spaces.1004"), L10n.text("Spaces.1005"), L10n.text("Spaces.1006"), L10n.text("Spaces.1007")]
+
+    /// How much of a space's colour the chrome behind the tabs wears: the
+    /// column, the strip, the bookmarks bar and the ground around the page's
+    /// card, never the page. Faint, as Arc's space themes are: enough to
+    /// tell at the edge of the eye which space this is, not so much that a
+    /// tab's grey or a title's ink reads any differently. The dark ground
+    /// swallows more of a colour, so it takes a little more.
+    static let washLight = 0.07
+    static let washDark = 0.11
+
+    /// The wash for colour COLOUR, or nil for none: no colour, or an index
+    /// out of range from a newer Search. Nil draws nothing at all, so a
+    /// space without a colour looks exactly as every space did before.
+    static func wash(_ colour: Int?, dark: Bool) -> Double? {
+        guard let colour, colour > 0, colours.indices.contains(colour) else { return nil }
+        return dark ? washDark : washLight
+    }
+
+    /// Colour COLOUR as STRENGTH washes with it (SpaceStrength.tone): the
+    /// colour itself at Subtle, so that wash is exactly as it always was.
+    static func toned(_ colour: Int, _ strength: SpaceStrength, dark: Bool) -> Color {
+        guard strength != .subtle, colours.indices.contains(colour),
+              let c = NSColor(colours[colour]).usingColorSpace(.sRGB) else { return colours.indices.contains(colour) ? colours[colour] : .clear }
+        let (r, g, b) = strength.tone(OKLab(r: c.redComponent, g: c.greenComponent, b: c.blueComponent), dark: dark).srgb
+        return Color(.sRGB, red: r, green: g, blue: b)
+    }
 
     /// The icons a space can wear: Apple's own symbols, drawn in one weight
     /// and one grey, grouped as work, thinking, leisure and life.
@@ -185,12 +228,7 @@ enum Spaces {
     /// store there always was — for the first space of each profile and any
     /// space made signed in with the others; a store of its own otherwise.
     @MainActor static func store(for id: UUID) -> WKWebsiteDataStore {
-        let space = known[id]
-        let profile = space?.profileID ?? Profile.personalID
-        if id == Space.firstID || space?.sharesSignIns == true
-            || (profile != Profile.personalID && Profiles.shared.profile(profile).home == id) {
-            return Profiles.store(profile)
-        }
+        guard ownsStore(id) else { return Profiles.store(profile(of: id)) }
         if let made = stores[id] { return made }
         let made = WKWebsiteDataStore(forIdentifier: id)
         if Store.keepsSignIns { Store.followSignIns(made) } else { Store.followCookies(made) }
@@ -198,6 +236,46 @@ enum Spaces {
         stores[id] = made
         return made
     }
+
+    /// Whether a space is signed out of the others, with a store of its own:
+    /// any but the first space of a profile and the ones made signed in with it.
+    @MainActor static func ownsStore(_ id: UUID) -> Bool {
+        let space = known[id]
+        let profile = space?.profileID ?? Profile.personalID
+        return !(id == Space.firstID || space?.sharesSignIns == true
+            || (profile != Profile.personalID && Profiles.shared.profile(profile).home == id))
+    }
+
+    /// The space whose own store this is, if it is one.
+    @MainActor static func owner(of store: WKWebsiteDataStore) -> UUID? {
+        stores.first { $0.value === store }?.key
+    }
+
+    @MainActor private static var histories: [UUID: History] = [:]
+
+    /// Where a space's pages are remembered: its profile's history, or for
+    /// a space signed out of the others, a history of its own, so what is
+    /// visited there never comes up in another space's suggestions (#758).
+    @MainActor static func history(for id: UUID) -> History {
+        guard ownsStore(id) else { return Profiles.history(profile(of: id)) }
+        if let made = histories[id] { return made }
+        let made = History(file: historyFile(id))
+        histories[id] = made
+        return made
+    }
+
+    /// Every history a profile's spaces write to: its own, then each
+    /// signed-out space's.
+    @MainActor static func histories(of profile: UUID) -> [History] {
+        [Profiles.history(profile)] + read(profile: profile).filter { ownsStore($0.id) }.map { history(for: $0.id) }
+    }
+
+    /// Quitting: every space's own history made so far, written now.
+    @MainActor static func flushHistories() {
+        for history in histories.values { history.flush() }
+    }
+
+    private static func historyFile(_ id: UUID) -> String { "history-space-\(id.uuidString).json" }
 
     /// The shared store and every space's own made so far. Not a private
     /// tab's: each has a store of its own, out of this list on purpose, so
@@ -230,6 +308,8 @@ enum Spaces {
         // its cookies again: they go with it.
         stores[id] = nil
         eraseStore(store, id: id)
+        // Its history goes with its cookies, opened this run or not.
+        if let history = histories.removeValue(forKey: id) { history.retire() } else { Disk.remove(Store.file(historyFile(id))) }
     }
 
     /// A store made by identifier, emptied now and removed once WebKit lets
@@ -319,6 +399,23 @@ struct Parked {
 extension Browser {
     var space: Space { spaces.first { $0.id == spaceID } ?? spaces.first ?? Space.first() }
 
+    /// What the chrome is washed with (see Spaces.wash): the space on
+    /// screen's colour or gradient, so it follows a swipe, ⌃1–⌃9 and the
+    /// profile shown. None with spaces off, and while a new one is being
+    /// made, as the dot has.
+    var wash: SpaceLook? {
+        prefs.usesSpaces && !makingSpace ? space.look : nil
+    }
+
+    /// How strongly the wash is drawn: the space on screen's strength.
+    var washStrength: SpaceStrength { wash == nil ? .subtle : space.washStrength }
+
+    /// The wash's colour, when it is one of the colours rather than a gradient.
+    var washColour: Int? {
+        if case .colour(let colour)? = wash { return colour }
+        return nil
+    }
+
     /// Every tab of the spaces not on screen, for the sleep timer.
     var parkedTabs: [Tab] { parked.values.flatMap(\.tabs) }
 
@@ -352,6 +449,9 @@ extension Browser {
             makingSpace = false
         }
         guard id != spaceID else { return }
+        // A peek that stays with its tab belongs to a tab on this space. The
+        // next space doesn't keep that page running out of sight.
+        if prefs.peekStays, peekTab != nil { closePeek() }
         cancelTabEdit()
         let returningVideo = parked[id].map { row in
             guard let active = row.active else { return false }
@@ -359,13 +459,18 @@ extension Browser {
             return visible.contains { $0 == floating || $0 == pictured }
         } ?? false
         if !returningVideo { leavingSpace() }
-        writeSession(now: true)
+        // Off the main thread: the row is parked in memory just below, and
+        // quitting writes whatever is still waiting (Disk.drain). Written at
+        // once, a long row held the switch until it was on disk.
+        writeSession()
         for tab in tabs where visibleTabIDs.contains(tab.id) { tab.touch() }
 
         // The row on screen is parked as it is, sound and all: music or a
         // stream keeps playing in the space you left, as it does in a tab
         // you left. ⌘⇧M, or its speaker, stops it.
         parked[spaceID] = Parked(tabs: tabs, active: activeID, splits: splits, groups: tabGroups)
+        // Its loose rows, for the space coming in (see rowKey).
+        let leaving = looseRow
 
         spaceID = id
         sitePanelFollowsSpace()
@@ -390,10 +495,14 @@ extension Browser {
             for tab in tabs where visibleTabIDs.contains(tab.id) {
                 if !tab.wake() { tab.revive() }
             }
+            // The page now, as a tab switch does (see PaneStage.show(now:)),
+            // rather than after the whole column has been built again.
+            if activeSplit == nil, let active, let window { PaneStage.stages.object(forKey: window)?.show(now: active) }
         } else {
             showRow([], active: nil)
             restoreSession()
         }
+        handOverRowKeys(leaving)
         returnSpaceVideo()
         editing = active?.isBlank ?? true
         typed = ""
@@ -404,6 +513,50 @@ extension Browser {
         // Beside the space's icon when the tabs are on screen (SpaceDot);
         // folded away, at the bottom.
         if folded && !peeking { announce(space.name) }
+    }
+
+    /// The key a loose row of the column is drawn under: the tab's own, kept
+    /// with it as it moves, so a tab opened, closed or carried among the
+    /// others moves as it always has — until another space comes in, whose
+    /// tabs are given the rows of the one going, place by place
+    /// (handOverRowKeys). Drawn under their own ids, every row of the space
+    /// going was taken down and every row of the one coming was built anew,
+    /// 2 ms a row, close to half a second for a space of 200 tabs; given
+    /// the same rows, each is only told its new tab.
+    func rowKey(_ tab: Tab) -> Int {
+        if let key = rowKeys[tab.id] { return key }
+        lastRowKey += 1
+        rowKeys[tab.id] = lastRowKey
+        return lastRowKey
+    }
+
+    /// The tabs the column draws loose, out of any group (SideBar.looseTabs).
+    var looseRow: [Tab] {
+        displayedTabs.filter { $0.pin == nil && (!prefs.usesTabGroups || group(of: $0) == nil) }
+    }
+
+    /// The rows of `leaving`, the loose tabs of the space gone, for the
+    /// loose tabs now on screen, in their order; past its end, each tab its
+    /// own key, or a new one where that key went to one of the others. Only
+    /// this row's tabs keep one.
+    private func handOverRowKeys(_ leaving: [Tab]) {
+        let handed = leaving.map(rowKey)
+        var kept: [Tab.ID: Int] = [:]
+        var taken = Set(handed)
+        for (index, tab) in looseRow.enumerated() {
+            if index < handed.count {
+                kept[tab.id] = handed[index]
+                continue
+            }
+            var key = rowKeys[tab.id] ?? 0
+            if key == 0 || taken.contains(key) {
+                lastRowKey += 1
+                key = lastRowKey
+            }
+            taken.insert(key)
+            kept[tab.id] = key
+        }
+        rowKeys = kept
     }
 
     /// Every other space's row, made ahead of time, so the column can show
@@ -436,7 +589,56 @@ extension Browser {
     func switchSpace(index: Int) {
         let list = everySpace
         guard list.indices.contains(index) else { return }
-        switchSpace(to: list[index].id)
+        goToSpace(list[index].id)
+    }
+
+    /// ⌃1–⌃9 and the space's menu: the space's page in front at once, its
+    /// rows sliding in, and the column taking it once they stand still
+    /// (SpaceSwipe.bring). Taken at once, the column's whole row was made
+    /// over before the rows could move, and the slide began late, with a
+    /// jolt. Anything else, with Reduce Motion, or in a hidden window (whose
+    /// frames are never drawn, so the bench's), the space at once.
+    func goToSpace(_ id: UUID) {
+        let shown = spaceComing ?? spaceID
+        guard prefs.usesSpaces, id != shown, !makingSpace, !Motion.reduced,
+              let to = spaces.firstIndex(where: { $0.id == id }),
+              let here = spaces.firstIndex(where: { $0.id == shown }),
+              !NSApp.isHidden || SpaceSwipe.glidesHidden
+        else {
+            SpaceSwipe.shared.land(self)
+            return switchSpace(to: id)
+        }
+        SpaceSwipe.shared.bring(self, id, step: to > here ? 1 : -1)
+    }
+
+    /// The page in front of space `id`, put on the stage now (pageAhead),
+    /// before the column has taken the space: woken if it sleeps, as the
+    /// space would wake it. Not a pair of Split View: that one comes with
+    /// the space.
+    func showAhead(_ id: UUID) {
+        // Back to this space's own, on a swipe brought back short.
+        if id == spaceID {
+            pageAhead = nil
+            if let window, let active { PaneStage.stages.object(forKey: window)?.show(now: active, fading: true) }
+            return
+        }
+        guard let row = parked[id] else { return }
+        let front = row.active.flatMap { active in row.tabs.first { $0.id == active } } ?? row.tabs.first { $0.pin == nil }
+        guard let front, !(prefs.splitView && row.splits.contains { $0.contains(front.id) }) else { return }
+        if !front.wake() { front.revive() }
+        pageAhead = front
+        if let window { PaneStage.stages.object(forKey: window)?.show(now: front, fading: true) }
+    }
+
+    /// Where space `index` lies in the map (SideBar.others), in pages from
+    /// the one at `at`: in the spaces' order, but for one on its way in from
+    /// further along (⌃1–⌃9), drawn where comingSlot says, and the one that
+    /// lies there out of the way.
+    func mapSlot(_ index: Int, from at: Int) -> Int {
+        guard let coming = spaceComing, let from = spaces.firstIndex(where: { $0.id == coming }),
+              comingSlot != from - at else { return index - at }
+        if index == from { return comingSlot }
+        return index - at == comingSlot ? 1000 : index - at
     }
 
     /// The icon a new space gets unless told: the first no space wears yet.
@@ -505,6 +707,34 @@ extension Browser {
         Spaces.write(spaces, profile: profileID)
     }
 
+    func setSpaceColour(_ id: UUID, to colour: Int) {
+        guard let at = spaces.firstIndex(where: { $0.id == id }), Spaces.colours.indices.contains(colour) else { return }
+        spaces[at].colour = colour
+        // A colour picked is the colour wanted: the gradient goes.
+        spaces[at].gradient = nil
+        Spaces.write(spaces, profile: profileID)
+    }
+
+    /// The space's gradient, or none to go back to its colour. One that
+    /// can't be drawn (fewer than two colours) is none.
+    func setSpaceGradient(_ id: UUID, to gradient: SpaceGradient?) {
+        guard let at = spaces.firstIndex(where: { $0.id == id }) else { return }
+        let gradient = gradient.flatMap { $0.usable ? $0 : nil }
+        guard spaces[at].gradient != gradient else { return }
+        spaces[at].gradient = gradient
+        Spaces.write(spaces, profile: profileID)
+    }
+
+    /// How strongly the space's colour or gradient washes the chrome.
+    /// Subtle is kept as none, so the space reads and writes as before.
+    func setSpaceStrength(_ id: UUID, to strength: SpaceStrength) {
+        guard let at = spaces.firstIndex(where: { $0.id == id }) else { return }
+        let kept: SpaceStrength? = strength == .subtle ? nil : strength
+        guard spaces[at].strength != kept else { return }
+        spaces[at].strength = kept
+        Spaces.write(spaces, profile: profileID)
+    }
+
     func setSpaceDownloads(_ id: UUID, to folder: URL?) {
         guard let at = spaces.firstIndex(where: { $0.id == id }) else { return }
         spaces[at].downloads = folder?.path
@@ -552,6 +782,38 @@ extension Browser {
 /// tabs in the row. One icon however many spaces there are; a click opens
 /// the menu. When the space changes the icon turns over the way the spaces
 /// went — out on one side, the next one in from the other.
+/// A space's colour, or its gradient, laid faintly over the chrome's own
+/// ground. Handed the look rather than the browser, so it is drawn again
+/// only when the look changes, not on everything the browser announces. A
+/// change crossfades once and is done: nothing runs while it stays.
+struct SpaceWash: View {
+    let look: SpaceLook?
+    @Environment(\.colorScheme) private var scheme
+    /// Subtle, Rich or Vivid: set for the whole window (see washStrength).
+    @Environment(\.washStrength) private var strength
+
+    var body: some View {
+        ZStack {
+            switch look {
+            case .colour(let colour)?:
+                if Spaces.wash(colour, dark: scheme == .dark) != nil {
+                    Spaces.toned(colour, strength, dark: scheme == .dark).opacity(strength.opacity(dark: scheme == .dark))
+                }
+            case .gradient(let gradient)?:
+                // One gradient for another crossfades, as a colour does.
+                GradientWash(gradient: gradient, strength: strength)
+                    .id(gradient)
+                    .transition(.opacity)
+            case nil:
+                EmptyView()
+            }
+        }
+        .allowsHitTesting(false)
+        .animation(Motion.quick, value: look)
+        .animation(Motion.quick, value: strength)
+    }
+}
+
 struct SpaceDot: View {
     @ObservedObject var browser: Browser
     @State private var hovering = false
@@ -567,13 +829,15 @@ struct SpaceDot: View {
 
     private var symbol: String { browser.makingSpace ? "plus" : browser.space.symbol }
     private var key: String { browser.makingSpace ? "new" : "\(browser.spaceID.uuidString)-\(browser.space.symbol)" }
+    /// The space's colour, if it has one; none while a new one is being made.
+    private var tint: Color? { browser.makingSpace ? nil : browser.space.tint }
 
     var body: some View {
         Button { SpaceMenu.show(for: browser) } label: {
             ZStack {
                 Image(systemName: shown?.symbol ?? symbol)
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(hovering ? Palette.ink : Palette.muted)
+                    .foregroundStyle(tint ?? (hovering ? Palette.ink : Palette.muted))
                     .id(shown?.key ?? key)
                     // The way the tabs go: sideways in the column; in the bar
                     // across the top, up for the next space, down going back.
@@ -584,14 +848,19 @@ struct SpaceDot: View {
             .frame(width: SpaceDot.width, height: 26)
             .clipped()
             .background(
+                // A coloured space's dot sits on a wash of its colour, enough
+                // to tell spaces apart at the edge of the eye.
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(hovering ? Palette.hover : .clear)
+                    .fill(tint.map { $0.opacity(hovering ? 0.24 : 0.14) } ?? (hovering ? Palette.hover : .clear))
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help(L10n.text("Spaces.1033", String(describing: browser.space.name), String(describing: browser.prefs.sidebar ? L10n.text("Spaces.1330") : L10n.text("Spaces.1329"))))
+        .animation(Motion.quick, value: browser.space.look)
+        .help(L10n.text("upstream.319.spaceSwitchHelp", browser.space.name,
+                        KeyCombo.spacesOnCommand ? "⌘1–⌘9" : "⌃1–⌃9",
+                        browser.prefs.sidebar ? L10n.text("Spaces.1330") : L10n.text("Spaces.1329")))
         .onChange(of: key) { _, now in
             let symbol = symbol
             DispatchQueue.main.async {
@@ -660,7 +929,15 @@ enum SpaceMenu {
         return item
     }
 
+    /// A space's icon for the menu, in its colour if it has one.
+    private static func image(_ symbol: String, tint: Color?) -> NSImage? {
+        let plain = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        guard let tint else { return plain }
+        return plain?.withSymbolConfiguration(.init(paletteColors: [NSColor(tint)]))
+    }
+
     static func show(for browser: Browser) {
+        SpaceLookPopover.anchor = NSEvent.mouseLocation
         menu(for: browser).popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
@@ -680,9 +957,9 @@ enum SpaceMenu {
             if let name = list.name { menu.addItem(.sectionHeader(title: name)) }
             for space in list.spaces {
                 let entry = item(space.name, key: index < 9 ? "\(index + 1)" : "", checked: space.id == browser.spaceID) {
-                    browser.switchSpace(to: space.id)
+                    browser.goToSpace(space.id)
                 }
-                entry.image = NSImage(systemSymbolName: space.symbol, accessibilityDescription: nil)
+                entry.image = image(space.symbol, tint: space.tint)
                 menu.addItem(entry)
                 index += 1
             }
@@ -712,6 +989,11 @@ enum SpaceMenu {
         let icon = NSMenuItem(title: L10n.text("Spaces.1038"), action: nil, keyEquivalent: "")
         icon.submenu = icons
         menu.addItem(icon)
+        // Everything the space can wear, in one popover (see SpaceLookPicker).
+        menu.addItem(item("Colour…") {
+            // Once the menu has gone: a popover shown while it tracks closes with it.
+            DispatchQueue.main.async { SpaceLookPopover.show(for: browser) }
+        })
         // The order is the swipe's, and ⌃1–⌃9's.
         if let at = browser.spaces.firstIndex(where: { $0.id == here.id }) {
             if at > 0 { menu.addItem(item(L10n.text("Spaces.1039")) { browser.moveSpace(here.id, to: at - 1) }) }
@@ -803,6 +1085,15 @@ enum Ask {
             guard ok, !name.isEmpty else { cancelled(); return }
             then(name, fresh.state != .on)
         }
+    }
+
+    /// Something to say, with nothing to answer but OK.
+    static func tell(_ title: String, detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.addButton(withTitle: "OK")
+        show(alert) { _ in }
     }
 
     /// `returnCancels`: Return is Cancel's, for a yes that can't be undone.

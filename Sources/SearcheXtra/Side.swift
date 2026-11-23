@@ -18,6 +18,7 @@ final class HeldEdges: ObservableObject {
 struct SideBar: View {
     @ObservedObject var browser: Browser
     @ObservedObject var prefs: Preferences
+    @ObservedObject private var agents = AgentControl.shared
     /// On the window's ground, beside the page's card (see CardEdge): the
     /// ground's colour and no edge of its own, the card's edge being the line.
     var onFrame = false
@@ -53,16 +54,28 @@ struct SideBar: View {
     @State private var crossing: PinDrop.Crossing?
     /// Where the blocks are, for working that out.
     @State private var frames = ColumnFrames()
+    /// Where each line of the pinned rows is, with pin folders drawn.
+    @State private var pinLineFrames = PinLineFrames()
+    /// Where a pin carried among the folders would go (see PinTree.place).
+    @State private var folderDrop: PinTree.Place?
+    /// Where a folder carried by its heading would go (PinTree.folderPlace).
+    @State private var folderMove: PinTree.FolderPlace?
     /// Whether this space's rows fit under the pins without scrolling: set
     /// only when the answer changes, from the room under the pins and what
     /// the rows add up to, which are kept where changing them draws nothing.
     @State private var fits = true
+    /// The space whose row the scroll last went to: another one is a space
+    /// coming in, not a tab picked (see the rows' onChange).
+    @State private var scrolledSpace: UUID?
     @State private var room = Room()
     private final class Room {
         var height: CGFloat = .infinity
         var needed: CGFloat = 0
         /// The rows' own height, as last laid out.
         var drawn: CGFloat = 0
+        /// The tab in front and the room when the rows last fitted in a
+        /// room measured: the column on screen, a plain stack at its top.
+        var fitted: (active: Tab.ID?, height: CGFloat)?
     }
 
     /// A tab's line: taller with roomier tabs turned on.
@@ -95,23 +108,27 @@ struct SideBar: View {
         ZStack(alignment: .top) {
             // Not under the card for a new space: it isn't made of views that
             // would take the click first.
-            DragStrip(reserved: 0, below: browser.makingSpace ? .greatestFiniteMagnitude : rowsEnd, onDoubleClick: browser.newTab)
+            // A right-click anywhere in the column with nothing of its own
+            // there — under the tabs, between groups, the band at the top,
+            // round the foot's buttons — brings up the column's menu.
+            DragStrip(reserved: 0, below: browser.makingSpace ? .greatestFiniteMagnitude : rowsEnd, onDoubleClick: browser.newTab,
+                      menu: browser.makingSpace ? nil : columnMenu)
 
             // The band the lights sit in is this mode's title bar: the window
             // is dragged by it and a double-click fills the screen with it,
             // everywhere but over the three doors, which take their own
             // clicks. The lights are the title bar's own and answer first.
             if icons {
-                DragStrip()
+                DragStrip(menu: columnMenu)
                     .frame(height: lightsBand)
             } else {
                 HStack(spacing: 0) {
-                    DragStrip()
+                    DragStrip(menu: columnMenu)
                         .frame(width: 10 + lights)
                     Color.clear
                         .frame(width: Metrics.helm)
                         .allowsHitTesting(false)
-                    DragStrip()
+                    DragStrip(menu: columnMenu)
                 }
                 .frame(height: Metrics.strip)
             }
@@ -147,10 +164,20 @@ struct SideBar: View {
             .padding(.horizontal, 10)
             // Clear of the foot, which sits over the sidebar's bottom edge,
             // and of what plays in another tab, over the foot.
-            .padding(.bottom, footHeight + (browser.player == nil ? 0 : rowHeight + SideBar.playerGap))
+            .padding(.bottom, footHeight + (browser.player == nil ? 0 : rowHeight + SideBar.playerGap)
+                     + (agentHere && !icons ? SideBar.agentRow + SideBar.playerGap : 0))
 
             VStack(spacing: 0) {
                 Spacer()
+                // A coding agent allowed in this window: its pill and Stop,
+                // in the column rather than over the page (AgentBanner).
+                if agentHere, !icons {
+                    AgentStatus(browser: browser, style: .row)
+                        .frame(height: SideBar.agentRow)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, SideBar.playerGap)
+                        .transition(.opacity)
+                }
                 if let tab = browser.player {
                     PlayerRow(browser: browser, prefs: prefs, tab: tab)
                         .padding(.horizontal, 10)
@@ -185,7 +212,12 @@ struct SideBar: View {
         .onAppear { SpaceSwipe.shared.start(for: browser) }
         .background {
             ZStack {
-                landing ? greys.hover : onFrame ? Palette.frame : Palette.ground
+                onFrame ? Palette.frame : Palette.ground
+                if landing { greys.hover }
+                // The space's colour, if it has one: over the ground, so the
+                // column stays opaque and folded out over the page it brings
+                // the same wash along.
+                SpaceWash(look: browser.wash)
                 if prefs.splitView {
                     SplitDropZone(browser: browser, tab: nil, kind: .strip)
                 }
@@ -199,6 +231,18 @@ struct SideBar: View {
         .onDrop(of: [.url, .text], isTargeted: $landing) { providers in
             browser.take(providers)
         }
+        // Another space's row comes in all at once, as a swipe lands it
+        // (SpaceSwipe.slide): the glide and settle below, made for a tab or
+        // two moving, took every row of both spaces out and in, the longer
+        // the row the slower. Inside them, so it has the last word; and
+        // over the rows' own, so a row given another space's tab (see
+        // Browser.rowKey) takes it at once, rather than fading its title
+        // over and gliding the ground of the tab in front across from the
+        // row that had it.
+        .transaction(value: browser.spaceID) {
+            $0.animation = nil
+            $0.disablesAnimations = true
+        }
         .animation(Motion.quick, value: landing)
         .animation(Motion.quick, value: browser.player?.id)
         .animation(Motion.glide, value: browser.activeID)
@@ -208,6 +252,12 @@ struct SideBar: View {
         // The last square made the first row changes nothing in the row's
         // order; only how many of each there are.
         .animation(Motion.settle, value: browser.listedPins.count)
+    }
+
+    /// The column's menu, for a right-click where nothing else has one.
+    private var columnMenu: () -> NSMenu? {
+        let browser = self.browser
+        return { [weak browser] in browser.map(ColumnMenu.make(for:)) }
     }
 
     /// The column's edge: pull it to make the column wider or narrower,
@@ -256,32 +306,84 @@ struct SideBar: View {
     }
 
     private var pages: some View {
+        ZStack(alignment: .topLeading) {
+            // Standing still, out of sight while a swipe moves this space's
+            // rows in the map in its place (others): every row of a long
+            // space moved a frame at a time, all its views were placed
+            // again at each, and the rows lagged the fingers.
+            // The card for a new space moves itself: there is none in the map.
+            if browser.makingSpace {
+                page(spaceAt, pill: pill)
+                    .modifier(SwipeShift(offset: browser.spaceSwipeOffset, across: true))
+            } else {
+                page(spaceAt, pill: pill)
+                    .modifier(SwipeHides(side: browser.swipeSide))
+            }
+            // Apart from this space's own rows: those, made again as the
+            // swipe set off and as it ended, held the rows back from the
+            // fingers for up to a tenth of a second.
+            SwipeSided(side: browser.mapDrawn) { _ in others }
+        }
+        // The card for a new space, with its field, only while the fingers
+        // bring it. Over the pages, not among them: among them, each swipe's
+        // start laid them all out again.
+        .overlay(alignment: .topLeading) {
+            SwipeCard(side: browser.swipeSide, browser: browser, at: spaceAt, width: width)
+        }
+            // The pages are the column's whole width, each with its own margin.
+            .padding(.horizontal, -10)
+            // The room there is, and never more: another space's rows, drawn
+            // whole while they pass, run on past the foot rather than making the
+            // column taller than the window. With no minimum, a long space coming
+            // in made it so, and the column, centred, lost its top and its foot
+            // until the swipe was done (#1024).
+            .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// The map: every space's rows, for the swipe to move along. Drawn
+    /// again only as its spaces' rows change or a space comes out of its
+    /// order (Browser.mapDrawn), not as a swipe sets off: all its pages made
+    /// again then, the rows started a few frames late.
+    private var others: some View {
         let width = self.width
-        let swipe = browser.spaceSwipeSide
         let offset = browser.spaceSwipeOffset
         let at = spaceAt
         return ZStack(alignment: .topLeading) {
-            page(at, pill: pill)
-                .modifier(SwipeShift(offset: offset, across: true))
-            // Only while the fingers are bringing one in: the one they are
-            // bringing, a page's width away.
-            if swipe > 0, at > 0 {
-                page(at - 1, pill: before)
-                    .modifier(SwipeShift(offset: offset, by: -width, across: true))
-            }
-            if swipe < 0, browser.drawsPage(after: at) {
-                page(at + 1, pill: after)
-                    .modifier(SwipeShift(offset: offset, by: width, across: true))
+            // The map: every space's rows, this one's too, each made once
+            // and kept out of sight, side by side in the spaces' order, the
+            // swipe moving along them (SpaceSwipe.bring). Made as one came in
+            // instead, beside the space landed on, they were built in the
+            // step that took it — up to a third of a second in which nothing
+            // answered — and for a space further along, in the first step of
+            // the slide too. Only those in sight are moved (SwipeShift's
+            // park); the rest stand still out of sight, not drawn again at
+            // every frame of a slide.
+            ForEach(Array(browser.spaces.enumerated()), id: \.element.id) { index, space in
+                mapPage(space.id)
+                    .modifier(SwipeShift(offset: offset, by: CGFloat(browser.mapSlot(index, from: at)) * width,
+                                         across: true, park: width))
+                    .accessibilityHidden(true)
             }
         }
-        // The pages are the column's whole width, each with its own margin.
-        .padding(.horizontal, -10)
-        // The room there is, and never more: another space's rows, drawn
-        // whole while they pass, run on past the foot rather than making the
-        // column taller than the window. With no minimum, a long space coming
-        // in made it so, and the column, centred, lost its top and its foot
-        // until the swipe was done (#1024).
-        .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// A space's rows in the map (pages), as the swipe draws them: this
+    /// space's as they are, scrolled as the column is, another's as it was
+    /// left. Its tab in front's ground glides nowhere (LiveMatch).
+    private func mapPage(_ space: UUID) -> some View {
+        let here = space == browser.spaceID
+        let row = here
+            ? Parked(tabs: browser.tabs, active: browser.activeID, splits: browser.splits, groups: browser.tabGroups)
+            : browser.parked[space] ?? Parked(tabs: [], active: nil)
+        // Only when it isn't scrolled where the map would draw it anyway,
+        // as it is once it has come: told every time, its rows in sight were
+        // all made again as a swipe set off.
+        let scrolled = here ? browser.mapScroll(fits: fits) : nil
+        if here { browser.mapDrew = (fits, scrolled) }
+        return preview(row, space: space, pill: before, scrolled: scrolled)
+            .padding(.horizontal, 10)
+            .frame(width: width, alignment: .topLeading)
+            .environment(\.inSpaceMap, true)
     }
 
     /// One space's page: the rows on screen, another space's rows as they
@@ -336,16 +438,33 @@ struct SideBar: View {
                                         room.drawn = $0
                                         refit()
                                     }
+                                    // How far it is scrolled, for its rows
+                                    // in the map to be drawn the same (mapPage).
+                                    .onGeometryChange(for: CGFloat.self) { -$0.frame(in: .named("scroll")).minY } action: {
+                                        browser.columnScrolled = (browser.spaceID, $0)
+                                    }
                                 }
+                                .coordinateSpace(name: "scroll")
                                 // The tab you go to is the tab you see — ⌘1–⌘9,
                                 // ⇧⌘], a link opening beside the one on screen.
                                 .onChange(of: browser.activeID) { _, id in
+                                    // Another space's row is in this same scroll,
+                                    // which was still where the last space was
+                                    // left: it came in there and then glided down
+                                    // to its tab. It comes in on its tab, as it
+                                    // does the first time (onAppear).
+                                    let arrived = scrolledSpace != browser.spaceID
+                                    scrolledSpace = browser.spaceID
                                     guard let id else { return }
                                     let representative = browser.activeSplit?.left ?? id
+                                    if arrived {
+                                        scroll(proxy, to: representative, anchor: .center)
+                                        return
+                                    }
                                     // Without the glide on a test run: a hidden
                                     // probe's window draws no frames, and the
                                     // scroll stopped where its first one left it.
-                                    withAnimation(Store.testing ? nil : Motion.glide) { proxy.scrollTo(representative) }
+                                    withAnimation(Store.testing ? nil : Motion.glide) { scroll(proxy, to: representative) }
                                 }
                                 // A turn of the run loop later, as the row across
                                 // the top does it (TabBar.reveal): the folded
@@ -353,10 +472,25 @@ struct SideBar: View {
                                 // once, before the rows had their height, the
                                 // scroll could be dropped and the tab you were on
                                 // left out of sight.
+                                //
+                                // Not when the rows grew past the same room
+                                // under the tab you were already on, a folder
+                                // opened: the stack was at its top, and
+                                // the scroll that takes over starts there too,
+                                // where Arc leaves it (a folder opened is
+                                // opened in place).
                                 .onAppear {
-                                    guard let id = browser.activeID else { return }
+                                    scrolledSpace = browser.spaceID
+                                    let stayed = room.fitted.map { $0.active == browser.activeID && $0.height == room.height } ?? false
+                                    room.fitted = nil
+                                    guard !stayed, let id = browser.activeID else { return }
+                                    // At once too, so a space whose row has just
+                                    // grown too long to fit doesn't show its top
+                                    // for a frame; the turn later is for when
+                                    // this one is dropped.
+                                    scroll(proxy, to: browser.activeSplit?.left ?? id, anchor: .center)
                                     DispatchQueue.main.async {
-                                        proxy.scrollTo(browser.activeSplit?.left ?? id, anchor: .center)
+                                        scroll(proxy, to: browser.activeSplit?.left ?? id, anchor: .center)
                                     }
                                 }
                             }
@@ -392,7 +526,8 @@ struct SideBar: View {
                 .coordinateSpace(name: "column")
                 .animation(Motion.settle, value: crossing)
             } else {
-                preview(browser.parked[browser.spaces[index].id] ?? Parked(tabs: [], active: nil), pill: pill)
+                preview(browser.parked[browser.spaces[index].id] ?? Parked(tabs: [], active: nil),
+                        space: browser.spaces[index].id, pill: pill)
             }
         }
         .padding(.horizontal, 10)
@@ -401,20 +536,34 @@ struct SideBar: View {
 
     private func refit() {
         let now = max(room.needed, room.drawn) <= room.height
+        if now, room.height.isFinite { room.fitted = (browser.activeID, room.height) }
         if Store.testing { SideBar.measured = ["room": room.height, "needed": room.needed, "drawn": room.drawn, "fits": now ? 1 : 0] }
         if fits != now { fits = now }
     }
 
     /// What the column last measured, for the bench (`columnscroll`). Test runs only.
     @MainActor static var measured: [String: CGFloat] = [:]
+    /// The pinned rows' lines as last drawn with folders, for the bench
+    /// (`pinfolder`): kind, depth, title, folded. Test runs only.
+    @MainActor static var drawnPinLines: [[Any]] = []
+    /// Where each of those lines was drawn, in the rows' own space. Test runs only.
+    @MainActor static var drawnPinFrames: [UUID: CGRect] = [:]
+    /// Where those lines' own space starts down the window. Test runs only.
+    @MainActor static var drawnPinTop: CGFloat?
 
     /// Another space's rows, drawn with the same pieces as this one's so the
     /// two read as one column while they pass — and nothing to press until
     /// it is the one on screen.
-    private func preview(_ row: Parked, pill: Namespace.ID) -> some View {
+    private func preview(_ row: Parked, space: UUID, pill: Namespace.ID, scrolled at: CGFloat? = nil) -> some View {
         let pins = row.tabs.filter { $0.pin != nil && !($0.listed && prefs.showsPinRows) }
         let listed = prefs.showsPinRows ? row.tabs.filter { $0.pin != nil && $0.listed } : []
+        // In their folders, as on screen, with Folders in pinned rows on.
+        let folders = prefs.showsPinFolders ? PinFolders.folders(space) : []
+        let pinLines = folders.isEmpty ? listed.map { PinRowLine.pin($0, depth: 0) }
+            : Browser.pinRowLines(listed, folders: folders, showing: row.active)
         let (groups, rest) = row.drawn(groupsOn: prefs.usesTabGroups, splitView: prefs.splitView)
+        let lines = previewLines(row, pins: pinLines, groups: groups, rest: rest,
+                                 keeps: showsLine(kept: pins.count + listed.count + groups.count, listed: listed.count, loose: rest.filter { !$0.isBlank }.count))
         let cells = pinCells(pins.count)
         return VStack(alignment: .leading, spacing: 0) {
             if !pins.isEmpty {
@@ -428,36 +577,112 @@ struct SideBar: View {
                 }
                 .padding(.bottom, 10)
             }
-            VStack(spacing: SideBar.gap) {
-                ForEach(listed) { tab in
-                    if icons {
-                        IconTile(browser: browser, prefs: prefs, tab: tab, live: tab.id == row.active,
-                                 pill: pill, close: {}, interactive: false)
-                    } else {
-                        SideRow(browser: browser, prefs: prefs, tab: tab, live: tab.id == row.active,
-                                pill: pill, close: {}, interactive: false)
+            // Scrolled as the column will be once the space lands, its tab
+            // in the middle (see the rows' onChange), and only the lines in
+            // sight made: drawn from the top, the column came in at its first
+            // tabs and jumped down to the one in front as it landed; drawn
+            // whole, its 200 rows were all built as the fingers moved, and
+            // the swipe fell behind them.
+            GeometryReader { geo in
+                let room = geo.size.height
+                let whole = lines.last.map { $0.y + $0.height } ?? 0
+                let front = lines.first { $0.front }
+                let centred = front.map { min(max(0, $0.y + $0.height / 2 - room / 2), max(0, whole - room)) } ?? 0
+                let scrolled = at ?? centred
+                let shown = lines.filter { $0.y + $0.height >= scrolled && $0.y <= scrolled + room }
+                let _ = { browser.mapScrolled[space] = centred }()
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(shown) { line in
+                        previewLine(line, row: row, pill: pill)
+                            .padding(.bottom, line.after)
                     }
                 }
-                // Its groups, folded as they were left (see Parked.drawn).
-                ForEach(groups) { drawn in
-                    GroupHeading(browser: browser, group: drawn.group, compact: icons)
-                    ForEach(drawn.tabs) { tab in
-                        rowItem(tab, tabs: row.tabs, splits: row.splits, activeID: row.active,
-                                interactive: false, pill: pill, close: {})
-                    }
-                }
-                // Under the groups, as on screen.
-                if showsLine(kept: pins.count + listed.count + groups.count, listed: listed.count, loose: rest.count) {
-                    KeepLine(clears: false) {}
-                }
-                ForEach(rest) { tab in
-                    rowItem(tab, tabs: row.tabs, splits: row.splits, activeID: row.active,
-                            interactive: false, pill: pill, close: {})
-                }
+                .offset(y: (shown.first?.y ?? 0) - scrolled)
             }
-            newTab
+            .clipped()
         }
         .allowsHitTesting(false)
+    }
+
+    /// A line of another space's rows as the swipe draws them, where it lies
+    /// among them and the room after it, added up as rowsHeight adds up the
+    /// column's own.
+    private struct PreviewLine: Identifiable {
+        enum Kind { case pin(PinRowLine), heading(TabGroup), tab(Tab), keep, newTab }
+        let id: AnyHashable
+        let kind: Kind
+        let y: CGFloat
+        let height: CGFloat
+        let after: CGFloat
+        let front: Bool
+    }
+
+    private func previewLines(_ row: Parked, pins: [PinRowLine], groups: [Parked.DrawnGroup], rest: [Tab],
+                              keeps: Bool) -> [PreviewLine] {
+        let front = row.splits.first { pair in row.active.map(pair.tabs.contains) ?? false }?.left ?? row.active
+        let heading = icons ? GroupHeading.compactHeight : GroupHeading.height
+        let lines: (Tab) -> CGFloat = { tab in
+            CGFloat(self.prefs.splitView ? (row.splits.first { $0.left == tab.id }?.tabs.count ?? 1) : 1)
+        }
+        var out: [PreviewLine] = []
+        var y: CGFloat = 0
+        func add(_ id: AnyHashable, _ kind: PreviewLine.Kind, _ height: CGFloat, after: CGFloat = SideBar.gap, front: Bool = false) {
+            out.append(PreviewLine(id: id, kind: kind, y: y, height: height, after: after, front: front))
+            y += height + after
+        }
+        // The pinned rows, one gap apart and one under the last (the rows'
+        // own padding, flatListed and foldered); rowsHeight counts another,
+        // to spare, which drawn here set every row under them 2 points low.
+        for line in pins {
+            switch line {
+            case .folder: add(line.id, .pin(line), heading)
+            case .item: add(line.id, .pin(line), rowHeight)
+            case .pin(let tab, _): add(line.id, .pin(line), rowHeight, front: tab.id == front)
+            }
+        }
+        for drawn in groups {
+            // A folded group showing none of its tabs still has its empty
+            // stack under its heading, and the gap after it.
+            add("heading-\(drawn.group.id)", .heading(drawn.group), heading, after: drawn.tabs.isEmpty ? 2 * SideBar.gap : SideBar.gap)
+            for tab in drawn.tabs { add(tab.id, .tab(tab), lines(tab) * rowHeight, front: tab.id == front) }
+        }
+        if keeps { add("keep", .keep, KeepLine.height) }
+        for tab in rest { add(tab.id, .tab(tab), lines(tab) * rowHeight, front: tab.id == front) }
+        // The row that makes another, with its gap above it (newTab).
+        if let last = out.last {
+            out[out.count - 1] = PreviewLine(id: last.id, kind: last.kind, y: last.y, height: last.height, after: 0, front: last.front)
+            y -= last.after
+        }
+        add("new-tab", .newTab, rowHeight + SideBar.gap, after: 0)
+        return out
+    }
+
+    @ViewBuilder
+    private func previewLine(_ line: PreviewLine, row: Parked, pill: Namespace.ID) -> some View {
+        switch line.kind {
+        case .pin(.folder(let folder, let depth)):
+            PinFolderHeading(browser: browser, prefs: prefs, folder: folder, depth: depth, compact: icons, interactive: false)
+        case .pin(.item(let item, _, let depth)):
+            FeedItemRow(browser: browser, prefs: prefs, item: item, depth: depth, compact: icons, interactive: false)
+        case .pin(.pin(let tab, let depth)):
+            if icons {
+                IconTile(browser: browser, prefs: prefs, tab: tab, live: tab.id == row.active,
+                         pill: pill, close: {}, interactive: false)
+            } else {
+                SideRow(browser: browser, prefs: prefs, tab: tab, live: tab.id == row.active,
+                        pill: pill, close: {}, interactive: false)
+                    .padding(.leading, CGFloat(depth) * PinFolderHeading.indent)
+            }
+        case .heading(let group):
+            GroupHeading(browser: browser, group: group, compact: icons)
+        case .tab(let tab):
+            rowItem(tab, tabs: row.tabs, splits: row.splits, activeID: row.active,
+                    interactive: false, pill: pill, close: {})
+        case .keep:
+            KeepLine(clears: false) {}
+        case .newTab:
+            newTab
+        }
     }
 
     /// Where the rows stop and the window's own drag area starts. Added up
@@ -475,15 +700,16 @@ struct SideBar: View {
     private var rowsHeight: CGFloat {
         let displayed = browser.displayedTabs
         let listed = browser.listedPins.count
-        let ungrouped = displayed.filter { $0.pin == nil && (!prefs.usesTabGroups || browser.group(of: $0) == nil) }.count
-        let listBlock = CGFloat(listed) * (rowHeight + SideBar.gap) + (listed > 0 ? SideBar.gap : 0)
+        let ungrouped = browser.looseRow.count
+        let listBlock = listedHeight(listed)
             + (showsLine(kept: keptCount, listed: listed, loose: ungrouped) ? KeepLine.height + SideBar.gap : 0)
         let grouped = prefs.usesTabGroups ? browser.tabGroups.map { browser.visibleTabs(in: $0) } : []
         let rows = prefs.usesTabGroups
             ? displayed.filter { $0.pin == nil && browser.group(of: $0) == nil } + grouped.flatMap { $0 }
             : displayed.filter { $0.pin == nil }
-        // A pair is two lines (see SplitTabItem).
-        let pairs = rows.filter { browser.split(for: $0) != nil }.count
+        // A split is a line for each page (see SplitTabItem): the lines
+        // past the first.
+        let pairs = rows.reduce(0) { $0 + max(0, (browser.split(for: $1)?.tabs.count ?? 1) - 1) }
         let heading = icons ? GroupHeading.compactHeight : GroupHeading.height
         // A folded group showing none of its tabs still has its empty stack
         // of them under its heading, and the gap after it.
@@ -491,6 +717,21 @@ struct SideBar: View {
             + CGFloat(grouped.filter(\.isEmpty).count) * SideBar.gap
         let loose = CGFloat(rows.count) * (rowHeight + SideBar.gap) + CGFloat(pairs) * rowHeight + headings
         return listBlock + loose + rowHeight + 8
+    }
+
+    /// The pinned rows' height: each row, or with pin folders each line,
+    /// the gap under it, and one more under them all.
+    private func listedHeight(_ listed: Int) -> CGFloat {
+        guard browser.showsPinFolderRows else {
+            return CGFloat(listed) * (rowHeight + SideBar.gap) + (listed > 0 ? SideBar.gap : 0)
+        }
+        let heading = PinFolderHeading.height(prefs, compact: icons)
+        let lines = browser.pinRowLines()
+        let total = lines.reduce(CGFloat(0)) { sum, line in
+            if case .folder = line { return sum + heading + SideBar.gap }
+            return sum + rowHeight + SideBar.gap
+        }
+        return total + (lines.isEmpty ? 0 : SideBar.gap)
     }
 
     @ViewBuilder
@@ -504,17 +745,18 @@ struct SideBar: View {
         close: @escaping () -> Void
     ) -> some View {
         let pair = prefs.splitView ? splits.first(where: { $0.left == tab.id }) : nil
+        let pages = pair.map { pair in pair.tabs.compactMap { id in tabs.first { $0.id == id } } } ?? []
         if icons {
-            if let pair, let right = tabs.first(where: { $0.id == pair.right }) {
-                IconPair(browser: browser, prefs: prefs, left: tab, right: right,
+            if let pair, pages.count >= 2 {
+                IconPair(browser: browser, prefs: prefs, pages: pages,
                          live: activeID.map { pair.contains($0) } ?? false,
                          focusedID: activeID, interactive: interactive, pill: pill)
             } else {
                 IconTile(browser: browser, prefs: prefs, tab: tab, live: tab.id == activeID,
                          pill: pill, close: close, interactive: interactive)
             }
-        } else if let pair, let right = tabs.first(where: { $0.id == pair.right }) {
-            SplitTabItem(browser: browser, prefs: prefs, left: tab, right: right,
+        } else if let pair, pages.count >= 2 {
+            SplitTabItem(browser: browser, prefs: prefs, pages: pages,
                          width: nil, height: rowHeight,
                          live: activeID.map { pair.contains($0) } ?? false,
                          focusedID: activeID,
@@ -530,16 +772,16 @@ struct SideBar: View {
     /// Each row's place down the column, the gap under it included: a pair
     /// stands as two lines (see Carried). Worked out once for the list.
     private func steps(_ rows: [Tab]) -> [CGFloat] {
-        let pairs = prefs.splitView ? Set(browser.splits.filter { $0.left != $0.right }.map(\.left)) : []
-        return rows.map { (pairs.contains($0.id) ? rowHeight * 2 : rowHeight) + SideBar.gap }
+        let pairs = prefs.splitView
+            ? Dictionary(browser.splits.filter { $0.left != $0.right }.map { ($0.left, $0.tabs.count) }, uniquingKeysWith: { first, _ in first })
+            : [:]
+        return rows.map { rowHeight * CGFloat(pairs[$0.id] ?? 1) + SideBar.gap }
     }
 
     // MARK: - the pinned squares
 
     private var pinnedTabs: [Tab] { browser.squarePins }
-    private var looseTabs: [Tab] {
-        browser.displayedTabs.filter { $0.pin == nil && (!prefs.usesTabGroups || browser.group(of: $0) == nil) }
-    }
+    private var looseTabs: [Tab] { browser.looseRow }
 
     /// The line between what is kept and what comes and goes, with the
     /// pinned rows on: over the tabs Clear would close, or under rows with
@@ -547,6 +789,9 @@ struct SideBar: View {
     /// either side of it: nothing kept above it either — no pin of this
     /// space, square or row, and no group — until the first is pinned
     /// (idea 444), as the row across the top has it (TabBar.showsPinLine).
+    /// `loose`: the tabs under it that hold a page. Over nothing but the
+    /// empty tab a window starts with, it was a line with nothing to keep
+    /// apart (Drice, 18 Nov 2026).
     private func showsLine(kept: Int, listed: Int, loose: Int) -> Bool {
         prefs.showsPinRows && kept > 0 && listed + loose > 0
     }
@@ -640,7 +885,175 @@ struct SideBar: View {
 
     /// The pins kept as rows, under the squares: Arc's pinned list. Each is
     /// a row like any other to look at, carried only among its own kind.
+    @ViewBuilder
     private var listed: some View {
+        if browser.showsPinFolderRows { foldered } else { flatListed }
+    }
+
+    /// The pinned rows in their folders (see PinFolders.swift): each
+    /// folder's heading, then what it holds, set in. A row carried among
+    /// them goes where it is let go — into the folder whose heading it is
+    /// over, or beside the row it is over — rather than moving along as it
+    /// goes; a mark shows where.
+    private var foldered: some View {
+        let lines = browser.pinRowLines()
+        if Store.testing { SideBar.drawnPinLines = lines.map(\.described) }
+        let heading = PinFolderHeading.height(prefs, compact: icons)
+        let lineSteps = lines.map { line -> CGFloat in
+            if case .folder = line { return heading + SideBar.gap }
+            return rowHeight + SideBar.gap
+        }
+        let drop = folderDrop
+        let move = folderMove
+        let moveMark = Self.folderMoveMark(move, lines: lines)
+        return VStack(spacing: SideBar.gap) {
+            ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
+                switch line {
+                case .folder(let folder, let depth):
+                    PinFolderHeading(browser: browser, prefs: prefs, folder: folder, depth: depth, compact: icons,
+                                     target: (drop?.folder == folder.id && drop?.anchor == nil)
+                                        || (move != nil && move?.parent == folder.id && move?.before == nil))
+                        .overlay(alignment: moveMark?.after == true ? .bottom : .top) {
+                            if let moveMark, moveMark.id == folder.id {
+                                PinFolderMark().offset(y: (moveMark.after ? 1 : -1) * (SideBar.gap / 2 + 1))
+                            }
+                        }
+                        .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named("listed")) }) { [pinLineFrames] in
+                            pinLineFrames.rects[folder.id] = $0
+                            if Store.testing { SideBar.drawnPinFrames[folder.id] = $0 }
+                        }
+                        // Carried by its heading, as a pinned row is, and put
+                        // down where let go: into a folder, out of one, or
+                        // before another (PinTree.folderPlace).
+                        .modifier(Carried(index: index, steps: lineSteps, vertical: true, space: "listed",
+                                          cross: { folderMoveCross(folder, $0) },
+                                          land: { folderMoveLand(folder, $0) }) { _ in })
+                case .item(let item, _, let depth):
+                    // A live folder's post: opened, never carried.
+                    FeedItemRow(browser: browser, prefs: prefs, item: item, depth: depth, compact: icons)
+                        .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named("listed")) }) { [pinLineFrames] in
+                            pinLineFrames.rects[item.id] = $0
+                        }
+                case .pin(let tab, let depth):
+                    Group {
+                        if icons {
+                            IconTile(browser: browser, prefs: prefs, tab: tab,
+                                     live: tab.id == browser.activeID, pill: pill,
+                                     close: { browser.close(tab) })
+                        } else {
+                            SideRow(browser: browser, prefs: prefs, tab: tab,
+                                    live: tab.id == browser.activeID, pill: pill,
+                                    close: { browser.close(tab) })
+                                .padding(.leading, CGFloat(depth) * PinFolderHeading.indent)
+                        }
+                    }
+                    .overlay(alignment: drop?.after == true ? .bottom : .top) {
+                        if let drop, drop.anchor == tab.id {
+                            PinFolderMark().offset(y: (drop.after ? 1 : -1) * (SideBar.gap / 2 + 1))
+                        }
+                    }
+                    .overlay(alignment: moveMark?.after == true ? .bottom : .top) {
+                        if let moveMark, moveMark.id == tab.id {
+                            PinFolderMark().offset(y: (moveMark.after ? 1 : -1) * (SideBar.gap / 2 + 1))
+                        }
+                    }
+                    .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named("listed")) }) { [pinLineFrames] in
+                        pinLineFrames.rects[tab.id] = $0
+                        if Store.testing { SideBar.drawnPinFrames[tab.id] = $0 }
+                    }
+                    // Carried as rows are, but put down only where let go:
+                    // its place among the lines is no place in the row.
+                    .modifier(Carried(index: index, steps: lineSteps, vertical: true,
+                                      space: "listed",
+                                      cross: { folderCross(tab, $0) },
+                                      land: { folderLand(tab, $0) }, faded: crossing?.tab == tab.id) { _ in })
+                }
+            }
+        }
+        .coordinateSpace(name: "listed")
+        .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .named("column")) }) { [frames] in frames.listed = $0 }
+        .onGeometryChange(for: CGFloat.self, of: { $0.frame(in: .global).minY }) { if Store.testing { SideBar.drawnPinTop = $0 } }
+        .padding(.bottom, lines.isEmpty ? 0 : SideBar.gap)
+    }
+
+    /// Where a pin let go at `y` in the rows' own space would go.
+    private func folderPlace(for id: UUID, y: CGFloat) -> PinTree.Place? {
+        let measured = measuredPinLines()
+        return PinTree.place(y: y, lines: measured.lines, folders: measured.folders, carrying: id)
+    }
+
+    /// The pin folders' lines as measured, for where something let go
+    /// among them goes.
+    private func measuredPinLines() -> (lines: [(line: PinTree.Line, frame: CGRect)], folders: [UUID: UUID?]) {
+        let lines = browser.pinRowLines()
+        let measured = lines.compactMap { line -> (line: PinTree.Line, frame: CGRect)? in
+            guard let rect = pinLineFrames.rects[line.id] else { return nil }
+            switch line {
+            case .folder(let folder, let depth): return (.folder(folder, depth: depth), rect)
+            case .pin(let tab, let depth): return (.pin(tab.id, depth: depth), rect)
+            case .item(let item, let folder, let depth): return (.item(item, folder: folder, depth: depth), rect)
+            }
+        }
+        var folders: [UUID: UUID?] = [:]
+        for line in lines { if case .pin(let tab, _) = line { folders[tab.id] = tab.everywhere ? nil : tab.pinFolder } }
+        return (measured, folders)
+    }
+
+    /// Where the mark for a carried folder goes: over the folder it would
+    /// go before; going last at the top, over the first pin there, or under
+    /// the last line. Into a folder, that folder's heading is lit instead.
+    static func folderMoveMark(_ place: PinTree.FolderPlace?, lines: [PinRowLine]) -> (id: UUID, after: Bool)? {
+        guard let place else { return nil }
+        if let before = place.before { return (before, false) }
+        guard place.parent == nil else { return nil }
+        if let top = lines.first(where: { if case .pin(_, 0) = $0 { return true }; return false }) { return (top.id, false) }
+        return lines.last.map { ($0.id, true) }
+    }
+
+    /// A folder carried by its heading: the place it would go. It stays
+    /// among the pinned rows, so no other block takes it.
+    private func folderMoveCross(_ folder: PinFolder, _ point: CGPoint) -> Bool {
+        let measured = measuredPinLines()
+        let place = PinTree.folderPlace(y: point.y, lines: measured.lines, folders: browser.pinFolders,
+                                        pinFolder: measured.folders, carrying: folder.id)
+        if folderMove != place { withAnimation(Motion.settle) { folderMove = place } }
+        return true
+    }
+
+    private func folderMoveLand(_ folder: PinFolder, _ point: CGPoint?) -> Bool {
+        let place = folderMove
+        if folderMove != nil { withAnimation(Motion.settle) { folderMove = nil } }
+        guard point != nil, let place else { return true }
+        withAnimation(Motion.settle) { browser.movePinFolder(folder.id, to: place) }
+        return true
+    }
+
+    private func showFolderDrop(_ place: PinTree.Place?) {
+        if folderDrop != place { withAnimation(Motion.settle) { folderDrop = place } }
+    }
+
+    /// A pinned row carried among the folders: over another block, that
+    /// block's; here, the place it would go.
+    private func folderCross(_ tab: Tab, _ point: CGPoint) -> Bool {
+        if cross(tab, point, from: .listed) {
+            showFolderDrop(nil)
+            return true
+        }
+        showFolderDrop(browser.takesFolder(tab) ? folderPlace(for: tab.id, y: point.y) : nil)
+        return false
+    }
+
+    private func folderLand(_ tab: Tab, _ point: CGPoint?) -> Bool {
+        let place = folderDrop
+        showFolderDrop(nil)
+        if land(tab, point) { return true }
+        guard point != nil, let place else { return false }
+        withAnimation(Motion.settle) { browser.movePin(tab, to: place) }
+        return true
+    }
+
+    /// The pinned rows as they always were, with no folder to draw.
+    private var flatListed: some View {
         let pins = browser.listedPins
         let squares = browser.squarePins.count
         let ghost: Int? = if case .listed(let at)? = crossing?.target { at } else { nil }
@@ -692,7 +1105,7 @@ struct SideBar: View {
             let loose = looseTabs
             // Under the groups: Clear keeps them, as it keeps the pins, so
             // everything above the line is what stays.
-            if showsLine(kept: keptCount, listed: browser.listedPins.count, loose: loose.count) {
+            if showsLine(kept: keptCount, listed: browser.listedPins.count, loose: loose.filter { !$0.isBlank }.count) {
                 KeepLine(clears: !loose.isEmpty) { browser.clearTabs() }
             }
             let ghost: Int? = if case .loose(let at)? = crossing?.target { at } else { nil }
@@ -700,8 +1113,12 @@ struct SideBar: View {
             // among them would land.
             if !loose.isEmpty || ghost != nil {
                 let looseSteps = steps(loose)
+                // Under each tab's row key, not its id: another space's tabs
+                // come into these same rows (see Browser.rowKey).
+                let rows = loose.enumerated().map { LooseRow(id: browser.rowKey($0.element), index: $0.offset, tab: $0.element) }
                 VStack(spacing: SideBar.gap) {
-                    ForEach(Array(loose.enumerated()), id: \.element.id) { index, tab in
+                    ForEach(rows) { row in
+                        let index = row.index, tab = row.tab
                         if ghost == index, let carried = crossingTab {
                             RowGhost(tab: carried, height: rowHeight, size: prefs.sideTitle)
                         }
@@ -755,6 +1172,16 @@ struct SideBar: View {
         let loose = Set(looseTabs.map(\.id))
         return GroupDropFrames.leaving(point, frames: groupFrames, loose: looseFrames.rects.filter { loose.contains($0.key) },
                                        groups: browser.tabGroups, source: tab.id, vertical: true)
+    }
+
+    /// Where the scroll goes for `id`: a loose row is drawn under its row
+    /// key, not its tab's id (see Browser.rowKey); any other row under its id.
+    private func scroll(_ proxy: ScrollViewProxy, to id: Tab.ID, anchor: UnitPoint? = nil) {
+        if let tab = looseTabs.first(where: { $0.id == id }) {
+            proxy.scrollTo(browser.rowKey(tab), anchor: anchor)
+        } else {
+            proxy.scrollTo(id, anchor: anchor)
+        }
     }
 
     private func groupRows(_ group: TabGroup) -> some View {
@@ -827,7 +1254,7 @@ struct SideBar: View {
         let squares = browser.squarePins.filter { $0.id != tab.id }
         let gridShown = !squares.isEmpty || ghostSquare != nil
         let rowsOn = prefs.showsPinRows
-        let listedShown = rowsOn && (!browser.listedPins.isEmpty || isListedGhost)
+        let listedShown = rowsOn && (!browser.listedPins.isEmpty || isListedGhost || browser.showsPinFolderRows)
         let zone = PinDrop.zone(point, width: width - 20,
                                 gridBottom: gridShown ? frames.grid?.maxY : nil,
                                 listed: listedShown ? frames.listed : nil)
@@ -871,8 +1298,18 @@ struct SideBar: View {
     /// The hand moved: the block it is over shows where the tab would
     /// land, and says so once, by touch, as it starts to. True while it does.
     private func cross(_ tab: Tab, _ point: CGPoint, from: From) -> Bool {
-        let now = target(for: tab, at: columnPoint(point, from: from))
+        let at = columnPoint(point, from: from)
+        let now = target(for: tab, at: at)
             .map { PinDrop.Crossing(tab: tab.id, target: $0) }
+        // Coming into the rows from the squares or the tabs, with folders:
+        // the place among them, as a row carried there has it.
+        if from != .listed, browser.showsPinFolderRows {
+            if case .listed? = now?.target {
+                showFolderDrop(folderPlace(for: tab.id, y: at.y - (frames.listed?.minY ?? 0)))
+            } else {
+                showFolderDrop(nil)
+            }
+        }
         if now != crossing {
             if crossing == nil, now != nil {
                 NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
@@ -888,13 +1325,17 @@ struct SideBar: View {
         let shown = crossing?.tab == tab.id ? crossing?.target : nil
         guard point != nil, let shown else {
             if crossing != nil { withAnimation(Motion.settle) { crossing = nil } }
+            if folderDrop != nil, crossing == nil { showFolderDrop(nil) }
             return false
         }
         withAnimation(Motion.settle) {
             crossing = nil
             switch shown {
             case .squares(let at): browser.pinDropped(tab, listed: false, at: at)
-            case .listed(let at): browser.pinDropped(tab, listed: true, at: at)
+            case .listed(let at):
+                if browser.pinDropped(tab, listed: true, at: at), browser.showsPinFolderRows {
+                    if let place = folderDrop { browser.movePin(tab, to: place) } else { browser.arrangePinFolders() }
+                }
             case .loose(let at): browser.unpinDropped(tab, at: at)
             case .group(let id): browser.unpinDropped(tab, at: 0, group: id)
             }
@@ -919,15 +1360,22 @@ struct SideBar: View {
     }
     /// Between what plays in another tab and the foot's doors.
     private static let playerGap: CGFloat = 4
+    /// The agent's quiet line at the column's foot.
+    private static let agentRow: CGFloat = 30
+    /// An agent's pill is showing in this window (AgentControl).
+    private var agentHere: Bool { agents.shownIn == ObjectIdentifier(browser) }
 
     @ViewBuilder
     private var newTab: some View {
         if icons {
             Quiet(icon: "plus", title: "", height: rowHeight, size: prefs.sideTitle, centred: true) { browser.launch() }
                 .help(L10n.text("upstream.88017ad.03b5eb004d"))
+                // The column's menu on a right-click, as round it.
+                .overlay { RightClick(menu: columnMenu) }
                 .padding(.top, SideBar.gap)
         } else {
             Quiet(icon: "plus", title: L10n.text("Side.0946"), height: rowHeight, size: prefs.sideTitle) { browser.launch() }
+                .overlay { RightClick(menu: columnMenu) }
                 .padding(.top, SideBar.gap)
         }
     }
@@ -957,6 +1405,8 @@ private struct SideFoot: View {
     var body: some View {
         if vertical {
             VStack(spacing: 2) {
+                // An agent connected in this window: a click on it is Stop.
+                AgentStatus(browser: browser, style: .icon)
                 FetchDoor(browser: browser, fetches: fetches, arrowEdge: prefs.sidePosition == .right ? .leading : .trailing)
                 ExtensionSlot(browser: browser, edge: prefs.sidePosition == .right ? .leading : .trailing, room: 0)
                 BookmarkDoor(browser: browser, arrowEdge: prefs.sidePosition == .right ? .leading : .trailing)
@@ -969,8 +1419,8 @@ private struct SideFoot: View {
             HStack(spacing: 2) {
                 if Profiles.shared.several { ProfileBadge(browser: browser) }
                 if prefs.usesSpaces { SpaceDot(browser: browser) }
-                ExtensionSlot(browser: browser, edge: .trailing, room: room)
-                BookmarkDoor(browser: browser, arrowEdge: .trailing)
+                ExtensionSlot(browser: browser, edge: prefs.sidePosition == .right ? .leading : .trailing, room: room)
+                BookmarkDoor(browser: browser, arrowEdge: prefs.sidePosition == .right ? .leading : .trailing)
                 // Only while a download is running, and a moment after.
                 FetchDoor(browser: browser, fetches: fetches, arrowEdge: prefs.sidePosition == .right ? .leading : .trailing)
                 Spacer(minLength: 0)
@@ -1026,6 +1476,48 @@ private struct PinGrid: Layout {
     }
 }
 
+/// The ground of the tab in front, matched from row to row as another tab
+/// is picked so that it glides there — within a space only. Matched across
+/// a change of space, the ground of the last space's tab in front was
+/// carried over to the new one's, out of step with the rows sliding in,
+/// whose places another space's tabs had just been given (Browser.rowKey).
+enum LivePill {
+    @MainActor static func id(_ browser: Browser) -> String { "live-\(browser.spaceID.uuidString)" }
+}
+
+/// The ground's glide from row to row (LivePill), off where nothing glides:
+/// in the map of every space's rows drawn beside the column (inSpaceMap),
+/// many at once, each with a tab in front, whose grounds would otherwise be
+/// matched with each other and with the column's.
+struct LiveMatch: ViewModifier {
+    @Environment(\.inSpaceMap) private var inMap
+    let id: String
+    let space: Namespace.ID
+
+    init(id: String, in space: Namespace.ID) {
+        self.id = id
+        self.space = space
+    }
+
+    func body(content: Content) -> some View {
+        if inMap { content } else { content.matchedGeometryEffect(id: id, in: space) }
+    }
+}
+
+private struct InSpaceMapKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Drawn in the map of every space's rows beside the column
+    /// (SideBar.pages), out of sight until a space comes in: not the
+    /// column's own rows, for what glides and what the bench counts.
+    var inSpaceMap: Bool {
+        get { self[InSpaceMapKey.self] }
+        set { self[InSpaceMapKey.self] = newValue }
+    }
+}
+
 /// A pinned tab as a cell in the block at the top of the column — as wide as
 /// its row asks for, but never taller than the classic square, so a row with
 /// room to spare turns into a wide, short button rather than a bigger icon.
@@ -1077,6 +1569,13 @@ private struct PinSquare: View, Equatable {
     /// stretching to chase the width.
     private var scale: CGFloat { min(width, height) }
 
+    /// The pin's letter: full ink with High contrast text, otherwise soft
+    /// grey until the square is live or under the pointer.
+    private var pinLetter: Color {
+        if live || prefs.highContrastText { return Palette.ink }
+        return hovering ? Palette.ink.opacity(0.7) : Palette.muted
+    }
+
     var body: some View {
         Group {
             if lettering {
@@ -1087,11 +1586,12 @@ private struct PinSquare: View, Equatable {
                 // Its page on the way, as a row's ring says.
                 Ring(size: scale * 11 / 34)
             } else if prefs.glyph == .icons, let icon = tab.icon {
-                Mark(icon: icon, letter: tab.pin ?? "", size: scale * 16 / 34, dim: tab.asleep)
+                Mark(icon: icon, letter: tab.pin ?? "", size: scale * 16 / 34, dim: tab.asleep,
+                     contrast: prefs.highContrastText)
             } else {
                 Text(tab.pin ?? "")
                     .font(.system(size: scale * 12 / 34, weight: .medium))
-                    .foregroundStyle((live ? Palette.ink : Palette.muted).opacity(tab.asleep ? 0.45 : 1))
+                    .foregroundStyle(pinLetter.opacity(tab.asleep ? 0.45 : 1))
             }
         }
         .frame(width: scale * 16 / 34, height: scale * 16 / 34)
@@ -1104,7 +1604,7 @@ private struct PinSquare: View, Equatable {
                     // pin barely showed among the others).
                     RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
                         .fill(greys.pinLive)
-                        .matchedGeometryEffect(id: "live", in: pill)
+                        .modifier(LiveMatch(id: LivePill.id(browser), in: pill))
                 } else {
                     RoundedRectangle(cornerRadius: scale * 9 / 34, style: .continuous)
                         .fill(selected ? greys.wash :
@@ -1150,6 +1650,14 @@ private struct PinSquare: View, Equatable {
     }
 }
 
+/// A loose row of the column: the key it is drawn under (Browser.rowKey),
+/// its place among the loose rows and the tab in it.
+private struct LooseRow: Identifiable {
+    let id: Int
+    let index: Int
+    let tab: Tab
+}
+
 /// One tab, as a line in the column.
 ///
 /// It doesn't watch the Browser. The little of it a row shows is read as the
@@ -1179,6 +1687,8 @@ private struct SideRow: View, Equatable {
     private let refusals: Int
     /// Its cross is a minus: closing it puts its page away (Browser.putsAway).
     private let putsAway: Bool
+    /// In a group, with groups on: a page put away from it stays a row there.
+    private let grouped: Bool
 
     init(browser: Browser, prefs: Preferences, tab: Tab, live: Bool, pill: Namespace.ID,
          close: @escaping () -> Void, interactive: Bool = true) {
@@ -1195,6 +1705,7 @@ private struct SideRow: View, Equatable {
         peek = browser.peekFrom == tab.id ? browser.peekTab : nil
         refusals = browser.refusals
         putsAway = browser.putsAway(tab)
+        grouped = prefs.usesTabGroups && browser.group(of: tab) != nil
     }
 
     /// The close action is left out: it closes the same tab every time.
@@ -1203,6 +1714,7 @@ private struct SideRow: View, Equatable {
             && a.pill == b.pill && a.interactive == b.interactive && a.editing == b.editing
             && a.selected == b.selected && a.pickedAmongOthers == b.pickedAmongOthers
             && a.peek === b.peek && a.refusals == b.refusals && a.putsAway == b.putsAway
+            && a.grouped == b.grouped
     }
 
     @State private var hovering = false
@@ -1225,6 +1737,17 @@ private struct SideRow: View, Equatable {
     /// the address on the tab you're on).
     private var rest: AtRest? { live && !editing ? AtRest.said(tab.restAddress, always: prefs.showsAddress) : nil }
     private var atRest: Bool { rest != nil }
+    /// A pin already put down has nothing left to put down: no minus (#1050).
+    private var closable: Bool { tab.pin == nil || !tab.asleep }
+    /// A grouped tab holding no page — put away with its minus (Browser.putAway),
+    /// put to sleep, or not opened since launch: the row stays, dimmed as a
+    /// pin put down is, so the minus is seen to have done something.
+    /// Read from the tab here, not when the column made the row: the column
+    /// isn't drawn again when one of its tabs lets its page go.
+    private var putAway: Bool { grouped && tab.asleep && !live }
+    /// Any other tab asleep, with Settings › Tabs › Dim sleeping tabs on:
+    /// faded until the pointer is on it.
+    private var dim: Bool { prefs.dimsSleepingTabs && tab.asleep && !live && !hovering && !putAway }
 
     var body: some View {
         let _ = Bench.count("row")
@@ -1244,13 +1767,18 @@ private struct SideRow: View, Equatable {
                     // The site's icon, or with Letters its letter: beside the
                     // title either way, as Settings says (#919).
                     if !tab.isBlank {
-                        Mark(icon: prefs.glyph == .icons ? tab.icon : nil, letter: tab.monogram, size: prefs.roomyTabs ? 17 : 15)
+                        Mark(icon: prefs.glyph == .icons ? tab.icon : nil, letter: tab.monogram, size: prefs.roomyTabs ? 17 : 15,
+                             dim: putAway || dim, contrast: prefs.highContrastText)
+                            // A coding agent at work here: a dot on the
+                            // icon's corner, the row as it was.
+                            .overlay(alignment: .bottomTrailing) { AgentMark(tab: tab) }
                     }
-                    if tab.bench {
+                    if tab.bench, !tab.agent {
                         // A script's tab, not yours.
                         Image(systemName: "flask")
                             .font(.system(size: 9))
                             .foregroundStyle(colour.opacity(0.7))
+                            .help("Opened by a script")
                     }
                     if tab.shy {
                         Image(systemName: "eye.slash")
@@ -1265,13 +1793,17 @@ private struct SideRow: View, Equatable {
                             .help(L10n.text("Side.0947"))
                     }
                     TitleAtRest(label: tab.label, rest: rest, shown: atRest, hovering: hovering,
-                                size: prefs.sideTitle, colour: colour, roomy: true)
+                                size: prefs.sideTitle, colour: colour, roomy: true, dim: dim)
                 }
                 Spacer(minLength: 0)
             }
             .padding(.leading, showsPopup ? 0 : 10)
             .padding(.trailing, status || peeking ? 0 : 10)
             .frame(height: prefs.sideRow)
+            // Stop, under the pointer, on the row the agent is working in.
+            .overlay(alignment: .trailing) {
+                if hovering, tab.agentWorking, !editing { AgentRowStop().padding(.trailing, 4) }
+            }
             .contentShape(Rectangle())
             .modifier(TabPress(enabled: interactive && !editing && !pickedAmongOthers, active: live, selected: $selectedOnPress, pressing: $pressed) {
                 browser.clearTabSelection()
@@ -1313,7 +1845,7 @@ private struct SideRow: View, Equatable {
         // doesn't jump on each row the pointer passes.
         .mask {
             ZStack {
-                Rectangle().opacity(hovering && !editing && !status ? 0 : 1)
+                Rectangle().opacity(hovering && closable && !editing && !status ? 0 : 1)
                 HStack(spacing: 0) {
                     Rectangle()
                     LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing)
@@ -1325,11 +1857,11 @@ private struct SideRow: View, Equatable {
         .overlay(alignment: .trailing) {
             if !editing {
                 ZStack {
-                    if hovering {
+                    if hovering && closable {
                         // A pinned row is put down, not closed (see
                         // Browser.close), and says so, as Arc's does; so is
                         // a grouped tab's page while it is open (closeTab).
-                        Image(systemName: tab.pin != nil || putsAway ? "minus" : "xmark")
+                        Image(systemName: tab.pin != nil || (putsAway && !tab.asleep) ? "minus" : "xmark")
                             .font(.system(size: 8, weight: .semibold))
                             .foregroundStyle(Palette.muted)
                             .frame(width: 15, height: 15)
@@ -1342,7 +1874,7 @@ private struct SideRow: View, Equatable {
                     Color.clear
                         .frame(width: 30, height: prefs.sideRow)
                         .contentShape(Rectangle())
-                        .onTapGesture { if hovering { close() } }
+                        .onTapGesture { if hovering && closable { close() } }
                 }
                 .padding(.trailing, 7)
             }
@@ -1374,6 +1906,12 @@ private struct SideRow: View, Equatable {
         .onHover(perform: hover)
         .onAppear { if interactive { Bench.rowAppeared(tab.id, hover: hover) } }
         .onDisappear { if interactive { Bench.rowDisappeared(tab.id) } }
+        // Another space's tab come into this row (Browser.rowKey).
+        .onChange(of: tab.id) { was, now in
+            guard interactive else { return }
+            Bench.rowDisappeared(was)
+            Bench.rowAppeared(now, hover: hover)
+        }
         .contextMenu { if interactive { TabMenu(browser: browser, tab: tab, close: close) } }
         .background {
             if interactive && prefs.splitView {
@@ -1382,6 +1920,7 @@ private struct SideRow: View, Equatable {
         }
         .animation(nil, value: hovering)
         .animation(Motion.glide, value: editing)
+        .animation(Motion.quick, value: dim)
         .onChange(of: refusals) { _, _ in
             guard editing else { return }
             shake = 0
@@ -1404,7 +1943,7 @@ private struct SideRow: View, Equatable {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .matchedGeometryEffect(id: "live", in: pill)
+            .modifier(LiveMatch(id: LivePill.id(browser), in: pill))
         } else if selected {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(greys.wash)
@@ -1415,8 +1954,11 @@ private struct SideRow: View, Equatable {
     }
 
     private var colour: Color {
-        if live { return Palette.ink }
-        return hovering ? Palette.ink.opacity(0.7) : Palette.muted
+        if live || prefs.highContrastText {
+            return putAway ? Palette.ink.opacity(0.45) : Palette.ink
+        }
+        let colour = hovering ? Palette.ink.opacity(0.7) : greys.muted
+        return putAway ? colour.opacity(0.45) : colour
     }
 }
 
@@ -1446,7 +1988,7 @@ struct Quiet: View {
                 }
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(hovering ? Palette.ink.opacity(0.7) : Palette.faint)
+            .foregroundStyle(hovering ? Palette.ink.opacity(0.7) : greys.faint)
             .padding(.leading, centred ? 0 : 10)
             .frame(height: height)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1467,8 +2009,10 @@ struct Quiet: View {
 /// the tabs below it closed, everything above it left as it was.
 struct KeepLine: View {
     static let height: CGFloat = 18
-    /// How many are drawn, for the bench (`columnscroll`). Test runs only.
+    /// How many are drawn in the column, for the bench (`columnscroll`):
+    /// not the map's (inSpaceMap). Test runs only.
     @MainActor static var drawn = 0
+    @Environment(\.inSpaceMap) private var inMap
     /// Whether there is anything under it to clear.
     let clears: Bool
     let act: () -> Void
@@ -1500,8 +2044,8 @@ struct KeepLine: View {
         .frame(height: KeepLine.height)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .onAppear { if Store.testing { KeepLine.drawn += 1 } }
-        .onDisappear { if Store.testing { KeepLine.drawn -= 1 } }
+        .onAppear { if Store.testing, !inMap { KeepLine.drawn += 1 } }
+        .onDisappear { if Store.testing, !inMap { KeepLine.drawn -= 1 } }
         .animation(Motion.quick, value: hovering)
     }
 }
@@ -1600,7 +2144,7 @@ private struct RightClick: NSViewRepresentable {
         var pages: (() -> NSMenu?)?
 
         override func hitTest(_ point: NSPoint) -> NSView? {
-            guard let event = NSApp.currentEvent, event.type == .rightMouseDown else { return nil }
+            guard NSApp.currentEvent?.type == .rightMouseDown || DragStrip.probingRightClick else { return nil }
             return super.hitTest(point)
         }
 
@@ -1608,6 +2152,9 @@ private struct RightClick: NSViewRepresentable {
             guard let menu = pages?() else { return }
             NSMenu.popUpContextMenu(menu, with: event, for: self)
         }
+
+        /// The same menu, for the bench (`columnmenu`).
+        override func menu(for event: NSEvent) -> NSMenu? { pages?() }
     }
 }
 

@@ -21,6 +21,6 @@ struct TabShortcutNumber: View {
             .foregroundStyle(Palette.ink.opacity(0.65))
             .frame(width: 15, height: 15)
             .allowsHitTesting(false)
-            .accessibilityLabel(L10n.text("upstream.tabs.commandNumber", String(number)))
+            .accessibilityLabel(L10n.text(KeyCombo.spacesOnCommand ? "upstream.319.controlNumber" : "upstream.tabs.commandNumber", String(number)))
     }
 }

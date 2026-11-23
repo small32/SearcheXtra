@@ -276,10 +276,8 @@ extension Browser {
     /// pair shows one page as any other tab does.
     private func panelPanes(_ tab: Tab.ID? = nil) -> [Tab] {
         guard let here = tabs.first(where: { $0.id == (tab ?? activeID) }) else { return [] }
-        guard let pair = split(for: here), let other = pair.partner(of: here.id),
-              let beside = tabs.first(where: { $0.id == other })
-        else { return [here] }
-        return [here, beside]
+        guard let pair = split(for: here) else { return [here] }
+        return [here] + tabs.filter { pair.contains($0.id) && $0.id != here.id }
     }
 
     /// A tab removed or replaced has no panel to return to. Sleeping and
@@ -657,6 +655,12 @@ final class ExtensionPanelDelegate: NSObject, WKNavigationDelegate, WKUIDelegate
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        // A frame the extension knows how to replace when presented with
+        // WebKit's storage restrictions (PanelFrameFallback).
+        if !navigationResponse.isForMainFrame,
+           let script = PanelFrameFallback.script(for: navigationResponse.response.url) {
+            webView.evaluateJavaScript(script) { _, _ in }
+        }
         let disposition = (navigationResponse.response as? HTTPURLResponse)?
             .value(forHTTPHeaderField: "Content-Disposition")?
             .split(separator: ";", maxSplits: 1).first?
@@ -679,6 +683,51 @@ final class ExtensionPanelDelegate: NSObject, WKNavigationDelegate, WKUIDelegate
     private func accept(_ download: WKDownload, from webView: WKWebView) {
         guard let browser else { download.cancel { _ in }; return }
         browser.keep(download, from: webView)
+    }
+}
+
+/// Frames an extension's panel shows that can't work in Search, and what
+/// the extension does without them.
+///
+/// Claude in Chrome (idea 686): for paid accounts its panel is claude.ai
+/// itself, /cic/new in a frame, signed in by claude.ai's own session
+/// cookies. Those are SameSite=Lax, and WebKit counts a frame in an
+/// extension's page as another site, so it sends them none (Chrome counts
+/// a site the extension may reach as the same site). The frame is signed
+/// out, sends the panel nothing and stays empty; and the panel's own call
+/// to claude.ai, which Search signs in (ExtensionFetch), says you are
+/// signed in, so it never shows its "can't load" page either: a blank
+/// panel. Claude's panel has its own way out, for a claude.ai that can't
+/// host it there: claude.ai posts `cic_sidepanel_cowork_unavailable`, and
+/// the panel shows the chat it had before, which runs on the extension's
+/// own sign-in. That message is what the panel is given here, as the frame
+/// starts, before it has shown anything. Drop this once WebKit sends a
+/// frame in an extension's page its site's Lax cookies.
+enum PanelFrameFallback {
+    /// claude.ai's hosts, as Claude's panel accepts its messages from them.
+    static let claudeHosts = ["claude.ai", "preview.claude.ai"]
+
+    /// Test runs can add a local stand-in for claude.ai
+    /// (`test.claudeHosts` in the test settings), so a fixture extension
+    /// can be checked without claude.ai.
+    static var claudeHostsThisRun: [String] {
+        guard Store.testing else { return claudeHosts }
+        return claudeHosts + (Store.settings.stringArray(forKey: "test.claudeHosts") ?? [])
+    }
+
+    /// What to run in the panel's page for a frame of it loading `url`:
+    /// nil for every frame but Claude's panel on claude.ai.
+    static func script(for url: URL?, hosts: [String] = claudeHostsThisRun) -> String? {
+        guard let url, let host = url.host?.lowercased(), hosts.contains(host),
+              url.path == "/cic" || url.path.hasPrefix("/cic/")
+        else { return nil }
+        let local = !claudeHosts.contains(host)
+        // Its listener takes claude.ai's origin only; a stand-in's https.
+        guard url.scheme?.lowercased() == "https" || local else { return nil }
+        return """
+        window.dispatchEvent(new MessageEvent("message", { origin: "https://claude.ai", \
+        data: { type: "cic_sidepanel_cowork_unavailable" } }));
+        """
     }
 }
 

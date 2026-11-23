@@ -144,11 +144,11 @@ struct WelcomePanel: View {
         VStack(alignment: .leading, spacing: 22) {
             heading(L10n.text("Welcome.1161"), L10n.text("Welcome.1162"))
             HStack(spacing: 12) {
-                Way(title: L10n.text("Welcome.1163"), sidebar: false, chosen: !prefs.sidebar) {
-                    withAnimation(Motion.glide) { prefs.sidebar = false }
-                }
                 Way(title: L10n.text("Welcome.1164"), sidebar: true, chosen: prefs.sidebar) {
                     withAnimation(Motion.glide) { prefs.sidebar = true }
+                }
+                Way(title: L10n.text("Welcome.1163"), sidebar: false, chosen: !prefs.sidebar) {
+                    withAnimation(Motion.glide) { prefs.sidebar = false }
                 }
             }
             HStack(spacing: 12) {

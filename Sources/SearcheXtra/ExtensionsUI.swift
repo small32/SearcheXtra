@@ -99,6 +99,125 @@ struct ExtensionsPage: View {
     }
 }
 
+/// An extension's "Runs on": every site it asked for (the default), the
+/// ones you name, or only where you click its button.
+@available(macOS 15.4, *)
+struct RunsOn: View {
+    let item: Installed
+    @ObservedObject var extensions: Extensions
+
+    var body: some View {
+        let access = extensions.siteAccess(item.id)
+        Menu {
+            Picker(L10n.text("extensions.sync.runsOn"), selection: Binding(
+                get: { access.mode },
+                set: { extensions.setSiteAccess(item.id, SiteAccess(mode: $0, hosts: access.hosts)) }
+            )) {
+                Text(L10n.text("extensions.sync.allSitesMenu")).tag(SiteAccess.Mode.all)
+                Text(L10n.text("extensions.sync.someSitesMenu")).tag(SiteAccess.Mode.some)
+                Text(L10n.text("extensions.sync.onClickMenu")).tag(SiteAccess.Mode.click)
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            HStack(spacing: 3) {
+                Text(access.mode.title)
+                    .font(.system(size: 11.5))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+            }
+            .foregroundStyle(access.restricted ? Palette.ink : Palette.muted)
+            .padding(.horizontal, 8)
+            .frame(height: 22)
+            .background(Palette.wash, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel(L10n.text("extensions.sync.runsOnName", item.name))
+        .accessibilityValue(access.mode.title)
+        .help(L10n.text("extensions.sync.runsOnHelp", item.name))
+    }
+}
+
+/// Under an extension held to fewer sites: the sites you named, one to add,
+/// and a word on what that means.
+@available(macOS 15.4, *)
+struct SiteList: View {
+    let item: Installed
+    @ObservedObject var extensions: Extensions
+    @State private var typed = ""
+
+    var body: some View {
+        let access = extensions.siteAccess(item.id)
+        VStack(alignment: .leading, spacing: 6) {
+            if access.mode == .some {
+                ForEach(access.hosts, id: \.self) { host in
+                    HStack(spacing: 6) {
+                        Text(host)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.ink)
+                            .lineLimit(1)
+                        Spacer(minLength: 6)
+                        Button {
+                            extensions.setSiteAccess(item.id, access.removing(host))
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(Palette.muted)
+                                .frame(width: 18, height: 18)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(L10n.text("extensions.sync.removeSite", host))
+                        .help(L10n.text("extensions.sync.removeSite", host))
+                    }
+                }
+                HStack(spacing: 8) {
+                    ZStack(alignment: .leading) {
+                        if typed.isEmpty {
+                            Text(L10n.text("extensions.sync.addSiteHint"))
+                                .foregroundStyle(Palette.muted.opacity(0.8))
+                        }
+                        TextField("", text: $typed)
+                            .textFieldStyle(.plain)
+                            .foregroundStyle(Palette.ink)
+                            .onSubmit(add)
+                            .accessibilityLabel(L10n.text("extensions.sync.addSiteName", item.name))
+                    }
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    Pill(L10n.text("ExtensionsUI.0483"), action: add)
+                        .disabled(SiteAccess.host(from: typed) == nil)
+                }
+            }
+            Text(note(access))
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func add() {
+        guard let host = SiteAccess.host(from: typed) else { return }
+        extensions.setSiteAccess(item.id, extensions.siteAccess(item.id).adding(host))
+        typed = ""
+    }
+
+    private func note(_ access: SiteAccess) -> String {
+        var out = access.mode == .some
+            ? L10n.text("extensions.sync.someSitesHelp")
+            : L10n.text("extensions.sync.onClickHelp")
+        if SiteAccess.needsEverySite(name: item.name, said: Extensions.settings(for: item.id)) {
+            out += " " + L10n.text("extensions.sync.fillingHelp", item.name)
+        }
+        return out
+    }
+}
+
 /// On an extension's page in the Chrome Web Store, the offer to add it —
 /// where the store's own button only says "Switch to Chrome".
 struct StoreOffer: View {

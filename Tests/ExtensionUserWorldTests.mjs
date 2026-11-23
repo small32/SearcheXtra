@@ -231,11 +231,14 @@ assert.equal(identities.length, 1, 'Removing a consumed marker does not emit ano
 // sees a handshake or a GM payload.
 const shims = fs.readFileSync(new URL('../Sources/SearcheXtra/ExtensionShims.swift', import.meta.url), 'utf8');
 const userStart = shims.indexOf('      const scripting = chrome.scripting;');
-const userEnd = shims.indexOf('      // WebKit says "install" again', userStart);
+const userEnd = shims.indexOf('      // WebKit says "install"', userStart);
 const pinStart = shims.indexOf('      const pinnedPorts = new WeakSet();');
 const pinEnd = shims.indexOf('      // Installed before the content-script return.', pinStart);
 const portStart = shims.indexOf('      if (runtime && typeof runtime.connect === "function" && runtime.onConnect) {');
 const portEnd = shims.indexOf('      // Members of namespaces WebKit has.', portStart);
+for (const [start, end] of [[userStart, userEnd], [pinStart, pinEnd], [portStart, portEnd]]) {
+  assert(start >= 0 && end > start, 'Expected shipping shim section was not found');
+}
 const bridgeURL = 'chrome-extension://fixtureExtension/_search/user-script-host.html';
 const portEvent = () => {
   const listeners = new Set();

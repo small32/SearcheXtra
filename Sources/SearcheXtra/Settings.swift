@@ -22,10 +22,19 @@ struct SettingsPanel: View {
     @State private var startPageDraft = ""
     @ObservedObject private var updater = Updater.shared
     @ObservedObject private var shield = Shield.shared
+    @ObservedObject private var sync = Sync.shared
+    /// The keys rows name, as Settings › Shortcuts has them now.
+    @ObservedObject private var shortcuts = ShortcutStore.shared
     @State private var isDefault = Links.isDefault
+    /// Whether Search opens email links, and which app does now.
+    @State private var mailDefault = Mail.isDefault
+    @State private var mailHandler = Mail.handlerName
     /// A site shortcut being written, kept out of Preferences until it's saved.
     @State private var draft: Keyword?
     @State private var page: Page = Page.named(Store.settings.string(forKey: "settings.page") ?? "") ?? .general
+    /// The chosen section's white, slid from one to the next as the tab
+    /// column slides its live tab's (Side.swift).
+    @Namespace private var chosen
     /// What is typed in Find a setting.
     @State private var query = ""
     @FocusState private var finding: Bool
@@ -196,7 +205,7 @@ struct SettingsPanel: View {
                 }
                 ForEach(block) { item in
                     PageRow(page: item, on: !searching && page == item,
-                            count: searching ? counts[item] ?? 0 : nil) {
+                            count: searching ? counts[item] ?? 0 : nil, chosen: chosen) {
                         query = ""
                         page = item
                     }
@@ -204,10 +213,18 @@ struct SettingsPanel: View {
             }
             Spacer(minLength: 0)
         }
+        .animation(slide, value: page)
         .padding(8)
         .frame(width: SettingsPanel.rail, alignment: .leading)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Palette.wash.opacity(0.45), in: Rectangle())
+    }
+
+    /// The white's move: the tab column's glide, a touch longer and with a
+    /// little give at the end, so the eye follows it down the rail. None
+    /// with Reduce Motion, and a plain ease in Low Power Mode, as glide.
+    private var slide: Animation? {
+        Motion.reduced ? nil : Motion.light ? .easeOut(duration: 0.2) : .spring(response: 0.45, dampingFraction: 0.72)
     }
 
     /// Find a setting: the wash, the glass, ⌘F beside it until something
@@ -258,6 +275,7 @@ struct SettingsPanel: View {
         let on: Bool
         /// While searching: how many rows of this section match.
         let count: Int?
+        let chosen: Namespace.ID
         let act: () -> Void
         @State private var hovering = false
 
@@ -283,11 +301,17 @@ struct SettingsPanel: View {
                 .opacity(count == 0 ? 0.4 : 1)
                 .padding(.horizontal, 10)
                 .frame(height: 30)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(on ? Palette.ground : (hovering ? Palette.hover : .clear))
-                        .shadow(color: .black.opacity(on ? 0.06 : 0), radius: 3, y: 1)
-                )
+                .background {
+                    if on {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Palette.ground)
+                            .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
+                            .matchedGeometryEffect(id: "chosen", in: chosen)
+                    } else if hovering {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Palette.hover)
+                    }
+                }
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
             .buttonStyle(.plain)
@@ -391,11 +415,13 @@ struct SettingsPanel: View {
 
     private func row(_ item: SettingsItem) -> some View {
         let counts = SettingsIndex.applies(item, prefs)
+        // The switch that swaps ⌘1–⌘9 and ⌃1–⌃9 names both as they were.
+        let relabel: (String) -> String = item.id == "spaces.commandNumbers" ? { $0 } : shortcuts.relabel
         return SettingRow(
             icon: item.icon,
-            title: title(of: item),
-            detail: counts ? detail(of: item) : SettingsIndex.needs(item),
-            more: counts ? item.more : nil,
+            title: relabel(title(of: item)),
+            detail: relabel(counts ? detail(of: item) : SettingsIndex.needs(item)),
+            more: counts ? item.more.map(relabel) : nil,
             wide: item.kind == .wide,
             lit: lit == item.id
         ) {
@@ -447,6 +473,8 @@ struct SettingsPanel: View {
     private func title(of item: SettingsItem) -> String {
         switch item.id {
         case "updates.version": return versionTitle
+        // ⌃ while it picks the tabs (Settings › Spaces & Pins).
+        case "tabs.shortcuts" where prefs.usesSpaces && prefs.spacesOnCommand: return L10n.text("upstream.319.settings.controlTabHints")
         default: return item.title
         }
     }
@@ -455,8 +483,12 @@ struct SettingsPanel: View {
         switch item.id {
         case "general.default":
             return isDefault ? L10n.text("Settings.0703") : item.detail
+        case "mail.default":
+            if mailDefault { return L10n.text("upstream.319.settings.emailHere") }
+            return mailHandler.map { L10n.text("upstream.319.settings.emailElsewhere", $0) } ?? item.detail
         case "downloads.folder":
             return prefs.downloads.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        case "sync": return sync.on ? sync.summary : item.detail
         case "search.engine": return searchDetail
         case "search.shift": return shiftDetail
         case "search.suggest": return suggestDetail
@@ -512,6 +544,32 @@ struct SettingsPanel: View {
                     }
                 }
             }
+        case "mail.webmail":
+            Picker("", selection: $prefs.webmail) {
+                ForEach(Webmail.allCases) { mail in
+                    Text(mail.title).tag(mail)
+                    if mail == .none { Divider() }
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
+        case "mail.default":
+            if mailDefault {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.ink)
+                    .frame(width: 24)
+            } else {
+                // Only ever from this click: macOS asks to confirm.
+                Pill(L10n.text("Settings.0705"), filled: true) {
+                    Mail.becomeDefault { worked in
+                        mailDefault = Mail.isDefault
+                        mailHandler = Mail.handlerName
+                        browser.announce(worked && mailDefault ? L10n.text("upstream.319.settings.emailNowHere") : L10n.text("Settings.0707"))
+                    }
+                }
+            }
         case "interface.language":
             Picker(L10n.text("language.title"), selection: $language.selection) {
                 ForEach(InterfaceLanguage.allCases) { Text($0.title).tag($0) }
@@ -521,6 +579,9 @@ struct SettingsPanel: View {
             // Coming from another browser, now or any time later: the same
             // page as File › Bring Things Over… and the Welcome's.
             Pill(L10n.text("App.0118")) { browser.lead(to: InternalPage(.importing)) }
+        case "sync":
+            // On asks for the folder first; cancelled, it stays off.
+            Switch(on: Binding(get: { sync.on }, set: { $0 ? sync.choose() : sync.turnOff() }))
         case "quit.confirm": Switch(on: $prefs.confirmsQuit)
         case "downloads.folder": Pill(L10n.text("Settings.0802")) { chooseFolder() }
         case "downloads.ask": Switch(on: $prefs.asksWhereToSave)
@@ -544,6 +605,8 @@ struct SettingsPanel: View {
                 (look, look == .system ? L10n.text("upstream.settings.c614ba7c45") : look.title, AnyView(LookPicture(look: look)))
             }, selection: $prefs.look)
         case "pages.dusk": Switch(on: $prefs.darkensPages)
+        case "inspector.chrome": Switch(on: $prefs.inspectorChrome)
+        case "inspector.dark": Switch(on: $prefs.inspectorDark)
         case "tabs.layout":
             Pictures(options: TabsLayout.allCases.map { ($0, $0.title, AnyView(LayoutPicture(layout: $0))) },
                      selection: Binding(
@@ -551,6 +614,7 @@ struct SettingsPanel: View {
                         set: { layout in withAnimation(Motion.glide) { prefs.tabsLayout = layout } }
                      ))
         case "sidebar.hides": Switch(on: $prefs.sideHides)
+        case "sidebar.slides": Switch(on: $prefs.slidesColumn)
         case "sidebar.foldIcons": Switch(on: $prefs.foldsToIcons)
         case "layout.cards":
             Pictures(options: [(true, L10n.text("upstream.settings.08437e70a0"), AnyView(CardPicture(card: true))),
@@ -559,7 +623,13 @@ struct SettingsPanel: View {
                         get: { prefs.cards },
                         set: { on in withAnimation(Motion.glide) { prefs.cards = on } }
                      ))
+        case "layout.cardsFullScreen": Switch(on: $prefs.cardsInFullScreen)
         case "toolbar.left": Switch(on: $prefs.navigationLeft)
+        case "tabs.compact":
+            Switch(on: Binding(
+                get: { prefs.compactStrip },
+                set: { on in withAnimation(Motion.glide) { prefs.compactStrip = on } }
+            ))
         case "sidebar.roomy":
             Switch(on: Binding(
                 get: { prefs.roomyTabs },
@@ -567,10 +637,12 @@ struct SettingsPanel: View {
             ))
         case "sidebar.player": Switch(on: $prefs.showsPlayer)
         case "glyph": Segmented(options: Glyph.allCases.map { ($0, $0.title) }, selection: $prefs.glyph)
+        case "tabs.highContrast": Switch(on: $prefs.highContrastText)
         case "tabs.reading": Switch(on: $prefs.showsReading)
         case "tabs.give": Switch(on: $prefs.tabsGive)
         case "bookmarks.bar": Switch(on: $prefs.bookmarksBar)
         case "motion.light": Switch(on: $prefs.lightMotion)
+        case "motion.instant": Switch(on: $prefs.instantMotion)
         case "note.split": Switch(on: $prefs.splitView)
         default: EmptyView()
         }
@@ -590,8 +662,11 @@ struct SettingsPanel: View {
             .fixedSize()
         case "tabs.newAfterLast": Switch(on: $prefs.newTabAfterLast)
         case "tabs.closeGoesBack": Switch(on: $prefs.closeGoesBack)
+        case "tabs.undoReopens": Switch(on: $prefs.undoReopensTab)
         case "tabs.switcherBehindFirst": Switch(on: $prefs.switcherBehindFirst)
+        case "tabs.switcherLeavesOutPins": Switch(on: $prefs.switcherLeavesOutPins)
         case "tabs.frontBeside": Switch(on: $prefs.frontLinksBeside)
+        case "tabs.mirror": Switch(on: $prefs.mirrorsTabs)
         case "tabs.lazy": Switch(on: $prefs.lazyTabs)
         case "tabs.popupWindows": Switch(on: $prefs.popupWindows)
         case "tabs.sleep":
@@ -602,6 +677,7 @@ struct SettingsPanel: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.muted)
             }
+        case "tabs.sleep.dim": Switch(on: $prefs.dimsSleepingTabs)
         case "tabs.close.after":
             Picker("", selection: $prefs.tabLife) {
                 ForEach(TabLife.allCases) { life in
@@ -667,6 +743,7 @@ struct SettingsPanel: View {
         case "float.own":
             Segmented(options: FloatOwn.allCases.map { ($0, $0.title) }, selection: $prefs.floatOwn, wide: true)
                 .frame(maxWidth: 340)
+        case "float.minimize": Switch(on: $prefs.floatMinimizes)
         case "media.click": Switch(on: $prefs.waitsForPlay)
         case "fullscreen.escapeTwice": Switch(on: $prefs.escapeTwice)
         case "fullscreen.keepsWindow": Switch(on: $prefs.keepsWindow)
@@ -677,6 +754,8 @@ struct SettingsPanel: View {
             // The number itself takes it back to 100%.
             Steps(stops: Preferences.zooms, value: $prefs.pageZoom, home: 1) { "\(Int(($0 * 100).rounded()))%" }
         case "pages.120": Segmented(options: FastPages.allCases.map { ($0, $0.title) }, selection: $prefs.fastPages)
+        case "pages.capture": Switch(on: $prefs.capturesPages)
+        case "sites.styles": SiteStylesControl(prefs: prefs)
         case "autocorrect": Switch(on: $prefs.autocorrect)
         case "note.panel": Switch(on: $prefs.sitesInPanel)
         case "note.sitesearch": Switch(on: $prefs.searchesSites)
@@ -708,11 +787,14 @@ struct SettingsPanel: View {
                 .disabled(!arcHere)
                 .opacity(arcHere ? 1 : 0.4)
         case "spaces": Switch(on: $prefs.usesSpaces)
+        case "spaces.commandNumbers": Switch(on: $prefs.spacesOnCommand)
         case "profiles": Pill(L10n.text("profiles.newAction")) { ProfileMenu.askNew() }
         case "profiles.oneWindow": Switch(on: $prefs.profilesInOneWindow)
         case "spaces.links": Switch(on: $prefs.sendsLinksToSpaces)
         case "pins.keep": Switch(on: $prefs.pinsKeepSite)
         case "pins.list": Switch(on: $prefs.listsPins)
+        case "pins.folders": Switch(on: $prefs.pinFolders)
+        case "pins.commandNewTab": Switch(on: $prefs.pinCommandOpensTab)
         case "newtab.floating": Switch(on: $prefs.floatingNewTab)
         case "newtab.recent": Switch(on: $prefs.recentInNewTab)
         case "commandbar": Switch(on: $prefs.commandBar)
@@ -773,14 +855,21 @@ struct SettingsPanel: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .fixedSize()
+        case "links.peek.stays": Switch(on: $prefs.peekStays)
+        case "links.optionSplit": Switch(on: $prefs.optionClickSplits)
         case "autoscroll": Switch(on: $prefs.autoScroll)
+        case "pages.bounce": Switch(on: $prefs.bounces)
         case "swipe.history": Switch(on: $prefs.holdsHistory)
+        case "launcher.on": Switch(on: $prefs.launcher)
+        case "launcher.key": LauncherKeyBox(prefs: prefs)
+        case "launcher.little": Switch(on: $prefs.launcherLittle)
         case "note.switcher": Switch(on: $prefs.switcherKeys)
         case "updates.version": versionControl
         case "updates.auto": Switch(on: $prefs.installsUpdates)
         case "about.feedback": Pill(L10n.text("Settings.0833")) { Links.writeFeedback() }
         case "about.notes": Pill(L10n.text("Settings.0836")) { browser.lead(to: InternalPage(.notes)) }
         case "bench": Switch(on: $prefs.bench)
+        case "agents": Switch(on: $prefs.agents)
         default: EmptyView()
         }
     }
@@ -868,6 +957,8 @@ struct SettingsPanel: View {
                     }
                 }
             }
+        case "agents":
+            if !searched, prefs.agents { RememberedAgents() }
         case "passwords.apple":
             ApplePasswordsCard(prefs: prefs, bare: true)
                 .under()
@@ -889,6 +980,34 @@ struct SettingsPanel: View {
         default:
             EmptyView()
         }
+    }
+
+    private var startPageProblem: String? {
+        let text = startPageDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !text.isEmpty && StartPage.url(from: text) == nil ? L10n.text("startPage.invalid") : nil
+    }
+
+    private func saveStartPage() {
+        guard startPageProblem == nil else { return }
+        prefs.startPage = StartPage.url(from: startPageDraft)?.absoluteString ?? ""
+        startPageDraft = prefs.startPage
+    }
+
+    private var startPageEditor: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                TextField(L10n.text("startPage.placeholder"), text: $startPageDraft)
+                    .textFieldStyle(.plain).onSubmit(saveStartPage)
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(Palette.wash, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                Pill(L10n.text("startPage.save"), filled: true, action: saveStartPage)
+                    .disabled(startPageProblem != nil || startPageDraft == prefs.startPage)
+                Pill(L10n.text("startPage.blank")) { prefs.startPage = ""; startPageDraft = "" }
+                    .disabled(prefs.startPage.isEmpty && startPageDraft.isEmpty)
+            }
+            if let problem = startPageProblem { Text(problem).font(.system(size: 11.5)).foregroundStyle(.red) }
+        }
+        .padding(.leading, SettingsPanel.textInset).padding(.trailing, 14).padding(.bottom, 11)
     }
 
     /// A custom engine's address, under the row that chose Custom.
@@ -938,15 +1057,23 @@ struct SettingsPanel: View {
             .padding(.trailing, 14)
             .padding(.bottom, 6)
         }
-        ForEach(prefs.keywords) { entry in
+        // The one being changed is up in the editor, not here as well.
+        ForEach(prefs.keywords.filter { $0.id != draft?.id }) { entry in
             HStack(spacing: 8) {
-                Text(entry.keyword)
-                    .frame(width: 50, alignment: .leading)
-                Text("→").foregroundStyle(Palette.muted)
-                Text(entry.template)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                // Clicked, a saved shortcut opens in the editor to be
+                // changed, rather than deleted and written again.
+                HStack(spacing: 8) {
+                    Text(entry.keyword)
+                        .frame(width: 50, alignment: .leading)
+                    Text("→").foregroundStyle(Palette.muted)
+                    Text(entry.template)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { draft = entry }
+                .help(L10n.text("upstream.319.settings.clickToChange"))
                 Button {
                     prefs.keywords.removeAll { $0.id == entry.id }
                 } label: {
@@ -970,7 +1097,8 @@ struct SettingsPanel: View {
     /// only exists once its address is one it's safe to send words to.
     private var draftProblem: String? {
         guard let draft else { return nil }
-        return Keyword.problem(word: draft.keyword, template: draft.template, among: prefs.keywords)
+        return Keyword.problem(word: draft.keyword, template: draft.template,
+                               among: prefs.keywords.filter { $0.id != draft.id })
     }
 
     private var keywordDetail: String {
@@ -983,10 +1111,17 @@ struct SettingsPanel: View {
 
     private func saveDraft() {
         guard let current = draft, draftProblem == nil else { return }
-        prefs.keywords.append(Keyword(
+        let saved = Keyword(
+            id: current.id,
             keyword: current.keyword.trimmingCharacters(in: .whitespacesAndNewlines),
             template: current.template.trimmingCharacters(in: .whitespacesAndNewlines)
-        ))
+        )
+        // One being changed keeps its place in the list.
+        if let index = prefs.keywords.firstIndex(where: { $0.id == saved.id }) {
+            prefs.keywords[index] = saved
+        } else {
+            prefs.keywords.append(saved)
+        }
         draft = nil
     }
 
@@ -1001,7 +1136,7 @@ struct SettingsPanel: View {
 
     private var searchDetail: String {
         guard prefs.engine == .custom else { return L10n.text("Settings.0749") }
-        guard Engine.accepts(prefs.customEngine) else {
+        guard Engine.accepts(Engine.written(prefs.customEngine)) else {
             return L10n.text("Settings.0750")
         }
         return L10n.text("Settings.0751", String(describing: prefs.engine.name(custom: prefs.customEngine)))
@@ -1012,7 +1147,7 @@ struct SettingsPanel: View {
             return SettingsIndex.item("search.shift")?.detail ?? ""
         }
         guard engine == .custom else { return "Shift-Return sends what you typed to \(engine.title)" }
-        guard Engine.accepts(prefs.shiftCustom) else {
+        guard Engine.accepts(Engine.written(prefs.shiftCustom)) else {
             return L10n.text("Settings.0750")
         }
         return "Shift-Return sends what you typed to \(engine.name(custom: prefs.shiftCustom))"
@@ -1589,5 +1724,34 @@ private struct NotificationSites: View {
                 }
             }
         }
+    }
+}
+
+/// The coding agents you said to always allow (AgentTrust), each with who
+/// signed the program that starts it and when it was last let in, and
+/// Forget. Under "Let coding agents use Search".
+private struct RememberedAgents: View {
+    @ObservedObject private var trust = AgentTrust.shared
+
+    var body: some View {
+        ForEach(trust.remembered) { entry in
+            Rule()
+            SettingRow(icon: "checkmark.shield", title: entry.client,
+                       detail: (entry.suspended == true ? L10n.text("upstream.319.remembered.suspended") : L10n.text("upstream.319.remembered.allowed"))
+                           + L10n.text("upstream.319.remembered.summary", entry.signer, Self.when(entry.used), Self.day(entry.expires)),
+                       more: entry.path.isEmpty ? nil : L10n.text("upstream.319.remembered.more", (entry.path as NSString).lastPathComponent, entry.identifier, entry.team, entry.path, entry.client)) {
+                Pill(L10n.text("upstream.319.remembered.forget")) { trust.forget(entry.id) }
+            }
+        }
+    }
+
+    private static func day(_ date: Date) -> String {
+        date.formatted(.dateTime.day().month(.abbreviated))
+    }
+
+    private static func when(_ date: Date) -> String {
+        let format = RelativeDateTimeFormatter()
+        format.unitsStyle = .full
+        return Date().timeIntervalSince(date) < 60 ? L10n.text("upstream.319.remembered.now") : format.localizedString(for: date, relativeTo: Date())
     }
 }

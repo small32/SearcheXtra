@@ -43,7 +43,7 @@ private func traces(_ history: History, host: String) -> [History.Trace] {
 @MainActor
 private func testRecordAndTakeKeepCanonicalIdentityComponents() {
     Store.use("identity")
-    let history = History()
+    let history = History(file: Store.file("history.json"))
     let addresses = [
         "http://identity.example.test:8080/A?Q=One#first",
         "https://identity.example.test:8080/A?Q=One",
@@ -80,7 +80,7 @@ private func testRecordAndTakeKeepCanonicalIdentityComponents() {
     Checks.expect(pages.allSatisfy { !$0.key.contains("#") }, "canonical history identities should omit fragments")
 
     Store.use("recorded-local-paths")
-    let recorded = History()
+    let recorded = History(file: Store.file("history.json"))
     for address in [
         "http://localhost:3000/a",
         "http://localhost:4000/a",
@@ -97,7 +97,7 @@ private func testRecordAndTakeKeepCanonicalIdentityComponents() {
 @MainActor
 private func testRetitleAndForgetUseIndependentIdentities() {
     Store.use("retitle-forget")
-    let history = History()
+    let history = History(file: Store.file("history.json"))
     let insecure = url("http://titles.example.test:8080/A?Q=One")
     let secure = url("https://titles.example.test:8080/A?Q=One")
     history.record(insecure, title: "Insecure title")
@@ -131,7 +131,7 @@ private func testLegacyLoadRebuildsIdentityFromStoredURL() {
         fatalError("Could not seed legacy fixture: \(error)")
     }
 
-    let history = History()
+    let history = History(file: Store.file("history.json"))
     let pages = traces(history, host: "legacy.example.test").filter { ["/A", "/a"].contains($0.url.path()) }
     let upper = pages.first { $0.url.path() == "/A" }
     let lower = pages.first { $0.url.path() == "/a" }
@@ -144,7 +144,7 @@ private func testLegacyLoadRebuildsIdentityFromStoredURL() {
 @MainActor
 private func testRootCreditsKeepOriginAndDirectRootCountsOnce() {
     Store.use("root-origins")
-    let history = History()
+    let history = History(file: Store.file("history.json"))
     for address in [
         "http://origin.example.test:8080/page",
         "https://origin.example.test:8080/page",
@@ -161,7 +161,7 @@ private func testRootCreditsKeepOriginAndDirectRootCountsOnce() {
     Checks.expect(traces(history, host: "origin.example.test").count == 3, "synthetic root credits should not add rows to visible history")
 
     Store.use("direct-root")
-    let direct = History()
+    let direct = History(file: Store.file("history.json"))
     direct.record(url("https://home.example.test/"), title: "Home")
     var home = traces(direct, host: "home.example.test").filter { $0.url.path() == "/" }
     Checks.expect(home.count == 1 && home.first?.count == 1, "recording a homepage should credit its root only once")
@@ -170,7 +170,7 @@ private func testRootCreditsKeepOriginAndDirectRootCountsOnce() {
     Checks.expect(home.count == 1 && home.first?.count == 2 && home.first?.title == "Home", "later deep-page credits should update the titled homepage once")
 
     Store.use("canonical-root")
-    let canonical = History()
+    let canonical = History(file: Store.file("history.json"))
     canonical.record(url("HTTPS://Normalize.example.test"), title: "First form")
     canonical.record(url("https://normalize.example.test/"), title: "Slash form")
     let normalizedHome = traces(canonical, host: "normalize.example.test").filter { $0.url.path() == "/" }
@@ -184,7 +184,7 @@ private func testRootCreditsKeepOriginAndDirectRootCountsOnce() {
 @MainActor
 private func testSuggestionIdsAndSafeCaseInsensitiveCompletion() {
     Store.use("suggestions")
-    let history = History()
+    let history = History(file: Store.file("history.json"))
     history.record(url("https://suggest.example.test/A?Q=One"), title: "Upper page")
     history.record(url("https://suggest.example.test/a?Q=One"), title: "Lower page")
     history.record(url("https://suggest.example.test/A?q=One"), title: "Query case")
@@ -206,7 +206,7 @@ private func testSuggestionIdsAndSafeCaseInsensitiveCompletion() {
     }
 
     Store.use("scheme-suggestion-ids")
-    let schemeHistory = History()
+    let schemeHistory = History(file: Store.file("history.json"))
     schemeHistory.record(url("http://scheme-id.example.test:3000/a?Q=One"), title: "HTTP")
     schemeHistory.record(url("https://scheme-id.example.test:3000/a?Q=One"), title: "HTTPS")
     let schemeOptions = schemeHistory.suggestions(for: "scheme-id.example.test", limit: 50).filter {
@@ -231,7 +231,7 @@ private func testSuggestionIdsAndSafeCaseInsensitiveCompletion() {
     }
 
     Store.use("known-suppression")
-    let knownHistory = History()
+    let knownHistory = History(file: Store.file("history.json"))
     knownHistory.record(url("https://github.com/"), title: "GitHub home")
     let github = knownHistory.suggestions(for: "github", limit: 50)
     Checks.expect(!github.contains { if case .known = $0.kind { return true }; return false }, "a visited known site should not also appear as a known-site suggestion")
@@ -247,7 +247,7 @@ private func savedFile() -> String {
 @MainActor
 private func testCredentialsNeverReachTheFile() {
     Store.use("credentials")
-    let history = History()
+    let history = History(file: Store.file("history.json"))
     history.record(url("https://user:secret@cred.example.test/page"), title: "Signed in")
     history.take(url("https://user:secret@cred.example.test/other"), title: "Taken", count: 2, last: Date())
     history.retitle(url("https://user:secret@cred.example.test/page"), "Retitled")
@@ -261,7 +261,7 @@ private func testCredentialsNeverReachTheFile() {
     Store.use("legacy-credentials")
     let legacy = [LegacyVisit(url: "https://user:secret@oldcred.example.test/page", key: "oldcred.example.test/page", title: "Old", count: 4, last: Date())]
     do { try JSONEncoder().encode(legacy).write(to: Store.file("history.json")) } catch { fatalError("\(error)") }
-    let loaded = History()
+    let loaded = History(file: Store.file("history.json"))
     Checks.expect(traces(loaded, host: "oldcred.example.test").first?.count == 4, "a legacy page kept with credentials should survive loading")
     // Written again at once, with nothing else visited.
     Checks.expect(!savedFile().contains("secret"), "a password kept by an older version should leave history.json as soon as it is loaded")
@@ -273,7 +273,7 @@ private func testCredentialsNeverReachTheFile() {
         LegacyVisit(url: "https://neg.example.test/", key: "neg.example.test", title: "Neg", count: -5, last: Date()),
     ]
     do { try JSONEncoder().encode(huge).write(to: Store.file("history.json")) } catch { fatalError("\(error)") }
-    let big = History()
+    let big = History(file: Store.file("history.json"))
     big.record(url("https://big.example.test/"), title: "Big")
     Checks.expect(traces(big, host: "big.example.test").first?.count == History.mostVisits, "counts from a hand-edited file are held, added to without overflowing")
     Checks.expect(traces(big, host: "neg.example.test").first?.count == 0, "a negative count from a hand-edited file becomes none")
@@ -299,7 +299,7 @@ private func testLegacyCreditsMoveToTheOriginTheirPagesUsed() {
         LegacyVisit(url: "https://www.titled.example.test/x", key: "titled.example.test/x", title: "X", count: 2, last: now),
     ]
     do { try JSONEncoder().encode(legacy).write(to: Store.file("history.json")) } catch { fatalError("\(error)") }
-    let history = History()
+    let history = History(file: Store.file("history.json"))
 
     let site = history.suggestions(for: "site.example", limit: 50).filter { $0.url.path() == "/" }
     Checks.expect(site.count == 1 && site.first?.url.host() == "www.site.example.test", "a legacy credit should move to the www its pages were on")
@@ -319,7 +319,7 @@ private func testLegacyCreditsMoveToTheOriginTheirPagesUsed() {
 @MainActor
 private func testCompletionFinishesWWWSitesWithoutTheirWWW() {
     Store.use("www-completion")
-    let history = History()
+    let history = History(file: Store.file("history.json"))
     history.record(url("https://www.apple-test.example/iPhone"), title: "iPhone")
     let options = history.suggestions(for: "apple-t", limit: 3)
     Checks.expect(history.completion(for: "apple-t", among: options) == "est.example", "a www site should complete from its name, as before")
@@ -335,7 +335,7 @@ private func testCompletionFinishesWWWSitesWithoutTheirWWW() {
 @MainActor
 private func testOneLetterCompletesOnlyTheTopVisitedSite() {
     Store.use("one-letter")
-    let history = History()
+    let history = History(file: Store.file("history.json"))
     for _ in 0..<5 { history.record(url("https://x.com/"), title: "X") }
     history.record(url("https://x.com/home"), title: "Home")
     let options = history.suggestions(for: "x", limit: 3)
@@ -359,7 +359,7 @@ private func testOneLetterCompletesOnlyTheTopVisitedSite() {
 @MainActor
 private func testTitlesPathsAndSlipsFillWhatTheAddressLeaves() {
     Store.use("loose")
-    let history = History()
+    let history = History(file: Store.file("history.json"))
     history.record(url("https://news.example-test.org/"), title: "Hacker Daily")
     history.record(url("https://docs.example-test.org/guide/concurrency"), title: "Swift Guide")
     for _ in 0..<3 { history.record(url("https://hackerspace.example/"), title: "Space") }
@@ -385,21 +385,21 @@ private func testTitlesPathsAndSlipsFillWhatTheAddressLeaves() {
 
     // score = fit × log(2 + popularity)
     Store.use("score-slip")
-    let slip = History()
+    let slip = History(file: Store.file("history.json"))
     slip.record(url("https://wiki.example/notes"), title: "Pipline notes")
     for _ in 0..<40 { slip.record(url("https://git.example/team/api/-/pipelines"), title: "Pipelines") }
     let often = slip.suggestions(for: "pipline", limit: 5).map(\.key)
     Checks.expect(often.first == "git.example/team/api/-/pipelines", "a page used daily, with a slip, should beat one seen once, got \(often)")
 
     Store.use("score-tie")
-    let tie = History()
+    let tie = History(file: Store.file("history.json"))
     tie.record(url("https://git.example/team/api/-/pipelines"), title: "")
     tie.record(url("https://wiki.example/notes"), title: "Pipline")
     let even = tie.suggestions(for: "pipline", limit: 5).map(\.key)
     Checks.expect(even.first == "wiki.example/notes", "as often visited, the match as typed should lead, got \(even)")
 
     Store.use("score-many")
-    let many = History()
+    let many = History(file: Store.file("history.json"))
     for _ in 0..<50 { many.record(url("https://git.example/old/api"), title: "") }
     for _ in 0..<500 { many.record(url("https://git.example/team/api"), title: "") }
     let more = many.suggestions(for: "api", limit: 5).map(\.key)
@@ -407,7 +407,7 @@ private func testTitlesPathsAndSlipsFillWhatTheAddressLeaves() {
 
     // A page counts the visits to every page under it.
     Store.use("score-under")
-    let under = History()
+    let under = History(file: Store.file("history.json"))
     for _ in 0..<5 { under.record(url("https://git.example/team/api"), title: "team / api") }
     for _ in 0..<40 { under.record(url("https://git.example/team/api/-/merge_requests/1"), title: "Fix api") }
     for _ in 0..<20 { under.record(url("https://git.example/team/api/-/pipelines/2"), title: "Pipeline · api") }
@@ -419,7 +419,7 @@ private func testTitlesPathsAndSlipsFillWhatTheAddressLeaves() {
 
     // As often visited, the fit decides.
     Store.use("score-fit")
-    let fits = History()
+    let fits = History(file: Store.file("history.json"))
     for page in ["https://api.example/", "https://dev-api.example/", "https://git.example/team/api", "https://rapid.example/"] {
         fits.record(url(page), title: "")
     }
@@ -429,7 +429,7 @@ private func testTitlesPathsAndSlipsFillWhatTheAddressLeaves() {
 
     // A name the app knows, typed with a slip, while nothing visited is near.
     Store.use("loose-known")
-    let github = History().suggestions(for: "githb", limit: 5)
+    let github = History(file: Store.file("history.json")).suggestions(for: "githb", limit: 5)
     Checks.expect(github.contains { $0.key == "github.com" }, "a known site with a slip should be offered, got \(github.map(\.key))")
 }
 
@@ -439,7 +439,7 @@ private func testTitlesPathsAndSlipsFillWhatTheAddressLeaves() {
 private func testTitleChurnWaitsForTheNextWrite() {
     Store.use("title-churn")
     let file = Store.file("history.json")
-    let history = History()
+    let history = History(file: Store.file("history.json"))
     let inbox = url("https://mail.example.test/inbox")
     history.record(inbox, title: "")
     _ = savedFile()

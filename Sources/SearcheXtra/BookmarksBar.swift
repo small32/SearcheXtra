@@ -43,7 +43,23 @@ struct BookmarksBar: View {
         }
         .frame(height: BookmarksBar.height)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(onFrame ? Palette.frame : Palette.ground)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button(L10n.text("Bookmarks.0238")) { bookmarks.askNewFolder(in: nil) }
+            Divider()
+            Button(L10n.text("Bookmarks.0226")) { browser.bookmarking = true }
+            Button("Hide Bookmarks Bar") {
+                withAnimation(Motion.glide) { browser.prefs.bookmarksBar = false }
+            }
+        }
+        .background {
+            ZStack {
+                onFrame ? Palette.frame : Palette.ground
+                // The tabs' wash carried on under them, or the colour
+                // stopped at the bar's edge.
+                SpaceWash(look: browser.wash)
+            }
+        }
         .overlay(alignment: .bottom) {
             if !onFrame { Rectangle().fill(Palette.hairline).frame(height: 1) }
         }

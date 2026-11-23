@@ -35,7 +35,7 @@ private struct ExtensionManager: View {
                 .font(.system(size: 20, weight: .semibold))
             TextField(L10n.text("extensions.search"), text: $search)
                 .textFieldStyle(.plain)
-                .disabled(extensions.busy != nil)
+                .disabled(!extensions.busy.isEmpty)
                 .padding(12)
                 .background(Palette.wash, in: RoundedRectangle(cornerRadius: 9))
             ScrollView {
@@ -73,6 +73,7 @@ private struct ExtensionManagerCard: View {
 
     var body: some View {
         let context = extensions.contexts[item.id]
+        let sites = context.map(Extensions.asksForSites) ?? false
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 14) {
                 Group {
@@ -86,15 +87,30 @@ private struct ExtensionManagerCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.name).font(.system(size: 14, weight: .semibold))
                     Text(L10n.text("extensions.version", item.version)).font(.system(size: 12)).foregroundStyle(Palette.muted)
+                    if item.enabled, context == nil, let reason = extensions.notStarted[item.id] {
+                        Text(L10n.text("extensions.sync.couldNotStart", reason))
+                            .foregroundStyle(Palette.unsafe)
+                            .font(.system(size: 11.5))
+                            .textSelection(.enabled)
+                    }
+                    if let limitation = context.flatMap({ Extensions.cantDo($0.webExtension.manifest) }) {
+                        Text(limitation)
+                            .foregroundStyle(Palette.unsafe)
+                            .font(.system(size: 11.5))
+                    }
                 }
                 Spacer(minLength: 0)
             }
             HStack(spacing: 8) {
                 Pill(L10n.text("extensions.details")) { expanded.toggle() }
-                    .disabled(extensions.busy == item.id)
+                    .disabled(extensions.busy.contains(item.id))
                 Pill(L10n.text("ExtensionsUI.0502")) { ExtensionActions.confirmRemove(item.id, name: item.name, extensions) }
-                    .disabled(extensions.busy == item.id)
+                    .disabled(extensions.busy.contains(item.id))
                 Spacer(minLength: 8)
+                if sites {
+                    RunsOn(item: item, extensions: extensions)
+                        .disabled(extensions.busy.contains(item.id))
+                }
                 Switch(on: Binding(get: { item.enabled }, set: { extensions.setEnabled(item.id, $0) }))
                     .accessibilityLabel(L10n.text("extensions.enable", item.name))
             }
@@ -102,6 +118,10 @@ private struct ExtensionManagerCard: View {
                   context?.hasAccessToPrivateData == true ? L10n.text("extensions.private.allowed") : nil]
                 .compactMap { $0 }.joined(separator: " · "))
                 .font(.system(size: 12)).foregroundStyle(Palette.muted)
+            if sites, extensions.siteAccess(item.id).restricted {
+                SiteList(item: item, extensions: extensions)
+                    .disabled(extensions.busy.contains(item.id))
+            }
             if expanded {
                 Rule()
                 Toggle(L10n.text("extensions.pin"), isOn: Binding(
@@ -129,7 +149,7 @@ private struct ExtensionManagerCard: View {
                         get: { Extensions.userScriptsAllowed(item.id) },
                         set: { extensions.setUserScriptsAllowed(item.id, $0) }
                     )).toggleStyle(.checkbox)
-                        .disabled(extensions.busy == item.id)
+                        .disabled(extensions.busy.contains(item.id))
                     Text(L10n.text("extensions.userScripts.detail"))
                         .font(.system(size: 12)).foregroundStyle(Palette.muted)
                 }
@@ -153,7 +173,7 @@ private struct ExtensionManagerCard: View {
                                 })
                         }
                     }
-                    .disabled(extensions.busy != nil)
+                    .disabled(!extensions.busy.isEmpty)
                     if let updateMessage {
                         Text(updateMessage).font(.system(size: 12)).foregroundStyle(Palette.muted)
                     }

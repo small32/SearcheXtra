@@ -28,7 +28,7 @@ const chromeView = new Proxy(nativeNamespace, {});
 globalsRoot.chrome = chromeView;
 assert.equal(globalsRoot.chrome, chromeView, 'Chrome code can use the app runtime view');
 const start = swift.indexOf('      const scripting = chrome.scripting;');
-const end = swift.indexOf('      // WebKit says "install" again', start);
+const end = swift.indexOf('      // WebKit says "install"', start);
 assert(start >= 0 && end > start);
 const shim = swift.slice(start, end);
 const event = () => ({ listeners: new Set(), addListener(f) { this.listeners.add(f); }, removeListener(f) { this.listeners.delete(f); } });

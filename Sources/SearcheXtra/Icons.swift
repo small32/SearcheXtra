@@ -42,8 +42,9 @@ final class Favicons: ObservableObject {
     /// changes: the History panel asks for two thousand at a time, and a page
     /// with no icon of its own is matched against every page of its site.
     private final class Lookup {
-        let image: NSImage?
-        init(_ image: NSImage?) { self.image = image }
+        weak var image: NSImage?
+        let missing: Bool
+        init(_ image: NSImage?) { self.image = image; missing = image == nil }
     }
     private let lookups = NSCache<NSString, Lookup>()
     private var loaded = false
@@ -71,12 +72,13 @@ final class Favicons: ObservableObject {
         }
     }
 
-    private func remember(_ image: NSImage, for ident: String) {
-        memory.setObject(image, forKey: ident as NSString, cost: 64 * 64 * 4)
-    }
     private var generation: UInt = 0
     private var shyGeneration: UInt = 0
     private var pageGenerations: [String: UInt] = [:]
+    /// Private icons have no disk copy to return to if their drawing is evicted.
+    private var shyImages: [String: Data] = [:]
+    /// A drawing can be evicted before its file has finished being written.
+    private var pendingImages: [String: Data] = [:]
     private var busy: Set<String> = []
     private var missing: Set<String> = []
     /// Icon addresses that came back with nothing usable this session.
@@ -120,6 +122,8 @@ final class Favicons: ObservableObject {
         pages.removeAll()
         shyPages.removeAll()
         memory.removeAllObjects()
+        shyImages.removeAll()
+        pendingImages.removeAll()
         dropped.removeAll()
         loaded = true
         missing.removeAll()
@@ -158,6 +162,7 @@ final class Favicons: ObservableObject {
         guard !shyPages.isEmpty else { return }
         for site in shyPages.values { for page in site.values { dropped.formUnion([page.light, page.dark].compactMap { $0 }) } }
         shyPages.removeAll()
+        shyImages.removeAll()
         save()
     }
     private static func file(_ ident: String) -> URL { folder.appendingPathComponent(ident + ".png") }
@@ -313,6 +318,7 @@ final class Favicons: ObservableObject {
         dropped.removeAll()
         for ident in gone {
             memory.removeObject(forKey: ident as NSString)
+            shyImages[ident] = nil
             absent.insert(ident)
         }
         return gone
@@ -336,10 +342,13 @@ final class Favicons: ObservableObject {
     private func lookup(_ site: String, page: String?, shy: Bool) -> NSImage? {
         load()
         let key = "\(Favicons.dark) \(shy) \(site) \(page ?? "")"
-        if let known = lookups.object(forKey: key as NSString) { return known.image }
+        if let known = lookups.object(forKey: key as NSString) {
+            if let image = known.image { return image }
+            if known.missing { return nil }
+        }
         let other = site.hasPrefix("www.") ? String(site.dropFirst(4)) : "www." + site
         let found = nearest(site, page: page, shy: shy) ?? nearest(other, page: page, shy: shy)
-        lookups.setObject(Lookup(found), forKey: key as NSString, cost: found == nil ? 1 : 64 * 64 * 4)
+        lookups.setObject(Lookup(found), forKey: key as NSString)
         return found
     }
 
@@ -378,6 +387,10 @@ final class Favicons: ObservableObject {
 
     private func known(_ ident: String) -> NSImage? {
         if let hit = memory.object(forKey: ident as NSString) { return hit }
+        if let data = shyImages[ident] ?? pendingImages[ident], let image = NSImage(data: data) {
+            remember(image, as: ident)
+            return image
+        }
         // An icon with no file on disk is looked for there once, not on every
         // line of every list that shows it: the History panel asked for two
         // thousand of them each time it drew. One that arrives later goes
@@ -387,8 +400,16 @@ final class Favicons: ObservableObject {
             absent.insert(ident)
             return nil
         }
-        remember(image, for: ident)
+        remember(image, as: ident)
         return image
+    }
+
+    private func remember(_ image: NSImage, as ident: String) {
+        // From the file's own pixel size: asking for a CGImage here would
+        // decode every icon on the main thread as it comes in.
+        let pixels = image.representations.map { $0.pixelsWide * $0.pixelsHigh }.max() ?? 0
+        let cost = pixels > 0 ? pixels * 4 : 128 * 128 * 8
+        memory.setObject(image, forKey: ident as NSString, cost: cost)
     }
 
     private static func fresh(_ ident: String) -> Bool {
@@ -424,9 +445,9 @@ final class Favicons: ObservableObject {
         guard cached(site) == nil, let image = await Favicons.square(data),
               generation == self.generation, !Task.isCancelled else { return }
         let ident = Favicons.ident("adopted:" + site)
-        remember(image, for: ident)
+        remember(image, as: ident)
         absent.remove(ident)
-        Favicons.keep(image, for: ident)
+        keep(image, for: ident)
         if pages[site]?["/"] == nil { pages[site, default: [:]]["/"] = Page(light: ident, seen: 0) }
         save()
         objectWillChange.send()
@@ -586,6 +607,12 @@ final class Favicons: ObservableObject {
     private func download(_ candidates: [URL], site: String, page: String, dark: Bool, shy: Bool,
                           again: Bool = true, generation: UInt, privateGeneration: UInt, pageGeneration: UInt) async {
         let busyKey = site + page
+        func current() -> Bool {
+            !Task.isCancelled && generation == self.generation
+                && (!shy || privateGeneration == shyGeneration)
+                && pageGeneration == pageGenerations[busyKey, default: 0]
+        }
+        guard current() else { return }
         defer { busy.remove(busyKey) }
         let session = URLSession(configuration: {
             let config = URLSessionConfiguration.ephemeral
@@ -595,6 +622,7 @@ final class Favicons: ObservableObject {
             ProxyNetwork.stamp(config)
             return config
         }())
+        defer { session.invalidateAndCancel() }
         var unanswered: [URL] = []
         var asked = false
         for candidate in candidates where !failed.contains(candidate) {
@@ -615,7 +643,8 @@ final class Favicons: ObservableObject {
             if !shy, Favicons.fresh(other) { kept = try? Data(contentsOf: Favicons.svg(other)) }
             var answer = kept.map { ($0, URLResponse(url: candidate, mimeType: "image/svg+xml", expectedContentLength: $0.count, textEncodingName: nil)) }
             asked = true
-            if answer == nil { answer = try? await session.data(from: candidate) }
+            if answer == nil { answer = try? await Favicons.readIcon(candidate, session: session) }
+            guard current() else { return }
             // No answer at all is the network, not the site.
             guard let (data, response) = answer else {
                 unanswered.append(candidate)
@@ -641,10 +670,13 @@ final class Favicons: ObservableObject {
                 failed.insert(candidate)
                 continue
             }
-            remember(image, for: ident)
+            remember(image, as: ident)
             absent.remove(ident)
             let sent = ident == drawn && kept == nil
-            if !shy { Favicons.keep(image, for: ident, svg: sent ? data : nil) }
+            if shy {
+                if let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+                   let png = rep.representation(using: .png, properties: [:]) { shyImages[ident] = png }
+            } else { keep(image, for: ident, svg: sent ? data : nil) }
             wear(ident, image, site: site, page: page, dark: dark, shy: shy)
             return
         }
@@ -667,6 +699,20 @@ final class Favicons: ObservableObject {
         // Not asked again this session: hammering a site for an icon it
         // doesn't have is exactly the kind of thing a quiet browser doesn't do.
         missing.insert(busyKey)
+    }
+
+    /// An oversized answer is a failed icon, not an unanswered request.
+    nonisolated static func readIcon(_ url: URL, session: URLSession) async throws -> (Data, URLResponse) {
+        let (bytes, response) = try await session.bytes(from: url)
+        defer { bytes.task.cancel() }
+        let limit = 2_000_000
+        guard response.expectedContentLength < limit else { return (Data(), response) }
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+            if data.count >= limit { return (Data(), response) }
+        }
+        return (data, response)
     }
 
     private func wear(_ ident: String, _ image: NSImage, site: String, page: String, dark: Bool, shy: Bool) {
@@ -743,17 +789,21 @@ final class Favicons: ObservableObject {
         }.value
     }
 
-    private static func keep(_ image: NSImage, for ident: String, svg: Data? = nil) {
+    private func keep(_ image: NSImage, for ident: String, svg: Data? = nil) {
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
               let png = rep.representation(using: .png, properties: [:])
         else { return }
         let file = Favicons.file(ident), source = Favicons.svg(ident)
-        let dir = folder
-        Favicons.disk.async {
+        let dir = Favicons.folder
+        pendingImages[ident] = png
+        Favicons.disk.async { [weak self] in
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try? png.write(to: file, options: .atomic)
             if let svg { try? svg.write(to: source, options: .atomic) }
+            DispatchQueue.main.async { [weak self] in
+                if self?.pendingImages[ident] == png { self?.pendingImages[ident] = nil }
+            }
         }
     }
 
@@ -862,6 +912,9 @@ struct Mark: View {
     let letter: String
     var size: CGFloat = 16
     var dim = false
+    /// Full ink for the letter (Settings › Appearance › Tabs › High contrast
+    /// text), instead of the soft grey a resting mark usually wears.
+    var contrast = false
 
     var body: some View {
         Group {
@@ -884,7 +937,7 @@ struct Mark: View {
             } else {
                 Text(letter)
                     .font(.system(size: size * 0.56, weight: .medium))
-                    .foregroundStyle(Palette.muted)
+                    .foregroundStyle(contrast ? Palette.ink : Palette.muted)
                     .frame(width: size, height: size)
                     .background(
                         RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
@@ -895,6 +948,7 @@ struct Mark: View {
         .opacity(dim ? 0.45 : 1)
         .transition(.opacity)
         .animation(Motion.quick, value: icon == nil)
+        .animation(Motion.quick, value: dim)
     }
 }
 

@@ -1,7 +1,8 @@
+import CryptoKit
 import WebKit
 
 // The ad blocker. No settings, no counter, no shield icon going green — it is
-// compiled once at launch and then it is simply true that the page is lighter.
+// prepared at launch and then it is simply true that the page is lighter.
 //
 // A content rule list is enforced inside WebKit's networking, before a request
 // is made and before a stylesheet is applied, so this costs nothing at run time
@@ -11,8 +12,19 @@ import WebKit
 final class Shield: ObservableObject {
     static let shared = Shield()
 
+    private let store: WKContentRuleListStore?
+
+    convenience init() {
+        self.init(store: WKContentRuleListStore.default())
+    }
+
+    init(store: WKContentRuleListStore?) {
+        self.store = store
+    }
+
     private(set) var list: WKContentRuleList?
     private var waiting: [(controller: WKUserContentController, host: String?)] = []
+    private var preparing = false
 
     /// Set the one time compiling the list didn't work. The toggle in
     /// Settings can say "on" all it wants; nothing is actually blocked until
@@ -59,7 +71,12 @@ final class Shield: ObservableObject {
     /// doing this at the navigation is what makes "off for this site" true
     /// for the whole page rather than for the second half of it.
     func tune(_ controller: WKUserContentController, for host: String?) {
-        guard list != nil else { return }
+        guard list != nil else {
+            if let index = waiting.firstIndex(where: { $0.controller === controller }) {
+                waiting[index].host = host
+            }
+            return
+        }
         set(controller, on: enabled && !isPaused(on: host))
     }
 
@@ -130,7 +147,7 @@ final class Shield: ObservableObject {
     }
 
     func compile() {
-        guard list == nil else { return }
+        guard list == nil, !preparing else { return }
         trouble = nil
         var rules: [[String: Any]] = Shield.unwanted.map { domain in
             return [
@@ -154,41 +171,64 @@ final class Shield: ObservableObject {
             ]
         }
 
-        guard let data = try? JSONSerialization.data(withJSONObject: rules),
+        guard let data = try? JSONSerialization.data(withJSONObject: rules, options: [.sortedKeys]),
               let json = String(data: data, encoding: .utf8)
         else {
             trouble = L10n.text("Shield.0870")
             return
         }
 
-        guard let store = WKContentRuleListStore.default() else {
+        guard let store else {
             trouble = L10n.text("Shield.0871")
             return
         }
-        store.compileContentRuleList(
-            forIdentifier: "office-shield",
-            encodedContentRuleList: json
-        ) { [weak self] compiled, error in
+        // Dictionary order isn't stable between launches; the sorted JSON is
+        // both the rules WebKit sees and the identity of their compiled form.
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let identifier = "office-shield-" + hash
+        preparing = true
+        store.lookUpContentRuleList(forIdentifier: identifier) { [weak self] found, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                guard let compiled else {
-                    self.trouble = error?.localizedDescription ?? L10n.text("Shield.0872")
-                    return
+                if let found {
+                    self.ready(found, store: store, identifier: identifier)
+                } else {
+                    store.compileContentRuleList(forIdentifier: identifier, encodedContentRuleList: json) { [weak self] compiled, error in
+                        MainActor.assumeIsolated {
+                            guard let self else { return }
+                            guard let compiled else {
+                                self.preparing = false
+                                self.trouble = error?.localizedDescription ?? L10n.text("Shield.0872")
+                                return
+                            }
+                            self.ready(compiled, store: store, identifier: identifier)
+                        }
+                    }
                 }
-                self.list = compiled
-                // Tabs that opened while this was still compiling get it now.
-                if self.enabled { self.waiting.forEach { self.set($0, on: true, again: true) } }
-                self.waiting = []
+            }
+        }
+    }
+
+    private func ready(_ compiled: WKContentRuleList, store: WKContentRuleListStore, identifier: String) {
+        preparing = false
+        list = compiled
+        // Tabs that opened while this was still preparing get it now.
+        if enabled { waiting.forEach { set($0.controller, on: !isPaused(on: $0.host), again: true) } }
+        waiting = []
+        // Leave other users of WebKit's store alone, including extensions.
+        store.getAvailableContentRuleListIdentifiers { identifiers in
+            for old in identifiers ?? [] where old != identifier && (old == "office-shield" || old.hasPrefix("office-shield-")) {
+                store.removeContentRuleList(forIdentifier: old) { _ in }
             }
         }
     }
 
     /// Every tab asks for it; whoever asks before it is ready is remembered.
-    func protect(_ controller: WKUserContentController) {
+    func protect(_ controller: WKUserContentController, for host: String? = nil) {
         if list != nil {
-            if enabled { set(controller, on: true, again: true) }
+            set(controller, on: enabled && !isPaused(on: host), again: true)
         } else {
-            waiting.append(controller)
+            waiting.append((controller, host))
         }
     }
 
@@ -196,5 +236,12 @@ final class Shield: ObservableObject {
     func apply(to controllers: [WKUserContentController]) {
         guard list != nil else { return }
         for controller in controllers { set(controller, on: enabled, again: true) }
+    }
+
+    func apply(to tabs: [Tab]) {
+        for tab in tabs {
+            guard let controller = tab.contentController else { continue }
+            tune(controller, for: tab.pageAddress?.host())
+        }
     }
 }

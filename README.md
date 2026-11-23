@@ -22,7 +22,7 @@ SearcheXtra 是基于 [Search](https://github.com/driceroland/Search) 的修改�
 
 ## 项目介绍
 
-SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部、竖排在侧边栏，也可以使用窄图标栏。地址栏同时用于输入网址和搜索词，没有推荐内容、账号登录入口或云同步服务。
+SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部、竖排在侧边栏，也可以使用窄图标栏。地址栏同时用于输入网址和搜索词。
 
 浏览器使用 macOS 内置的 **WebKit** 引擎，与 Safari 使用同一套底层技术，无需附带 Chromium 引擎。
 
@@ -34,7 +34,7 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 
 - **地址与搜索合一。** 按 ⌘L 或点击当前标签页打开上游样式的浮动地址输入框，输入网址或搜索词。地址补全结合本机书签和历史记录；可选的搜索引擎输入建议默认关闭，开启后会向所选引擎发送适合搜索的输入，无痕标签页不发送。
 - **标签页与固定标签页。** 常用页面可以固定，显示为字母或网站图标。上次会话的标签页会恢复，切换到对应标签页时才创建网页视图。`⌘K` 按名称查找已打开的标签页。
-- **分屏浏览。** 在“设置 → 外观”中启用分屏，将标签页拖到页面边缘，或选择“标签页 → 拆分当前页面”。拖动分隔线调整宽度，带边框的页面接收操作指令。分屏组合和宽度随空间保存，重启后可以恢复。
+- **分屏浏览。** 将标签页拖到页面边缘，或选择“标签页 → 拆分当前页面”，最多可并排显示四页。拖动分隔线调整宽度，分屏布局随空间保存，重启后可以恢复。
 - **标签管理与休眠。** 可选择新标签页位置、休眠时间和闲置自动关闭时间；支持多选标签页并复制网址、跨空间共享固定页，以及让指定网站保持唤醒。自动关闭默认停用，固定页、无痕页和有未提交输入的网页会保留。
 - **网页深色与刷新率。** 可将没有深色主题的网页自动转为深色，并按网站停用；120Hz 可选择从不、接通电源时或始终启用。
 - **网页 PDF。** 从文件菜单导出当前网页的完整 PDF。
@@ -58,7 +58,7 @@ SearcheXtra 将界面留给标签页和网页。标签页可以横排在顶部�
 
 广告拦截、隐藏元素、阅读模式、画中画和密码管理均为内置功能，无需另装扩展。扩展用于补充其他需求。
 
-- 不提供账号、云同步或浏览数据云存储。标签页、历史记录和密码保留在本机。
+- 可选择共享文件夹，在自己的 Mac 之间同步空间、固定标签、书签和部分设置，默认关闭。标签页、历史记录、密码和 Cookie 保留在本机。
 - 不收集遥测、使用分析或向服务器发送崩溃报告。网络访问主要来自网页、网站图标、扩展下载及更新检查。
 - 界面语言设置只影响浏览器自身。网页内容、书签名称及第三方扩展的界面保持原有内容。
 
@@ -221,13 +221,13 @@ Release packages are built with GitHub Actions. `SHA256SUMS.txt` contains packag
 
 ### Overview and features
 
-SearcheXtra keeps the interface focused on tabs and pages. Tabs can appear across the top, in a sidebar, or in a narrow icon column. The address field accepts both URLs and search terms. There is no recommendation feed, browser account, or cloud sync service. The browser uses the system **WebKit** engine, the same underlying technology as Safari, without bundling Chromium.
+SearcheXtra keeps the interface focused on tabs and pages. Tabs can appear across the top, in a sidebar, or in a narrow icon column. The address field accepts both URLs and search terms. The browser uses the system **WebKit** engine, the same underlying technology as Safari, without bundling Chromium.
 
 Set **Settings → General → Start page** to choose the page for new windows. Addresses such as `example.com` work without a scheme. Choose Use blank page to restore the blank start page. Changes take effect immediately without replacing open or restored pages. New tabs default to a blank page independently of this setting, or to an enabled new-tab extension's page. Private new tabs remain blank.
 
 - **Addresses and search:** Press `⌘L` or click the selected tab to open the upstream floating address field. Address suggestions combine local bookmarks and history. Optional search-engine suggestions are off by default; when enabled, suitable search input is sent to the selected engine, except in private tabs.
 - **Tabs and pins:** Pin frequently used pages as letters or site icons. Session tabs are restored, with web views created when selected. `⌘K` finds open tabs by name.
-- **Split view:** Enable it in Settings → Appearance, then drag a tab to a page edge or choose Tabs → Split Current Page. Resize with the divider. Commands target the outlined pane. Split pairs and widths are saved with their spaces and restored after restarting.
+- **Split view:** Drag a tab to a page edge or choose Tabs → Split Current Page to arrange up to four pages side by side. Resize with the dividers. Spaces restore their split layouts after restarting.
 - **Reader mode:** `⇧⌘R` extracts the article body, with reading themes, article media, and Markdown copying. On macOS 15 or later, on-demand webpage translation uses Apple's local translation framework after downloading the required languages; automatic translation can be configured per language.
 - **Hide page elements:** Press `⇧⌘H`, then click a cookie notice, subscription overlay, or other element. Rules are saved per site and applied before rendering on later visits.
 - **Ad and tracker blocking:** Blocks third-party trackers and ad networks during network requests. Enabled by default, with per-site controls.
@@ -244,7 +244,7 @@ Set **Settings → General → Start page** to choose the page for new windows. 
 - **Links and privacy:** Copy links with tracking parameters removed. When supported by the system WebKit, additional controls send Global Privacy Control signals and remove click identifiers during navigation.
 - **Updates:** Download this fork's packages from [GitHub Releases](https://github.com/small32/SearcheXtra/releases). The macOS updater checks this repository’s GitHub releases and compares version numbers. Ad-hoc-signed builds download the update from the release page for manual application replacement.
 
-Ad blocking, element hiding, reader mode, picture in picture, and password management are built in; extensions supplement these features. The browser has no account, cloud sync, or cloud browsing-data storage. It does not collect telemetry, usage analytics, or send crash reports to a server. Network traffic primarily comes from webpages, favicons, extension downloads, and update checks.
+Ad blocking, element hiding, reader mode, picture in picture, and password management are built in; extensions supplement these features. Optional sync uses a folder you choose to share spaces, pins, bookmarks, and selected settings between your Macs. Open tabs, history, passwords, and cookies stay on the Mac. The browser does not collect telemetry, usage analytics, or send crash reports to a server. Network traffic primarily comes from webpages, favicons, extension downloads, and update checks.
 
 ### Privacy and macOS data storage
 

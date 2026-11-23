@@ -645,27 +645,17 @@ final class Fetches: ObservableObject {
     /// times a second at most, each time with the file checked on disk. The
     /// first change at once: it is what claims the file being written, and a
     /// download that fails in its first moments is resumed from that file.
-    private var measuring = false
-    private func measureSoon() {
-        guard !measuring else { return }
-        measure()
-        measuring = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.measuring = false
-            self?.measure()
-        }
-    }
-
     /// Anything a download did since the last measuring, before its end is
     /// taken down: the end reads what was last measured.
     private func catchUp() {
-        if measuring { measure() }
+        if measurement != nil { measure() }
     }
 
     /// The running downloads, together, in whole percents; each file's own
     /// progress and row are brought up to date on the way.
     private func measureSoon() {
         guard !running.isEmpty, measurement == nil else { return }
+        measure()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             measurement = nil

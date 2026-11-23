@@ -271,7 +271,8 @@ enum SiteSearch {
         // Redirected only within the site: nothing is read from one not visited.
         let configuration = URLSessionConfiguration.ephemeral
         ProxyNetwork.stamp(configuration)
-        let session = URLSession(configuration: configuration, delegate: SameSiteRedirects(host: host), delegateQueue: .main)
+        let session = suppliedSession ?? URLSession(configuration: configuration, delegate: SameSiteRedirects(host: host), delegateQueue: .main)
+        let turn = generation
         session.dataTask(with: request) { data, response, _ in
             defer { session.finishTasksAndInvalidate() }
             guard let data, data.count <= 64 * 1024, (response as? HTTPURLResponse)?.statusCode == 200,

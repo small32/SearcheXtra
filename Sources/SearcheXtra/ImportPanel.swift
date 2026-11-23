@@ -178,6 +178,9 @@ struct ImportPanel: View {
     private func arcDetail(_ arc: (spaces: Int, pinned: Int)) -> String {
         let spaces = L10n.text("import.arc.spaceCount", String(arc.spaces))
         let head = L10n.text("import.arc.summary", spaces, String(arc.pinned))
+        if browser.prefs.listsPins && browser.prefs.pinFolders {
+            return head + L10n.text("upstream.319.importPinFolders")
+        }
         return browser.prefs.listsPins
             ? head + L10n.text("import.arc.rowsResult")
             : head + L10n.text("import.arc.sleepResult")
@@ -360,6 +363,17 @@ struct ImportPanel: View {
                          + (browser.prefs.sidebar ? "" : L10n.text("import.arc.rowsSidebar"))) {
                         Pill(L10n.text("import.arc.enableRows")) {
                             withAnimation(Motion.glide) { browser.prefs.listsPins = true }
+                        }
+                    }
+                }
+                // Arc's folders, as folders of rows rather than tab groups:
+                // offered here, the moment they would be wanted, as the rows are.
+                if wantsArc, arc.pinned > 0, browser.prefs.listsPins, !browser.prefs.pinFolders {
+                    Rule()
+                    Line("Keep its folders as folders",
+                         "As in Arc: each folder of pinned pages a folder of rows, nested as it was, rather than a tab group. Turned on, it stays in Settings › Spaces & Pins › Folders in pinned rows") {
+                        Pill("Turn on folders") {
+                            withAnimation(Motion.glide) { browser.prefs.pinFolders = true }
                         }
                     }
                 }

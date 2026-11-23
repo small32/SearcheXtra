@@ -28,11 +28,13 @@ struct CaptureQuestion: View {
 
     private var question: some View {
         HStack(spacing: 12) {
-            Image(systemName: ask.wants == "location" ? "location" : ask.wants == "microphone" ? "mic" : ask.wants == "notifications" ? "bell" : "video")
+            Image(systemName: ask.wants == "location" ? "location" : ask.wants == "microphone" ? "mic" : ask.wants == "notifications" ? "bell"
+                  : ask.wants == "cookies" ? "person.crop.circle" : "video")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.muted)
             Text(ask.wants == "location" ? L10n.text("App.0189", ask.host)
                  : ask.wants == "notifications" ? L10n.text("App.0190", ask.host)
+                 : ask.wants == "cookies" ? L10n.text("upstream.319.storageCookies", ask.host, ask.under)
                  : L10n.text("App.0191", ask.host, resource))
                 .font(.system(size: 12.5))
                 .foregroundStyle(Palette.ink)

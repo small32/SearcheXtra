@@ -175,9 +175,13 @@ final class Updater: ObservableObject {
             }
             guard let self else { return }
             checking = false
-            lastChecked = Date()
-            Store.settings.set(Date(), forKey: lastKey)
-            guard let found, found.build > Updater.build, found.runsHere else {
+            let checked = Date()
+            lastChecked = checked
+            Store.settings.set(checked, forKey: lastKey)
+            let newer = Updater.overridden
+                ? found.build > currentBuild
+                : (try? ExtensionVersion.isNewer(found.version, than: currentVersion)) == true
+            guard newer, found.runsHere else {
                 stage = Updater.nothingNewer(after: stage)
                 done(nil)
                 return

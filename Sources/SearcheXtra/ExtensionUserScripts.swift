@@ -27,6 +27,8 @@ enum ExtensionUserScripts {
         weak var tab: Tab?
         var handlers: [String: (String, WKContentWorld)] = [:]
         let discovery = "userScriptFrames_" + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        @MainActor lazy var discoveryScript = WKUserScript(source: ExtensionUserScripts.discovery(channel: discovery),
+                                                          injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world)
         var frames: [String: Frame] = [:]
         var mainDocument: String?
         init(_ tab: Tab) { self.tab = tab }
@@ -120,10 +122,9 @@ enum ExtensionUserScripts {
         for page in Array(pages.values) { page.tab?.refreshUserScripts() }
     }
 
-    /// Called after Tab replaces its own user scripts. Register handlers in
-    /// exactly the world that owns the script; no DOM event or page-global
-    /// channel lends a website access to its extension's message transport.
-    static func arm(_ tab: Tab, controller: WKUserContentController) {
+    /// These scripts join the tab's own scripts for the next document.
+    /// Register handlers only in the content world that owns each script.
+    static func armedScripts(_ tab: Tab, controller: WKUserContentController) -> [WKUserScript] {
         let key = ObjectIdentifier(controller)
         let page: Page
         if let found = pages[key] { page = found }
@@ -136,7 +137,7 @@ enum ExtensionUserScripts {
             registrations[id].map { Extensions.shared.seen(tab, for: $0.context) } == true
         }
         var retained = Set<String>()
-        controller.addUserScript(WKUserScript(source: discovery(channel: page.discovery), injectionTime: .atDocumentStart, forMainFrameOnly: false, in: Web.world))
+        var armed = [page.discoveryScript]
         for id in permitted {
             guard var registration = registrations[id], Extensions.shared.seen(tab, for: registration.context) else { continue }
             let scripts = registration.scripts
@@ -153,8 +154,8 @@ enum ExtensionUserScripts {
                 }
                 let properties = registration.worlds.first { ($0["worldId"] as? String ?? "") == worldID } ?? [:]
                 if scripts.contains(where: { ($0["world"] as? String) != "MAIN" && ($0["worldId"] as? String ?? "") == worldID }) {
-                    controller.addUserScript(WKUserScript(source: bootstrap(id: id, channel: channel, messaging: properties["messaging"] as? Bool == true),
-                                                           injectionTime: .atDocumentStart, forMainFrameOnly: false, in: world))
+                    armed.append(WKUserScript(source: bootstrap(id: id, channel: channel, messaging: properties["messaging"] as? Bool == true),
+                                              injectionTime: .atDocumentStart, forMainFrameOnly: false, in: world))
                 }
             }
             if registration.compiled == nil {
@@ -171,14 +172,15 @@ enum ExtensionUserScripts {
             registrations[id] = registration
             for script in registration.compiled ?? [] {
                 let world = script.worldID.flatMap { registration.contentWorlds[$0] } ?? .page
-                controller.addUserScript(WKUserScript(source: script.source, injectionTime: script.atStart ? .atDocumentStart : .atDocumentEnd,
-                                                       forMainFrameOnly: script.mainFrameOnly, in: world))
+                armed.append(WKUserScript(source: script.source, injectionTime: script.atStart ? .atDocumentStart : .atDocumentEnd,
+                                          forMainFrameOnly: script.mainFrameOnly, in: world))
             }
         }
         for (key, (name, world)) in page.handlers where !retained.contains(key) {
             controller.removeScriptMessageHandler(forName: name, contentWorld: world)
             page.handlers[key] = nil
         }
+        return armed
     }
 
     static func call(_ api: String, args: [Any], context: WKWebExtensionContext) async throws -> Any? {

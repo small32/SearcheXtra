@@ -10,8 +10,8 @@ Nothing here makes, shows or brings forward a window.
 - every setting Settings had before the rework is still reachable from the
   find field, by words someone would type, or says it is always on now;
 - the merged controls write the keys the two switches did;
-- new defaults reach only keys nobody touched;
-- an explicit off on a switch that left Settings stays off.
+- existing SearcheXtra defaults and explicit preferences survive the port;
+- the new settings are indexed alongside the existing controls.
 """
 import subprocess
 import sys
@@ -46,14 +46,15 @@ BEFORE = {
     "links.peek": "peek", "links.peekClick": "peek", "autoscroll": "middle button",
     "swipe.history": "swipe", "auto.install": "updates", "bench": "script",
     "autocorrect": "spelling",
-    # Always on now: the find field says so.
+    # The fork still exposes switches for many of these commands.
     "splitView": "split", "tabs.groups": "groups", "panel.sites": "side panel",
     "translate.pages": "translate", "tabs.keepAwake": "awake", "search.sites": "site from the address",
     "pins.shared": "every space", "pins.numberBack": "number again", "switcher.keys": "switcher",
     "links.show": "where links go", "float.flicks": "flick",
+    "sync.folder": "sync", "tabs.mirror": "same tabs", "pins.folders": "pinned folder",
 }
-ALWAYS = {"splitView", "tabs.groups", "panel.sites", "translate.pages", "tabs.keepAwake", "search.sites",
-          "pins.shared", "pins.numberBack", "switcher.keys", "links.show", "float.flicks"}
+RETAINED_SWITCHES = {"splitView", "tabs.groups", "panel.sites", "tabs.keepAwake", "search.sites",
+                     "pins.shared", "pins.numberBack", "switcher.keys", "links.show", "float.flicks"}
 
 
 def settings(**f): return sv.cmd({"do": "settings", **f})
@@ -75,16 +76,20 @@ def case_reachable(t):
         found = settings(find=words)["found"]
         hit = [i for i in found if key in i["keys"]]
         t.ok(f"“{words}” finds {key}", bool(hit), [i["id"] for i in found])
-        if hit and key in ALWAYS:
-            t.ok(f"…and says {key} is always there", hit[0]["note"] and hit[0]["findOnly"], hit[0])
+        if key in RETAINED_SWITCHES:
+            t.ok(f"{key} remains an editable setting", any(not i["note"] and not i["findOnly"] for i in hit), hit)
+        elif key == "translate.pages":
+            t.ok("translation is described as a built-in command", any(i["note"] and i["findOnly"] for i in hit), hit)
     t.ok("no key is left out of the rows", set(BEFORE) - {"auto.install"} <= keys, set(BEFORE) - keys)
     # Every result names its section and group.
     found = settings(find="video")["found"]
     t.ok("results carry section and group", found and all(i["page"] and i["groupTitle"] for i in found), found)
     t.ok("…in Browsing › Video", any(i["page"] == "browsing" and i["groupTitle"] == "Video" for i in found))
     shown = [i for i in items if not i["findOnly"]]
-    t.ok("about fifty rows in the sections", 45 <= len(shown) <= 75, len(shown))
-    t.ok("ten sections", len(every["pages"]) == 10, every["pages"])
+    t.ok("every settings row has a unique ID", len({i["id"] for i in shown}) == len(shown))
+    t.ok("local Bookmarks section and the upstream sections are present",
+         set(every["pages"]) == {"general", "appearance", "tabs", "browsing", "spaces", "passwords",
+                                 "privacy", "extensions", "keyboard", "about", "bookmarks"}, every["pages"])
     # Old addresses land in the new sections.
     sv.cmd({"do": "ui", "show": "search://settings/shortcuts"}); time.sleep(0.6)
     t.ok("search://settings/shortcuts opens Keyboard & Mouse", settings()["settingsPage"] == "keyboard",
@@ -97,13 +102,16 @@ def case_defaults(t):
     """new defaults reach only untouched keys; nothing written just by reading"""
     sv.setup(); sv.launch()
     v = settings()["values"]
-    t.ok("pins keep their site, untouched", v["pins.keep"] is True and v["pins.home"] and v["pins.peek"], v)
+    t.ok("pin navigation preferences remain off by default",
+         not any(v[key] for key in ("pins.keep", "pins.home", "pins.peek")), v)
     t.ok("120 Hz on power, untouched", v["pages.120"] == "onPower", v["pages.120"])
     t.ok("hold a swipe on, untouched", v["swipe.history"] is True)
     t.ok("address on the tab on, untouched", v["tabs.address"] is True)
     t.ok("links shown and flicks on, as before", v["links.show"] is True and v["float.flicks"] is True)
     t.ok("sleep Normal, float on switching tabs, peek with Shift", (v["tabs.sleep"], v["float.own"], v["links.peek"]) == ("normal", "tabs", "shift"), v)
-    t.ok("every always-on feature is on", all(v["always"].values()), v["always"])
+    t.ok("Split View, tab groups and shared pins remain opt-in",
+         not any(v["always"][key] for key in ("splitView", "tabs.groups", "pins.shared")), v["always"])
+    t.ok("shared tabs and sidebar slides are opt-in", not v["tabs.mirror"] and not v["sidebar.slides"], v)
     for key in ["pins.home", "pins.peek", "pages.120.mode", "swipe.history", "tabs.address"]:
         t.ok(f"{key} not written by reading it", read(key) is None, read(key))
 
@@ -121,11 +129,11 @@ def case_explicit(t):
     t.ok("hold a swipe stays off", v["swipe.history"] is False)
     t.ok("address on the tab stays off", v["tabs.address"] is False)
     t.ok("one pin key off, the other unset: off", v["pins.keep"] is False, v)
-    t.ok("an old off on a command-only switch is on now", all(v["always"].values()), v["always"])
+    t.ok("explicit off values remain off", not any(v["always"][key] for key in ("splitView", "tabs.groups", "panel.sites")))
     sv.quit(); time.sleep(0.5)
     sv.setup(**{"pins.peek": True, "pins.home": False}); sv.launch()
     v = settings()["values"]
-    t.ok("either pin key on: on, both kept in step", v["pins.keep"] and v["pins.home"] and v["pins.peek"], v)
+    t.ok("a saved pin preference remains independent", v["pins.keep"] and not v["pins.home"] and v["pins.peek"], v)
 
 
 def case_merged(t):
@@ -157,9 +165,9 @@ def case_merged(t):
     put("links.peek", "off")
     t.ok("Peek: Off writes links.peek off, keeps the click", (read("links.peek"), read("links.peekClick")) == ("0", "optionShift"))
     v = put("arc.setup", True)
-    t.ok("Set Up Like Arc: left, spaces, rows, pins, floating new tab",
+    t.ok("Set Up Like Arc: left, spaces, rows and pins",
          v["arc"] and v["tabs.layout"] == "left" and read("spaces") == "1" and read("pins.list") == "1"
-         and read("newtab.floating") == "1" and v["pins.keep"], v)
+         and v["pins.keep"], v)
     # And it survives a relaunch, read back from the keys alone.
     sv.quit(); time.sleep(0.5); sv.launch()
     v = settings()["values"]

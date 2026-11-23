@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import WebKit
 
 // Chrome's native messaging, for the extensions that talk to an app on this
@@ -16,6 +17,12 @@ import WebKit
 
 @available(macOS 15.4, *)
 enum ExtensionNative {
+    /// Why an app's connection ended (#1122: iCloud Passwords' helper went
+    /// after a couple of minutes): the host's name and how, never a message.
+    /// `log show --predicate 'subsystem == "com.officecommun.search" AND
+    /// category == "ExtensionNative"' --info --last 1h`
+    static let log = Logger(subsystem: "com.officecommun.search", category: "ExtensionNative")
+
     struct Refused: LocalizedError {
         let why: String
         var errorDescription: String? { why }
@@ -25,7 +32,10 @@ enum ExtensionNative {
     private static var folders: [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let support = home.appendingPathComponent("Library/Application Support")
-        return [
+        // A probe's world reads its own folder first, so a test can run a
+        // host of its own without leaving a file in a browser's folder.
+        let probe = Store.testing ? [Store.folder.appendingPathComponent("NativeMessagingHosts")] : []
+        return probe + [
             support.appendingPathComponent("Google/Chrome/NativeMessagingHosts"),
             support.appendingPathComponent("Chromium/NativeMessagingHosts"),
             support.appendingPathComponent("Microsoft Edge/NativeMessagingHosts"),
@@ -84,6 +94,10 @@ enum ExtensionNative {
         // have left its host behind.
         stopOrphans()
         let pipe = HostPipe(program: program, origin: "chrome-extension://\(extensionID)/")
+        let started = Date()
+        pipe.onTerminated = { note in
+            log.notice("Host \(name, privacy: .public) ended: \(note, privacy: .public), after \(Int(Date().timeIntervalSince(started)), privacy: .public)s")
+        }
         pipe.onMessage = { message in
             DispatchQueue.main.async { port.sendMessage(message, completionHandler: nil) }
         }
@@ -118,7 +132,12 @@ enum ExtensionNative {
             }
             try? pipe.write(message)
         }
-        port.disconnectHandler = { _ in beating?.invalidate(); beating = nil; pipe.stop() }
+        port.disconnectHandler = { error in
+            log.info("Port to \(name, privacy: .public) let go\(error == nil ? "" : " with an error", privacy: .public)")
+            beating?.invalidate()
+            beating = nil
+            pipe.stop()
+        }
         // Install both ends before launching a host that may answer at once.
         Live.keep(pipe, for: port, of: extensionID)
         do { try pipe.start() } catch { pipe.stop(); throw error }
@@ -133,7 +152,9 @@ enum ExtensionNative {
     /// connected keeps its own.
     @MainActor
     static func stopOrphans() {
-        for live in Live.pipes.values where live.port.isDisconnected { live.pipe.stop() }
+        let gone = Live.pipes.values.filter { $0.port.isDisconnected }
+        if !gone.isEmpty { log.notice("Stopping \(gone.count, privacy: .public) host(s) whose port went unannounced") }
+        for live in gone { live.pipe.stop() }
     }
 
     /// A worker's ports go with it, yet WebKit, stopping an idle worker and
@@ -146,7 +167,9 @@ enum ExtensionNative {
     /// shim), so its pages' ports are left as they are.
     @MainActor
     static func stopWorkerHosts(of extensionID: String) {
-        for live in Live.pipes.values where live.worker && live.extensionID == extensionID {
+        let last = Live.pipes.values.filter { $0.worker && $0.extensionID == extensionID }
+        if !last.isEmpty { log.notice("A new worker: stopping its last worker's \(last.count, privacy: .public) host(s)") }
+        for live in last {
             let cleanup = live.port.disconnectHandler
             live.port.disconnectHandler = nil
             cleanup?(nil)
@@ -211,6 +234,9 @@ final class HostPipe: @unchecked Sendable {
             if exited { newValue?() }
         }
     }
+    /// Once the host's process has exited: how it ended (its status or the
+    /// signal) and what came first, in plain words for a log. Nothing it sent.
+    var onTerminated: ((String) -> Void)?
     private var waiters: [(id: Int, continuation: CheckedContinuation<Any?, Error>)] = []
     private var nextWaiter = 0
     private var stopped = false
@@ -242,8 +268,14 @@ final class HostPipe: @unchecked Sendable {
         output.fileHandleForReading.readabilityHandler = { [weak self] _ in
             self?.reading.async { [weak self] in self?.drain() }
         }
-        process.terminationHandler = { [weak self] _ in
+        process.terminationHandler = { [weak self] process in
             guard let self else { return }
+            self.lock.lock()
+            let first = self.stopped ? "stopped by the browser" : self.outputClosed ? "its output closed first" : "exited on its own"
+            self.lock.unlock()
+            let how = process.terminationReason == .uncaughtSignal
+                ? "signal \(process.terminationStatus)" : "status \(process.terminationStatus)"
+            self.onTerminated?("\(how), \(first)")
             self.reading.async { [weak self] in
                 guard let self else { return }
                 // A final reply can precede the process exit notification.

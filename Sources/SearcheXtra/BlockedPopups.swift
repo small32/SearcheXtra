@@ -159,7 +159,7 @@ struct PopupSign: View {
             .help(BlockedPopups.title(tab.blockedPopups.count))
             .accessibilityLabel(BlockedPopups.title(tab.blockedPopups.count))
             .accessibilityIdentifier("BlockedPopups")
-            .popover(isPresented: $showing, arrowEdge: .bottom) {
+            .popover(isPresented: $showing, hangingFrom: .bottom) {
                 BlockedPopupsMenu(browser: browser, tab: tab) { showing = false }
             }
             .animation(Motion.quick, value: hovering)
