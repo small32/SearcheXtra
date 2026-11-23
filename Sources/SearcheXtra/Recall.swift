@@ -403,6 +403,11 @@ struct DownloadsPanel: View {
         private let fade: CGFloat = 24
         private static var space: String { "downloads.list" }
 
+        private var bottomOpacity: Double {
+            let hiddenHeight: CGFloat = max(0, end - height)
+            return 1 - min(1, Double(hiddenHeight / fade))
+        }
+
         var body: some View {
             ScrollView(showsIndicators: false) {
                 content()
@@ -426,7 +431,7 @@ struct DownloadsPanel: View {
             .mask {
                 VStack(spacing: 0) {
                     Rectangle()
-                    LinearGradient(colors: [.black, .black.opacity(1 - min(1, max(0, end - height) / fade))],
+                    LinearGradient(colors: [.black, .black.opacity(bottomOpacity)],
                                    startPoint: .top, endPoint: .bottom)
                         .frame(height: fade)
                 }

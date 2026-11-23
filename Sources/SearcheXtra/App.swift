@@ -860,7 +860,7 @@ struct ContentView: View {
         }
     }
 
-    var body: some View {
+    private var windowLayers: some View {
         window_
             // The column folded away, and out again at the edge (see Fold.swift).
             .overlay(alignment: sideOnRight ? .trailing : .leading) {
@@ -896,6 +896,10 @@ struct ContentView: View {
             // there is to watch.
             .animation(browser.fieldShowing ? Motion.settle : Motion.quick, value: browser.fieldShowing)
             .background(windowSetup)
+    }
+
+    private var windowWithChromeUpdates: some View {
+        windowLayers
             .onChange(of: browser.prefs.sidebar) { _, _ in
                 DispatchQueue.main.async { Lights.refresh(window); measureLights() }
             }
@@ -919,6 +923,10 @@ struct ContentView: View {
                 guard sideOnRight else { return }
                 DispatchQueue.main.async { Lights.refresh(window); measureLights() }
             }
+    }
+
+    private var windowWithFocusUpdates: some View {
+        windowWithChromeUpdates
             // Stepping away to another app: macOS draws its own resting
             // buttons, and on a light window they come out nearly white. Ours
             // go on in their place until the app comes back.
@@ -942,6 +950,10 @@ struct ContentView: View {
                     if browser.commandHeld { browser.commandHeld = false }
                 }
             }
+    }
+
+    private var windowWithFullscreenUpdates: some View {
+        windowWithFocusUpdates
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.willEnterFullScreenNotification)) { note in
                 if let window, (note.object as? NSWindow) === window { browser.fullScreen = true }
             }
@@ -960,6 +972,10 @@ struct ContentView: View {
                 resting?.isHidden = true
                 browser.appBack()
             }
+    }
+
+    var body: some View {
+        windowWithFullscreenUpdates
             .onChange(of: browser.fieldShowing) { _, showing in
                 if showing {
                     DispatchQueue.main.async { browser.askFocus() }
@@ -972,18 +988,18 @@ struct ContentView: View {
             .animation(Motion.settle, value: browser.newsShowing)
             .animation(Motion.settle, value: browser.reviewing)
             .animation(Motion.settle, value: browser.styling)
-        .onAppear {
-            watchKeys()
-            browser.askFocus()
-            // Over a page, the page has the keys from the start. Left with
-            // the window, the Mac's keyboard navigation handed them to the
-            // first button that takes them, Reload, ringed.
-            handBack()
-            // Addresses from other apps have somewhere to go from here on.
-            Links.hand(to: browser)
-            BookmarkMenu.shared.start(for: browser)
-            Browsers.watchFrames()
-        }
+            .onAppear {
+                watchKeys()
+                browser.askFocus()
+                // Over a page, the page has the keys from the start. Left with
+                // the window, the Mac's keyboard navigation handed them to the
+                // first button that takes them, Reload, ringed.
+                handBack()
+                // Addresses from other apps have somewhere to go from here on.
+                Links.hand(to: browser)
+                BookmarkMenu.shared.start(for: browser)
+                Browsers.watchFrames()
+            }
     }
 
     /// Give the keyboard back to the page once the field is done with it.

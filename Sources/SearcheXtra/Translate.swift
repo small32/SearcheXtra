@@ -487,10 +487,10 @@ final class PageTranslator {
     typealias Translate = ([String]) async throws -> [String]
 
     /// A way to translate strings from one language into the target.
-    /// macOS 26 opens a session with no view when the language is on the
-    /// Mac already. Otherwise (macOS 15, or a language still to download)
-    /// the session comes from SwiftUI's translationTask, in a 1×1 view in
-    /// the tab's window, which is where the system's download sheet shows.
+    /// With the macOS 26 SDK and runtime, an installed language can open a
+    /// session without a view. Otherwise SwiftUI's translationTask provides
+    /// the session in a 1×1 view in the tab's window, where the system can
+    /// also show its download sheet.
     private func session(from: Locale.Language, main: Bool) async throws -> Translate? {
         if PageTranslator.fake {
             let tag = "[\(PageTranslator.code(from))→\(PageTranslator.code(target))] "
@@ -533,10 +533,15 @@ final class PageTranslator {
                 return { strings in try await PageTranslator.translate(strings, with: session) }
             }
             #endif
+            // The macOS 26 SDK first shipped with Xcode 26 (Swift 6.2).
+            // A runtime availability check alone cannot expose this initializer.
+            #if compiler(>=6.2)
             if #available(macOS 26, *) {
                 let session = TranslationSession(installedSource: from, target: target)
                 return { strings in try await PageTranslator.translate(strings, with: session) }
             }
+            #endif
+            break
         default:
             // To download: only for the page's own language, which you asked for.
             if !main { return nil }
