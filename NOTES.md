@@ -1,4 +1,4 @@
-SearcheXtra 2.2.6：同步上游 macOS 更新，改善地址栏、触控板导航、扩展兼容、图片复制和 Arc 导入，修复权限、下载、书签导入及资源释放问题。 SearcheXtra 2.2.6: Sync upstream macOS updates, improve the address field, swipe navigation, extension compatibility, image copying and Arc import, and fix permissions, downloads, bookmark imports and resource cleanup.
+SearcheXtra 2.2.7：分屏最多可显示四个页面，新增固定标签文件夹、RSS 动态文件夹和可选的文件夹同步。清除缓存会同时清除 Service Worker 缓存，并改善地址栏和扩展兼容性。 SearcheXtra 2.2.7 adds four-page Split View, pinned-tab folders, live RSS folders, and optional folder sync. Clearing the cache includes Service Worker Cache Storage. This release also improves the address field and extension compatibility.
 
 SearcheXtra 2.2.5：合并上游更新代码，并修复了一些BUG。 SearcheXtra 2.2.5: Merged upstream updates and fixed some bugs.
 
