@@ -15,7 +15,7 @@ final class PinFolderColumnTests: XCTestCase {
     private var activationPolicy: NSApplication.ActivationPolicy?
     /// The four tabs makeBrowser made, in order: a session left by the
     /// test before may have brought others back first.
-    private var made: [Search.Tab] = []
+    private var made: [SearcheXtra.Tab] = []
 
     override class func setUp() {
         setenv("SEARCH_PROBE", "pin-folders-\(getpid())", 1)
@@ -254,7 +254,7 @@ final class PinFolderColumnTests: XCTestCase {
     }
 
     /// Four tabs pinned as rows, in order, and a tab in front after them.
-    private func pinned(_ browser: Browser) throws -> (Search.Tab, Search.Tab, Search.Tab, Search.Tab) {
+    private func pinned(_ browser: Browser) throws -> (SearcheXtra.Tab, SearcheXtra.Tab, SearcheXtra.Tab, SearcheXtra.Tab) {
         let tabs = made
         XCTAssertEqual(tabs.count, 4)
         for tab in tabs { browser.pin(tab, listed: true) }

@@ -846,14 +846,14 @@ private protocol Closable: AnyObject { func close() }
 /// session, and holds it open until closed.
 @available(macOS 15, *)
 @MainActor
-private final class SessionLease: Closable {
+final class SessionLease: Closable {
     private(set) var session: TranslationSession!
     private var host: NSView?
+    private var pending: CheckedContinuation<TranslationSession, Error>?
     private var hold: CheckedContinuation<Void, Never>?
     private var closed = false
 
     static func open(from: Locale.Language, to: Locale.Language, fast: Bool, in content: NSView) async throws -> SessionLease {
-        let lease = SessionLease()
         let configuration: TranslationSession.Configuration
         #if compiler(>=6.3)
         if #available(macOS 26.4, *) {
@@ -864,29 +864,56 @@ private final class SessionLease: Closable {
         #else
         configuration = .init(source: from, target: to)
         #endif
-        let session: TranslationSession = await withCheckedContinuation { got in
-            var given = false
-            let view = NSHostingView(rootView: SessionHost(configuration: configuration) { session in
-                guard !given else { return }
-                given = true
-                got.resume(returning: session)
-                await withCheckedContinuation { (hold: CheckedContinuation<Void, Never>) in
-                    if lease.closed { hold.resume() } else { lease.hold = hold }
-                }
-            })
-            view.frame = NSRect(x: 0, y: 0, width: 1, height: 1)
-            view.alphaValue = 0.01
-            content.addSubview(view)
-            lease.host = view
+        return try await open(in: content) { receive in
+            NSHostingView(rootView: SessionHost(configuration: configuration, work: receive))
         }
-        lease.session = session
-        return lease
+    }
+
+    /// The host factory also lets lifecycle tests delay the framework's
+    /// callback without downloading a language or opening a system sheet.
+    static func open(in content: NSView,
+                     makeHost: (@escaping @MainActor (TranslationSession) async -> Void) -> NSView) async throws -> SessionLease {
+        let lease = SessionLease()
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let session: TranslationSession = try await withCheckedThrowingContinuation { got in
+                guard !Task.isCancelled else { return got.resume(throwing: CancellationError()) }
+                lease.pending = got
+                let view = makeHost { [weak lease] session in
+                    guard let lease else { return }
+                    await lease.receive(session)
+                }
+                view.frame = NSRect(x: 0, y: 0, width: 1, height: 1)
+                view.alphaValue = 0.01
+                content.addSubview(view)
+                lease.host = view
+            }
+            guard !Task.isCancelled else { lease.close(); throw CancellationError() }
+            lease.session = session
+            return lease
+        } onCancel: {
+            Task { @MainActor in lease.close() }
+        }
+    }
+
+    private func receive(_ session: TranslationSession) async {
+        guard !closed, let pending else { return }
+        self.pending = nil
+        pending.resume(returning: session)
+        await withCheckedContinuation { hold in
+            if closed { hold.resume() } else { self.hold = hold }
+        }
     }
 
     func close() {
+        guard !closed else { return }
         closed = true
+        let pending = pending
+        self.pending = nil
+        pending?.resume(throwing: CancellationError())
         hold?.resume()
         hold = nil
+        session = nil
         host?.removeFromSuperview()
         host = nil
     }
@@ -895,7 +922,7 @@ private final class SessionLease: Closable {
 @available(macOS 15, *)
 private struct SessionHost: View {
     let configuration: TranslationSession.Configuration
-    let work: (TranslationSession) async -> Void
+    let work: @MainActor (TranslationSession) async -> Void
 
     var body: some View {
         Color.clear.frame(width: 1, height: 1)

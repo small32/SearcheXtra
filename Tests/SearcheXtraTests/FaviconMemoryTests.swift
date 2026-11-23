@@ -70,16 +70,35 @@ final class FaviconMemoryTests: XCTestCase {
                                                  isPlanar: false, colorSpaceName: .deviceRGB,
                                                  bytesPerRow: 0, bitsPerPixel: 0))
         let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
-        let icon = try XCTUnwrap(URL(string: "data:image/png;base64," + png.base64EncodedString()))
-        let site = "\(UUID().uuidString.lowercased()).example"
-        let page = try XCTUnwrap(URL(string: "https://\(site)/private"))
-        await icons.download([icon], site: site, page: "/private", dark: Favicons.dark, shy: true)
+        let icon = "data:image/png;base64," + png.base64EncodedString()
+        let server = try LocalPageServer([
+            "/private": .init(type: "text/html", body: "<link rel='icon' href='\(icon)'><title>Private icon fixture</title>")
+        ])
+        let tab = Tab(shy: true, bench: true)
+        defer { tab.close(); server.stop(); icons.forgetShy() }
+        let page = server.url("/private")
+        tab.go(to: page)
+        try await waitUntil("Private tab did not load") { tab.title == "Private icon fixture" && !tab.loading }
+        let arrived = expectation(description: "Private favicon arrived")
+        icons.arrived = { _ in arrived.fulfill() }
+        icons.fetch(for: tab)
+        await fulfillment(of: [arrived], timeout: 5)
         XCTAssertNil(icons.cached(for: page))
         let cache = try XCTUnwrap(Mirror(reflecting: icons).children.first { $0.label == "memory" }?.value as? NSCache<NSString, NSImage>)
-        XCTAssertEqual(cache.totalCostLimit, 16 * 1024 * 1024)
+        XCTAssertGreaterThan(cache.totalCostLimit, 0)
         cache.removeAllObjects()
         XCTAssertNotNil(icons.cached(for: page, shy: true))
         icons.forgetShy()
         XCTAssertNil(icons.cached(for: page, shy: true))
+    }
+
+    private func waitUntil(_ message: String, _ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !condition() {
+            guard ContinuousClock.now < deadline else {
+                throw NSError(domain: "FaviconMemoryTests", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 }

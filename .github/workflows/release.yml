@@ -28,13 +28,13 @@ jobs:
       matrix:
         include:
           - arch: arm64
-            runner: macos-15
+            runner: macos-26
             output: build
           - arch: x86_64
             runner: macos-15-intel
             output: build/intel
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 120
     env:
       SEARCH_ARCH: ${{ matrix.arch }}
       OUTPUT_DIR: ${{ matrix.output }}

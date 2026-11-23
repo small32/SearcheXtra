@@ -57,8 +57,13 @@ final class ExtensionPopupWindowTests: XCTestCase {
 
     func testActionPopupAnchorsToItsButtonOrTheExtensionsMenu() throws {
         let extensions = Extensions.shared
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
         let saved = extensions.anchors
-        defer { extensions.anchors = saved }
+        extensions.anchors = [:]
+        defer {
+            browser.closeAll()
+            extensions.anchors = saved
+        }
 
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200),
                               styleMask: [.borderless], backing: .buffered, defer: false)
@@ -69,14 +74,15 @@ final class ExtensionPopupWindowTests: XCTestCase {
         let menu = NSView(frame: NSRect(x: 330, y: 170, width: 26, height: 26))
         content.addSubview(own)
         content.addSubview(menu)
-        extensions.anchors = ["popup-test": WeakView(own), Extensions.menuAnchor: WeakView(menu)]
+        extensions.registerAnchor(own, for: "popup-test", in: browser)
+        extensions.registerAnchor(menu, for: Extensions.menuAnchor, in: browser)
 
-        XCTAssertTrue(extensions.anchor(for: "popup-test") === own,
+        XCTAssertTrue(extensions.anchor(for: "popup-test", in: browser) === own,
                       "a pinned extension's popover hangs from its own title-bar icon")
-        XCTAssertTrue(extensions.anchor(for: "unpinned-test") === menu,
+        XCTAssertTrue(extensions.anchor(for: "unpinned-test", in: browser) === menu,
                       "an extension selected in the list hangs from the puzzle button")
         own.removeFromSuperview()
-        XCTAssertTrue(extensions.anchor(for: "popup-test") === menu,
+        XCTAssertTrue(extensions.anchor(for: "popup-test", in: browser) === menu,
                       "a folded-away title-bar icon must not be used as a detached anchor")
         XCTAssertFalse(window.isVisible, "resolving a popover anchor must not open a window")
     }

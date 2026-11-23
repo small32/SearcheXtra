@@ -1,4 +1,4 @@
-import Combine
+import Observation
 import XCTest
 @testable import SearcheXtra
 
@@ -17,7 +17,7 @@ final class BookmarkManagerTests: XCTestCase {
         XCTAssertEqual(Bookmarks().bookmark(node.id)?.title, "")
     }
 
-    func testBatchDeletionPublishesOneChangeAndKeepsUnselectedSiblings() throws {
+    func testBatchDeletionNotifiesObserversAndKeepsUnselectedSiblings() throws {
         guard Store.testing else { throw XCTSkip("Run with SEARCH_PROBE=interface-tests") }
         let bookmarks = Bookmarks()
         let previous = bookmarks.roots
@@ -29,11 +29,14 @@ final class BookmarkManagerTests: XCTestCase {
         let children = (0..<100).map { Bookmark(title: "Page \($0)", url: "https://bookmark-\($0).example/") }
         let folder = bookmarks.insert(.folder("Folder", children), into: nil)
         let survivor = bookmarks.insert(.folder("Survivor", []), into: nil)
-        var changes = 0
-        let watch = bookmarks.objectWillChange.sink { changes += 1 }
+        let changed = expectation(description: "The observed bookmark roots change")
+        withObservationTracking {
+            _ = bookmarks.roots
+        } onChange: {
+            changed.fulfill()
+        }
         bookmarks.remove(Set([folder.id] + children.prefix(50).map(\.id)))
-        watch.cancel()
-        XCTAssertEqual(changes, 1)
+        wait(for: [changed], timeout: 1)
         XCTAssertEqual(bookmarks.roots.map(\.id), [survivor.id])
         Disk.drain()
         XCTAssertEqual(Bookmarks().roots.map(\.id), [survivor.id])

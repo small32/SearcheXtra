@@ -53,7 +53,7 @@ final class Favicons: ObservableObject {
     private var dropped: Set<String> = []
 
     private let memory = NSCache<NSString, NSImage>()
-    private let session: URLSession
+    private let suppliedSession: URLSession?
     private var bookmarkQueue: [(URL, String, String, Bool, UInt, CheckedContinuation<Void, Never>)] = []
     private var bookmarkDownloads = 0
     private var bookmarkWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
@@ -64,12 +64,16 @@ final class Favicons: ObservableObject {
         memory.totalCostLimit = 8 * 1024 * 1024
         lookups.countLimit = 512
         lookups.totalCostLimit = 8 * 1024 * 1024
-        if let session { self.session = session }
-        else {
-            let configuration = URLSessionConfiguration.ephemeral
-            configuration.timeoutIntervalForRequest = 8
-            self.session = URLSession(configuration: configuration)
-        }
+        suppliedSession = session
+    }
+
+    private func makeSession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 8
+        // A favicon names the site you are on, so it goes the way the
+        // page did, private tabs included (Proxy.swift).
+        ProxyNetwork.stamp(config)
+        return URLSession(configuration: config)
     }
 
     private var generation: UInt = 0
@@ -489,6 +493,8 @@ final class Favicons: ObservableObject {
                     discoverBookmarks()
                 }
                 guard generation == self.generation, pageGeneration == pageGenerations[site + page, default: 0], !Task.isCancelled else { return }
+                let session = suppliedSession ?? makeSession()
+                defer { if suppliedSession == nil { session.invalidateAndCancel() } }
                 var candidates = Favicons.rank([], page: url, dark: dark)
                 let result = try? await session.data(from: url)
                 guard generation == self.generation, pageGeneration == pageGenerations[site + page, default: 0], !Task.isCancelled else { return }
@@ -613,16 +619,8 @@ final class Favicons: ObservableObject {
                 && pageGeneration == pageGenerations[busyKey, default: 0]
         }
         guard current() else { return }
-        defer { busy.remove(busyKey) }
-        let session = URLSession(configuration: {
-            let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = 8
-            // A favicon names the site you are on, so it goes the way the
-            // page did, private tabs included (Proxy.swift).
-            ProxyNetwork.stamp(config)
-            return config
-        }())
-        defer { session.invalidateAndCancel() }
+        let session = suppliedSession ?? makeSession()
+        defer { if suppliedSession == nil { session.invalidateAndCancel() } }
         var unanswered: [URL] = []
         var asked = false
         for candidate in candidates where !failed.contains(candidate) {
