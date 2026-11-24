@@ -27,10 +27,12 @@ final class ExtensionLifecycleTests: XCTestCase {
     }
 
     private func waitUntilAdmitted() async throws {
-        let deadline = Date().addingTimeInterval(5)
+        // A new controller deliberately waits through WebKit's startup
+        // installation window before making the extension visible.
+        let deadline = Date().addingTimeInterval(15)
         while !Extensions.shared.installed.contains(where: { $0.id == id }) {
             guard Date() < deadline else { throw NSError(domain: "ExtensionLifecycleTests", code: 1) }
-            await Task.yield()
+            try await Task.sleep(for: .milliseconds(20))
         }
     }
 

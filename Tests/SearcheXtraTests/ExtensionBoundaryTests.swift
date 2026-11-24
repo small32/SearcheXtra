@@ -30,7 +30,8 @@ final class ExtensionBoundaryTests: XCTestCase {
             try Data("<!doctype html><title>Popup</title>".utf8).write(to: folder.appendingPathComponent("popup.html"))
         }
         try JSONSerialization.data(withJSONObject: manifest).write(to: folder.appendingPathComponent("manifest.json"))
-        let context = WKWebExtensionContext(for: try await WKWebExtension(resourceBaseURL: folder))
+        let webExtension = try await WKWebExtension(resourceBaseURL: folder)
+        let context = WKWebExtensionContext(for: webExtension)
         context.baseURL = URL(string: "\(Extensions.scheme)://\(UUID().uuidString.lowercased())/")!
         return context
     }
@@ -114,6 +115,7 @@ final class ExtensionBoundaryTests: XCTestCase {
     }
 
     func testPopupURLsStayInsideTheirOwnExtension() async throws {
+        _ = NSApplication.shared
         let context = try await context(popup: "popup.html?view=compact#settings")
         let popup = try XCTUnwrap(Extensions.popupURL(for: context))
         XCTAssertEqual(popup.scheme, Extensions.scheme)

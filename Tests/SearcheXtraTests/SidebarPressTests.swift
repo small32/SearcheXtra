@@ -80,9 +80,14 @@ final class SidebarPressTests: XCTestCase {
         XCTAssertTrue(browser.editing, "A fresh click on the active row opens the upstream address field")
     }
 
-    func testEditedRowTakesTheKeys() async throws {
+    func testActiveRowOpensTheAddressFieldWithItsContentsSelected() async throws {
         let browser = makeBrowser()
-        let window = makeWindow(browser)
+        let width = browser.prefs.sideWidth
+        let window = makeWindow(root: HStack(spacing: 0) {
+            SideBar(browser: browser, prefs: browser.prefs)
+            Omnibox(browser: browser, over: true, fitted: true)
+        }, width: width + 500, height: 500)
+        browser.window = window
         try await settle()
         let point = rowPoint(0, in: window)
         for _ in 0..<2 {
@@ -90,10 +95,12 @@ final class SidebarPressTests: XCTestCase {
             try await send(.leftMouseUp, at: point, in: window)
         }
         try await settle()
-        XCTAssertEqual(browser.editingTab, browser.tabs[0].id)
-        let editor = try XCTUnwrap(window.firstResponder as? NSTextView, "The row's field must have the keys")
+        XCTAssertEqual(browser.activeID, browser.tabs[0].id)
+        XCTAssertTrue(browser.editing)
+        XCTAssertNil(browser.editingTab)
+        let editor = try XCTUnwrap(window.firstResponder as? NSTextView, "The address field must have the keys")
         XCTAssertEqual(editor.selectedRange().length, (editor.string as NSString).length)
-        XCTAssertFalse(editor.string.isEmpty)
+        XCTAssertEqual(editor.string, browser.tabs[0].address?.absoluteString)
     }
 
     func testRowLeftPickedAloneSelectsOnPressAgain() async throws {
@@ -314,9 +321,8 @@ final class SidebarPressTests: XCTestCase {
         // queue: the release is queued first, in this process only.
         let field = try XCTUnwrap(addressField(in: window.contentView!))
         let point = field.convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), to: nil)
-        NSApp.postEvent(try event(.leftMouseUp, at: point, in: window), atStart: false)
-        window.sendEvent(try event(.leftMouseDown, at: point, in: window))
-        try await settle()
+        NSApp.postEvent(try event(.leftMouseUp, at: point, in: window), atStart: true)
+        NSApp.sendEvent(try event(.leftMouseDown, at: point, in: window))
         XCTAssertEqual(browser.editingTab, first.id, "A click in the name field keeps the rename open")
         XCTAssertTrue(browser.renamingTab)
         XCTAssertEqual(browser.activeID, first.id)
@@ -479,7 +485,9 @@ final class SidebarPressTests: XCTestCase {
     }
 
     private func makeWindow(_ browser: Browser) -> NSWindow {
-        makeWindow(root: SideBar(browser: browser, prefs: browser.prefs), width: browser.prefs.sideWidth, height: 500)
+        let window = makeWindow(root: SideBar(browser: browser, prefs: browser.prefs), width: browser.prefs.sideWidth, height: 500)
+        browser.window = window
+        return window
     }
 
     private func makeWindow<V: View>(root: V, width: CGFloat = 250, height: CGFloat = 40) -> NSWindow {

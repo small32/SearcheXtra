@@ -54,16 +54,15 @@ enum Crx {
         realpath(folder.path, nil).map { real in defer { free(real) }; return String(cString: real) } ?? folder.standardizedFileURL.path
     }
 
-    private static let idExpression = try! NSRegularExpression(pattern: "(?<![a-z])([a-p]{32})(?![a-z])")
     private static let storeDetailExpression = try! NSRegularExpression(pattern: #"^/detail/(?:[^/]+/)?([a-p]{32})(?:/.*)?$"#)
     private static let webstoreDetailExpression = try! NSRegularExpression(pattern: #"^/webstore/detail/(?:[^/]+/)?([a-p]{32})(?:/.*)?$"#)
 
     /// Thirty-two letters from a to p, wherever they are — a bare id, a store
     /// link, an old chrome.google.com/webstore link.
-    private static let idPattern = try! NSRegularExpression(pattern: "(?<![a-z])([a-p]{32})(?![a-z])", options: .caseInsensitive)
+    private static let idPattern = try! NSRegularExpression(pattern: "(?<![a-zA-Z])([a-pA-P]{32})(?![a-zA-Z])")
     static func id(in text: String) -> String? {
         let range = NSRange(text.startIndex..., in: text)
-        guard let match = idExpression.firstMatch(in: text.lowercased(), range: range),
+        guard let match = idPattern.firstMatch(in: text, range: range),
               let found = Range(match.range(at: 1), in: text)
         else { return nil }
         return text[found].lowercased()

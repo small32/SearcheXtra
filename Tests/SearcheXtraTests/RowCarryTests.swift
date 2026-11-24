@@ -247,13 +247,14 @@ final class RowCarryTests: XCTestCase {
         let browser = makeBrowser()
         let pinned = browser.tabs[0]
         browser.pin(pinned)
+        browser.select(pinned)
         // A pin is every window's: left in, the next test's rows start lower.
         defer { browser.unpin(pinned) }
         let window = try makeTopRow(browser)
         try await settle()
         TabDrag.testPointer = NSPoint(x: window.frame.midX, y: window.frame.midY)
         defer { TabDrag.testPointer = nil }
-        let x = Metrics.lights + (browser.prefs.usesSpaces ? SpaceDot.width + Metrics.tabGap : 0) + Metrics.pinWidth / 2
+        let x = try tabStripFrame(for: pinned, in: window).midX
         try await send(.leftMouseDown, at: NSPoint(x: x, y: Metrics.strip / 2), in: window)
         for y in stride(from: Metrics.strip / 2 - 6, through: -40, by: -6) {
             try await send(.leftMouseDragged, at: NSPoint(x: x, y: y), in: window)

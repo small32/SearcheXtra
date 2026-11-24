@@ -139,7 +139,8 @@ final class OptionClickTests: XCTestCase {
         browser.select(t[0])
         let window = makeStrip(browser)
         try await settle()
-        try await click(pillPoint(2), in: window, option: true)
+        let frame = try tabStripFrame(for: t[2], in: window)
+        try await click(NSPoint(x: frame.midX, y: frame.midY), in: window, option: true)
         XCTAssertEqual(browser.split(for: t[2])?.tabs, [t[0].id, t[2].id])
     }
 
@@ -205,11 +206,6 @@ final class OptionClickTests: XCTestCase {
         return window
     }
 
-    /// The middle of a pill in the 900-point strip of four tabs.
-    private func pillPoint(_ index: Int) -> NSPoint {
-        NSPoint(x: 195 + CGFloat(index) * 150, y: Metrics.strip / 2)
-    }
-
     private func rowPoint(_ index: Int, in window: NSWindow) -> NSPoint {
         NSPoint(x: 70, y: window.frame.height - Metrics.strip - 14 - CGFloat(index) * 30)
     }
@@ -232,4 +228,21 @@ final class OptionClickTests: XCTestCase {
         }
         try await settle()
     }
+}
+
+/// Find a tab's actual hit area after laying out the strip. The toolbar's
+/// side and controls change the width and position of every tab.
+@MainActor
+func tabStripFrame(for tab: SearcheXtra.Tab, in window: NSWindow) throws -> CGRect {
+    func marker(in view: NSView) -> SplitDropZone.Marker? {
+        if let marker = view as? SplitDropZone.Marker, marker.kind == .strip, marker.tab === tab {
+            return marker
+        }
+        return view.subviews.lazy.compactMap(marker(in:)).first
+    }
+    let content = try XCTUnwrap(window.contentView)
+    content.layoutSubtreeIfNeeded()
+    let hitArea = try XCTUnwrap(marker(in: content), "Tab must have a drop marker in the strip")
+    XCTAssertFalse(hitArea.bounds.isEmpty)
+    return hitArea.convert(hitArea.bounds, to: nil)
 }

@@ -37,17 +37,18 @@ final class ExtensionLoadRaceTests: XCTestCase {
         let id = Crx.unpackedID(for: URL(fileURLWithPath: Crx.realPath(of: source), isDirectory: true))
         defer { extensions.remove(id) }
 
-        extensions.installFolder(at: source, confirm: false)
-        let installed = try await waitForContext(id, extensions)
-        XCTAssertTrue(installed, "the installed extension never loaded")
+        let install = try XCTUnwrap(extensions.installFolder(at: source, confirm: false))
+        await install.value
+        _ = try XCTUnwrap(extensions.contexts[id], "the installed extension never loaded")
         XCTAssertEqual(loaded(id, extensions), 1)
 
         // Off, on, and off again before that load lands.
         extensions.setEnabled(id, false)
-        extensions.setEnabled(id, true)
+        let canceled = try XCTUnwrap(extensions.setEnabled(id, true))
         extensions.setEnabled(id, false)
-        let cameBack = try await waitForContext(id, extensions, limit: 2)
+        let cameBack = await canceled.value
         XCTAssertFalse(cameBack, "a switched-off extension was loaded by the load already in flight")
+        XCTAssertNil(extensions.contexts[id])
         XCTAssertEqual(loaded(id, extensions), 0)
 
         // On twice: two loads in flight, one context in the controller.

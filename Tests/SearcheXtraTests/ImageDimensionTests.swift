@@ -1,18 +1,13 @@
 import Foundation
-import ImageIO
 import XCTest
 @testable import SearcheXtra
 
 final class ImageDimensionTests: XCTestCase {
-    func testImageHeaderDimensionsCannotOverflowPixelLimit() throws {
-        let data = tiff(width: .max, height: .max)
-        let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary))
-        let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any])
-        // Verify this fixture reaches the size check, rather than merely
-        // passing because ImageIO rejected a malformed image beforehand.
-        XCTAssertEqual((properties[kCGImagePropertyPixelWidth] as? NSNumber)?.uint64Value, UInt64(UInt32.max))
-        XCTAssertEqual((properties[kCGImagePropertyPixelHeight] as? NSNumber)?.uint64Value, UInt64(UInt32.max))
-        XCTAssertFalse(Browser.reasonable(data))
+    func testImageHeaderDimensionsCannotOverflowPixelLimit() {
+        // Some ImageIO versions reject this TIFF before returning its
+        // dimensions. Exercise the same pixel check independently of ImageIO.
+        XCTAssertFalse(Browser.reasonable(width: Int(UInt32.max), height: Int(UInt32.max)))
+        XCTAssertFalse(Browser.reasonable(tiff(width: .max, height: .max)))
     }
 
     func testSmallImageAcceptedAndOversizedHeadersRejected() {

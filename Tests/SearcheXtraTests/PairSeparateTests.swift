@@ -185,7 +185,13 @@ final class PairSeparateTests: XCTestCase {
             windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
             pressure: type == .leftMouseUp ? 0 : 1
         ))
-        window.sendEvent(event)
+        if type == .leftMouseDown {
+            // The app's local monitor clears cancellation when a new press
+            // starts, even if the earlier gesture never delivered onEnded.
+            NSApp.sendEvent(event)
+        } else {
+            window.sendEvent(event)
+        }
         try await Task.sleep(for: .milliseconds(30))
     }
 }

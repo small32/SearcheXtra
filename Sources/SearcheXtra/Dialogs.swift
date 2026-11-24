@@ -391,8 +391,9 @@ extension Browser {
     private static let pageLog = Logger(subsystem: "com.officecommun.search", category: "Pages")
 
     private func pageProcessEnded(_ webView: WKWebView, _ end: PageEnd) {
-        cancelDisplay(for: webView)
-        guard let tab = tab(for: webView) else { return }
+        cancelCapture(for: webView)
+        guard let tab = anyTab(for: webView) ?? (peekTab?.built === webView ? peekTab : nil) else { return }
+        heldDialogs.removeValue(forKey: tab.id)?.forEach { $0.dismiss() }
         dropQuestions(for: tab.id)
         let host = tab.address?.host() ?? ""
         // On screen, either half of a pair: straight back, a reload beats a

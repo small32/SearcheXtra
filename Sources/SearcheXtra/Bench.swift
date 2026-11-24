@@ -335,26 +335,30 @@ final class Bench {
             if !caught.isEmpty { answer["onScreen"] = caught }
             var out = (try? JSONSerialization.data(withJSONObject: answer)) ?? Data("{\"error\":\"unwritable answer\"}".utf8)
             out.append(0x0A)
-            out.withUnsafeBytes { raw in
-                var sent = 0
-                var spins = 0
+            send(out, from: 0, until: .now() + .milliseconds(500))
+        }
+
+        private func send(_ reply: Data, from offset: Int, until deadline: DispatchTime) {
+            guard !closed else { return }
+            var sent = offset
+            let retry = reply.withUnsafeBytes { raw in
                 while sent < raw.count {
+                    guard DispatchTime.now() < deadline else { return false }
                     let n = write(fd, raw.baseAddress! + sent, raw.count - sent)
-                    if n <= 0 {
-                        // A client that never reads must not spin the main
-                        // queue forever: half a second, then give up.
-                        if errno == EAGAIN, spins < 250 {
-                            spins += 1
-                            usleep(2000)
-                            continue
-                        }
-                        break
-                    }
-                    spins = 0
+                    if n < 0, errno == EINTR { continue }
+                    guard n > 0 else { return n < 0 && errno == EAGAIN }
                     sent += n
                 }
+                return false
             }
-            drop()
+            if retry {
+                let next = sent
+                DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(10)) { [weak self] in
+                    self?.send(reply, from: next, until: deadline)
+                }
+            } else {
+                drop()
+            }
         }
 
         func drop() {
@@ -369,8 +373,18 @@ final class Bench {
     // MARK: - the commands
 
     static func responseTimeout(for request: [String: Any]) -> Double {
-        let asked: Double = (request["do"] as? String) == "wait" ? (request["seconds"] as? Double ?? 30) + 5 :
-            (request["do"] as? String) == "import-file" ? (request["timeout"] as? Double ?? 120) : 25
+        func number(_ key: String, fallback: Double) -> Double {
+            guard let value = request[key] as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID() else {
+                return fallback
+            }
+            return value.doubleValue
+        }
+        let asked: Double
+        switch request["do"] as? String {
+        case "wait": asked = number("seconds", fallback: 30) + 5
+        case "import-file": asked = number("timeout", fallback: 120)
+        default: asked = 25
+        }
         return asked.isFinite ? min(max(asked, 1), 600) : 25
     }
 

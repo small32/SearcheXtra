@@ -23,8 +23,10 @@ final class SidePanelScopeTests: XCTestCase {
             ExtensionShims.panelOff.remove(id)
         }
         let a = try XCTUnwrap(first.active)
+        a.restore(url: URL(string: "https://example.com/a")!, title: "First")
         first.newTab()
         let b = try XCTUnwrap(first.active)
+        XCTAssertNotEqual(a.id, b.id)
         let c = try XCTUnwrap(second.active)
         let url = URL(string: "https://example.com/panel")!
         let panelA = SidePanelContent.page(extensionID: id, url: url, tab: a.id)
@@ -63,8 +65,10 @@ final class SidePanelScopeTests: XCTestCase {
         let second = Browser(record: WindowRecord(), opensStartPage: false)
         defer { first.closeAll(); second.closeAll() }
         let a = try XCTUnwrap(first.active)
+        a.restore(url: URL(string: "https://example.com/a")!, title: "First")
         first.newTab()
         let b = try XCTUnwrap(first.active)
+        XCTAssertNotEqual(a.id, b.id)
         let c = try XCTUnwrap(second.active)
         let id = "panel-close-fixture", url = URL(string: "https://example.com/panel")!
         let panelA = SidePanelContent.page(extensionID: id, url: url, tab: a.id)

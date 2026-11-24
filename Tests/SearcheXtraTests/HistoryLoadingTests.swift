@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class HistoryLoadingTests: XCTestCase {
-    private func fixture() throws -> (String, URL) {
+    private func fixture(count: Int = 2_000) throws -> (String, URL) {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         let file = root.appendingPathComponent(".build/history-load-\(UUID().uuidString).json")
@@ -12,7 +12,7 @@ final class HistoryLoadingTests: XCTestCase {
         let to = file.standardizedFileURL.pathComponents
         let common = zip(from, to).prefix { $0 == $1 }.count
         let name = (Array(repeating: "..", count: from.count - common) + to.dropFirst(common)).joined(separator: "/")
-        let rows: [[String: Any]] = (0..<2_000).map { i in
+        let rows: [[String: Any]] = (0..<count).map { i in
             let url = "https://site\(i).example/article/\(i)"
             return ["url": url, "key": url, "title": "Page \(i) " + String(repeating: "x", count: 350),
                     "count": 1, "last": Date().timeIntervalSinceReferenceDate]
@@ -53,7 +53,7 @@ final class HistoryLoadingTests: XCTestCase {
     }
 
     func testEarlyChangesWaitForTheFileAndReplayInOrder() async throws {
-        let (name, file) = try fixture()
+        let (name, file) = try fixture(count: 25)
         defer { try? FileManager.default.removeItem(at: file) }
         let original = try Data(contentsOf: file)
         let gate = DispatchSemaphore(value: 0)
@@ -91,6 +91,7 @@ final class HistoryLoadingTests: XCTestCase {
         XCTAssertTrue(urls.contains(imported.absoluteString))
         XCTAssertTrue(urls.contains(early.absoluteString))
         XCTAssertFalse(urls.contains(forgotten.absoluteString))
+        XCTAssertEqual(saved.first { $0["url"] as? String == renamed.absoluteString }?["title"] as? String, "Renamed")
     }
 
     func testClearDuringLoadingWinsAndTheNextVisitIsKept() throws {

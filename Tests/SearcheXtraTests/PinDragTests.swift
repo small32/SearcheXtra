@@ -152,7 +152,7 @@ final class PinDragTests: XCTestCase {
         let browser = makeBrowser(count: 5)
         let t = browser.tabs
         browser.pin(t[0]); browser.pin(t[1])
-        browser.select(t[2])
+        browser.select(t[0])
         let window = makeWindow(browser)
         try await settle()
         let room = browser.prefs.sideWidth - 20
@@ -173,7 +173,8 @@ final class PinDragTests: XCTestCase {
         let browser = makeBrowser(count: 20)
         let t = browser.tabs
         browser.pin(t[0]); browser.pin(t[1])
-        browser.select(t[2])
+        browser.select(t[0])
+        XCTAssertEqual(t.count, 20)
         let window = makeWindow(browser)
         try await settle()
         let room = browser.prefs.sideWidth - 20
@@ -295,7 +296,9 @@ final class PinDragTests: XCTestCase {
         browser.prefs.listsPins = rows
         browser.prefs.roomyTabs = false
         browser.prefs.sharesPins = false
-        for word in ["one", "two", "three", "four", "five", "six"].prefix(count) {
+        let names = ["one", "two", "three", "four", "five", "six"]
+        for index in 0..<count {
+            let word = index < names.count ? names[index] : "tab-\(index + 1)"
             if browser.tabs.last?.isBlank == false { browser.newTab() }
             browser.tabs.last?.restore(url: URL(string: "about:blank#\(word)")!, title: word)
         }
@@ -330,7 +333,7 @@ final class PinDragTests: XCTestCase {
     /// down, and no tooltip comes during a drag.
     private func drag(from start: NSPoint, through points: [NSPoint], in window: NSWindow) async throws {
         let last = try await carry(from: start, through: points, in: window)
-        try await Task.sleep(for: .milliseconds(120))
+        try await Task.sleep(for: .milliseconds(60))
         try await send(.leftMouseUp, at: last, in: window)
         try await settle()
     }
@@ -339,8 +342,9 @@ final class PinDragTests: XCTestCase {
         try await send(.leftMouseDown, at: start, in: window)
         var last = start
         for target in points {
-            // As a hand moves: a few points at a time.
-            let steps = max(1, Int((hypot(target.x - last.x, target.y - last.y) / 4).rounded(.up)))
+            // Sample the path without leaving the AppKit tooltip timer
+            // enough time to interrupt the synthetic drag.
+            let steps = max(1, Int((hypot(target.x - last.x, target.y - last.y) / 10).rounded(.up)))
             for step in 1...steps {
                 let f = CGFloat(step) / CGFloat(steps)
                 let p = NSPoint(x: last.x + (target.x - last.x) * f, y: last.y + (target.y - last.y) * f)

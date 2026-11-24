@@ -307,7 +307,7 @@ final class SidePanelPages: NSObject {
     }
     private var pages: [ObjectIdentifier: Page] = [:]
     private var bound: [ObjectIdentifier: [Tab.ID: SidePanelContent]] = [:]
-    private var pendingPrunes: Set<ObjectIdentifier> = []
+    private var pendingPrunes: [ObjectIdentifier: UUID] = [:]
 
     /// The page up in this window's panel, for SidePanelView and the bench.
     func web(in browser: Browser) -> WKWebView? { pages[ObjectIdentifier(browser)]?.web }
@@ -392,7 +392,9 @@ final class SidePanelPages: NSObject {
     /// A retired window owns no remaining tab bindings or panel view.
     func forget(in browser: Browser) {
         drop(in: browser)
-        bound.removeValue(forKey: ObjectIdentifier(browser))
+        let key = ObjectIdentifier(browser)
+        pendingPrunes[key] = nil
+        bound[key] = nil
     }
 
     func bind(_ content: SidePanelContent, to tab: Tab.ID, in browser: Browser) {
@@ -410,10 +412,12 @@ final class SidePanelPages: NSObject {
     /// finishes, once all rows describe the tabs this browser still owns.
     func schedulePrune(in browser: Browser) {
         let key = ObjectIdentifier(browser)
-        guard bound[key]?.isEmpty == false, pendingPrunes.insert(key).inserted else { return }
+        guard bound[key]?.isEmpty == false, pendingPrunes[key] == nil else { return }
+        let token = UUID()
+        pendingPrunes[key] = token
         DispatchQueue.main.async { [weak self, weak browser] in
-            guard let self else { return }
-            pendingPrunes.remove(key)
+            guard let self, pendingPrunes[key] == token else { return }
+            pendingPrunes[key] = nil
             guard let browser else { bound[key] = nil; return }
             let live = Set((browser.tabs + browser.parkedTabs).map(\.id))
             bound[key] = bound[key]?.filter { live.contains($0.key) }

@@ -184,12 +184,11 @@ final class TabGroupDragOutTests: XCTestCase {
         browser.select(t[4])
         let window = try makeTopRow(browser)
         try await settle()
-        TabDrag.testPointer = NSPoint(x: window.frame.midX, y: window.frame.midY)
-        let y = Metrics.strip / 2
-        // The heading at about 100, one from 160 to 300, then two, three,
-        // four, and five ending near 930, before the buttons.
-        let x: CGFloat = 210
-        let end: CGFloat = 945
+        let first = try tabStripFrame(for: t[0], in: window)
+        let last = try tabStripFrame(for: t[4], in: window)
+        let y = first.midY
+        let x = first.midX
+        let end = last.maxX - 4
         try await send(.leftMouseDown, at: NSPoint(x: x, y: y), in: window)
         for step in stride(from: x + 4, through: end, by: 4) {
             try await send(.leftMouseDragged, at: NSPoint(x: step, y: y), in: window)
@@ -245,6 +244,7 @@ final class TabGroupDragOutTests: XCTestCase {
         window.contentView = NSHostingView(rootView: TabBar(browser: browser))
         window.orderFrontRegardless()
         windows.append(window)
+        browser.window = window
         return window
     }
 
@@ -266,6 +266,7 @@ final class TabGroupDragOutTests: XCTestCase {
     }
 
     private func send(_ type: NSEvent.EventType, at point: NSPoint, in window: NSWindow) async throws {
+        TabDrag.testPointer = window.convertPoint(toScreen: point)
         let event = try XCTUnwrap(NSEvent.mouseEvent(
             with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
             windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,

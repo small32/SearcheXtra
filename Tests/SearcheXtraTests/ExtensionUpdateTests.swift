@@ -79,6 +79,8 @@ final class ExtensionUpdateTests: XCTestCase {
         let extensions = Extensions.shared
         let item = Installed(id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", name: "Synthetic update",
                              version: "1", enabled: false, fromStore: true, permissions: [])
+        extensions.seedInstalledForTests(item)
+        defer { extensions.remove(item.id) }
         let started = expectation(description: "First update requested")
         let response = UpdateResponse()
         URLProtocol.registerClass(UpdateProtocol.self)

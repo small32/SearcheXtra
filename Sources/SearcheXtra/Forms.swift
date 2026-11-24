@@ -845,13 +845,13 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           var name = box ? box.value.trim() : '';
           if (name) {
             offered = Date.now();
-            window.webkit.messageHandlers.officeForms.postMessage({ kind: 'name', user: name });
+            post({ kind: 'name', user: name });
           }
           return;
         }
         if (!both.pass.value) return;
         offered = Date.now();
-        window.webkit.messageHandlers.officeForms.postMessage({
+        post({
           kind: 'submit',
           user: both.user ? both.user.value : '',
           password: both.pass.value
@@ -995,10 +995,10 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
         if (scrolled === true && now === said) return;
         said = now;
         if (rect && hungFrom && hungFrom !== el && contactScope(hungFrom) !== contactScope(el)) {
-          window.webkit.messageHandlers.officeForms.postMessage({ kind: 'focus', typing: typing, rect: null });
+          post({ kind: 'focus', typing: typing, rect: null });
         }
         hungFrom = rect ? el : null;
-        window.webkit.messageHandlers.officeForms.postMessage({
+        post({
           kind: 'focus',
           typing: typing,
           active: document.hasFocus(),
@@ -1038,8 +1038,10 @@ final class FormRelay: NSObject, WKScriptMessageHandler {
           kind: 'fullscreen', on: on
         });
       }
-      document.addEventListener('fullscreenchange', immersed, true);
-      document.addEventListener('webkitfullscreenchange', immersed, true);
+      if (window === window.top) {
+        document.addEventListener('fullscreenchange', immersed, true);
+        document.addEventListener('webkitfullscreenchange', immersed, true);
+      }
 
       document.addEventListener('focusin', caret, true);
       document.addEventListener('focusout', function () { setTimeout(caret, 0); }, true);

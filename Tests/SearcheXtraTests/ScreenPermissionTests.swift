@@ -265,7 +265,7 @@ final class ScreenPermissionTests: XCTestCase {
         var answer: WKPermissionDecision?
         browser.askedForCapture(peek.web, origin: frame.securityOrigin, frame: frame, type: .cameraAndMicrophone) { answer = $0 }
         XCTAssertNil(answer)
-        XCTAssertEqual(browser.asking?.wants, "camera and microphone")
+        XCTAssertEqual(browser.asking?.wants, "cameraAndMicrophone")
         try await Task.sleep(for: .milliseconds(550))
         browser.allowCapture()
         XCTAssertEqual(answer, .grant)
@@ -311,7 +311,7 @@ final class ScreenPermissionTests: XCTestCase {
         let origin = "https://screen.example"
         var answer: WKPermissionDecision?
         browser.askedForCapture(tab.web, origin: frame.securityOrigin, frame: frame, type: .cameraAndMicrophone) { answer = $0 }
-        XCTAssertEqual(browser.asking?.wants, "camera and microphone")
+        XCTAssertEqual(browser.asking?.wants, "cameraAndMicrophone")
         try await Task.sleep(for: .milliseconds(550))
         browser.allowCapture()
         XCTAssertEqual(answer, .grant)
@@ -355,7 +355,7 @@ final class ScreenPermissionTests: XCTestCase {
         var answer: WKPermissionDecision?
         browser.askedForCapture(tab.web, origin: frame.securityOrigin, frame: frame, type: .cameraAndMicrophone) { answer = $0 }
         XCTAssertNil(answer)
-        XCTAssertEqual(browser.asking?.wants, "camera and microphone")
+        XCTAssertEqual(browser.asking?.wants, "cameraAndMicrophone")
         try await Task.sleep(for: .milliseconds(550))
         browser.denyCapture()
         XCTAssertEqual(answer, .deny)

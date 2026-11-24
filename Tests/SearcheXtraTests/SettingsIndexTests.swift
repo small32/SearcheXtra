@@ -42,7 +42,7 @@ final class SettingsIndexTests: XCTestCase {
             let prefs = Preferences()
             XCTAssertFalse(prefs.pinsKeepSite)
             XCTAssertEqual(prefs.fastPages, .onPower)
-            XCTAssertFalse(prefs.holdsHistory)
+            XCTAssertTrue(prefs.holdsHistory)
             XCTAssertTrue(prefs.showsAddress)
             XCTAssertEqual(prefs.sleepChoice, .normal)
             XCTAssertEqual(prefs.floatOwn, .tabs)

@@ -135,6 +135,7 @@ private func withUnreadableList(_ name: String,
     NSApp.setActivationPolicy(.prohibited)
     Disk.drain()
     let file = Store.file(name + ".json"), files = FileManager.default
+    try files.createDirectory(at: Store.folder, withIntermediateDirectories: true)
     let previous = try? Data(contentsOf: file)
     let known = Spaces.known
     let old = Set((try? files.contentsOfDirectory(at: Store.folder, includingPropertiesForKeys: nil)) ?? [])

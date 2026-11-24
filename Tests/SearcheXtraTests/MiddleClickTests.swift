@@ -19,6 +19,9 @@ final class MiddleClickTests: XCTestCase {
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0))
             let cg = try XCTUnwrap(original.cgEvent)
             cg.setIntegerValueField(.mouseEventButtonNumber, value: button)
+            // The original CGEvent contains a screen position, but its
+            // synthesized window number makes the bridge read local points.
+            cg.location = original.locationInWindow
             return try XCTUnwrap(NSEvent(cgEvent: cg))
         }
 

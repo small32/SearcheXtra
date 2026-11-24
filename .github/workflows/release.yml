@@ -16,8 +16,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'push' && github.ref_name == 'v2.2.7' }}
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   macos:
@@ -26,14 +26,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Publish Apple Silicon first on the 2.2.7 tag. A manual build can
-        # still produce and publish both architectures for the same tag.
-        arch: ${{ fromJSON(github.event_name == 'push' && github.ref_name == 'v2.2.7' && '["arm64"]' || '["arm64", "x86_64"]') }}
-    runs-on: ${{ matrix.arch == 'arm64' && 'macos-26' || 'macos-15-intel' }}
+        include:
+          - arch: arm64
+            runner: macos-26
+            output: build
+          - arch: x86_64
+            runner: macos-15-intel
+            output: build/intel
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     env:
       SEARCH_ARCH: ${{ matrix.arch }}
-      OUTPUT_DIR: ${{ matrix.arch == 'arm64' && 'build' || 'build/intel' }}
+      OUTPUT_DIR: ${{ matrix.output }}
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: Check out tagged source
@@ -165,7 +169,6 @@ jobs:
       contents: write
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-      APPLE_SILICON_FIRST: ${{ github.event_name == 'push' && github.ref_name == 'v2.2.7' }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
@@ -183,16 +186,8 @@ jobs:
           set -euo pipefail
           version="$(tr -d '[:space:]' < VERSION)"
           test "$RELEASE_TAG" = "v$version"
-          architectures=(arm64)
-          notes=docs/RELEASE_NOTES.md
-          if [[ "$APPLE_SILICON_FIRST" == true ]]; then
-            notes=release/notes.md
-            sed '/-x86_64\.zip/d' docs/RELEASE_NOTES.md > "$notes"
-          else
-            architectures+=(x86_64)
-          fi
           : > release/SHA256SUMS.txt
-          for arch in "${architectures[@]}"; do
+          for arch in arm64 x86_64; do
             artifact="release/SearcheXtra-macos-$arch"
             cp "$artifact/SearcheXtra-$version-$arch.zip" release/
             cat "$artifact/SHA256SUMS.txt" >> release/SHA256SUMS.txt
@@ -202,8 +197,8 @@ jobs:
             gh release upload "$RELEASE_TAG" release/*.zip release/SHA256SUMS.txt --clobber
           else
             gh release create "$RELEASE_TAG" --verify-tag --draft \
-              --title "SearcheXtra $version" --notes-file "$notes" \
+              --title "SearcheXtra $version" --notes-file docs/RELEASE_NOTES.md \
               release/*.zip release/SHA256SUMS.txt
           fi
           gh release edit "$RELEASE_TAG" --draft=false --latest \
-            --title "SearcheXtra $version" --notes-file "$notes"
+            --title "SearcheXtra $version" --notes-file docs/RELEASE_NOTES.md

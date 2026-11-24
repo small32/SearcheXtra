@@ -48,6 +48,8 @@ final class PinStuckTests: XCTestCase {
     func testASquareCalledOffMidCarryIsPutDown() async throws {
         let browser = makeBrowser(count: 10)
         for tab in browser.tabs.prefix(6) { browser.pin(tab) }
+        let first = browser.tabs[0]
+        browser.select(first)
         let window = makeWindow(browser)
         try await settle()
         let room = browser.prefs.sideWidth - 20
@@ -57,17 +59,14 @@ final class PinStuckTests: XCTestCase {
             point(x: x + 10, y: y, in: window),
         ], in: window)
         XCTAssertEqual(CarryGuard.count, 1, "carried")
-        iconArrives(browser.tabs[0], in: browser)
+        iconArrives(first, in: browser)
         try await settle()
         XCTAssertEqual(CarryGuard.count, 0, "put down as the drag was called off")
         try await send(.leftMouseUp, at: last, in: window)
         try await settle()
         XCTAssertEqual(CarryGuard.count, 0)
         XCTAssertEqual(browser.squarePins.count, 6)
-        // Picked up again, it goes where it is carried — once the page the
-        // first press selected has loaded, which would call it off too.
-        try await Task.sleep(for: .seconds(2))
-        let first = browser.tabs[0]
+        // Picked up again after the icon change, it goes where it is carried.
         try await drag(from: point(x: x, y: y, in: window), through: [
             point(x: x + room / 3, y: y, in: window),
             point(x: x + room / 3 + 4, y: y, in: window),

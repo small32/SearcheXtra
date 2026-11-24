@@ -347,9 +347,8 @@ enum ExtensionFetch {
         var matching: [(priority: Int, id: Int, type: String, rule: [String: Any])] = []
         for rule in rules {
             guard Date() < deadline else { return nil }
-            guard let type = (rule["action"] as? [String: Any])?["type"] as? String, type == "modifyHeaders" || type == "allow",
-                  let verdict = ruleMatches(rule["condition"] as? [String: Any] ?? [:], url: url, method: method, deadline: deadline)
-            else { continue }
+            guard let type = (rule["action"] as? [String: Any])?["type"] as? String, type == "modifyHeaders" || type == "allow" else { continue }
+            guard let verdict = ruleMatches(rule["condition"] as? [String: Any] ?? [:], url: url, method: method, deadline: deadline) else { return nil }
             guard verdict else { continue }
             matching.append(((rule["priority"] as? Int) ?? 1, (rule["id"] as? Int) ?? 0, type, rule))
         }
@@ -413,8 +412,9 @@ enum ExtensionFetch {
             // took too long; and it stops at the deadline.
             guard filter.utf8.count <= 4096, address.utf8.count <= 8192, !tooSlow("url:" + filter) else { return false }
             let started = Date()
-            let found = urlFilterMatches(filter, address, caseSensitive: sensitive, deadline: deadline)
-            if Date().timeIntervalSince(started) > 0.02 { markTooSlow("url:" + filter) }
+            let patternDeadline = started.addingTimeInterval(0.02)
+            let found = urlFilterMatches(filter, address, caseSensitive: sensitive, deadline: min(deadline, patternDeadline))
+            if Date() >= patternDeadline { markTooSlow("url:" + filter) }
             guard let found else { return nil }
             guard found else { return false }
         }

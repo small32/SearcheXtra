@@ -73,12 +73,19 @@ final class Browser: NSObject, ObservableObject {
             // gone unwatched long enough to sleep is counted from here, not
             // from when it was first picked.
             // A question the page asked while it was in the background.
-            if let id = activeID, id != oldValue, let held = heldDialogs.removeValue(forKey: id) {
-                DispatchQueue.main.async { held.forEach { $0.present() } }
+            if let id = activeID, id != oldValue, heldDialogs[id] != nil {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, let held = heldDialogs.removeValue(forKey: id) else { return }
+                    for question in held {
+                        if activeID == id { question.present() }
+                        else { question.dismiss() }
+                    }
+                }
             }
             guard oldValue != activeID else { return }
             cameFrom = (oldValue, ProcessInfo.processInfo.systemUptime)
             followPeek()
+            sidePanelFollows(active)
             // Going to another tab ends a page's run of links (see
             // placeForLink) — but with links opened in front beside their
             // page, not going between the page and the tabs it opened: each
@@ -435,7 +442,11 @@ final class Browser: NSObject, ObservableObject {
     /// window again — every row, every pin — and the menu bar with it.
     var typed: String {
         get { typing.typed }
-        set { typing.typed = newValue; guess() }
+        set {
+            if typing.typed != newValue { SiteCardPanel.hide(in: self) }
+            typing.typed = newValue
+            guess()
+        }
     }
     let typing = FieldState()
 
@@ -970,7 +981,7 @@ final class Browser: NSObject, ObservableObject {
     /// The page whose accounts were last looked up for the box the caret is
     /// in. The box reports where it is on every frame of a scroll so the
     /// list can follow it; the keychain is asked once per box, not per frame.
-    private var looked: (tab: Tab.ID, host: String, clear: Bool, name: Bool, wide: Bool, code: Bool, fill: Tab.Fill?)?
+    private var looked: (tab: Tab.ID, host: String, clear: Bool, name: Bool, wide: Bool, code: Bool, fill: Tab.Fill?, formID: String?)?
     /// The sign-in box the caret is in, for a list that changes while it is
     /// there: the page's passkeys arrive when they arrive.
     private var field: (tab: Tab.ID, spot: CGRect, passwords: Bool, name: Bool, code: Bool)?
@@ -1037,14 +1048,14 @@ final class Browser: NSObject, ObservableObject {
         // a box with no accounts stays without, and the keychain isn't
         // asked again until the caret leaves.
         if let looked, looked.tab == tab.id, looked.host == host, looked.clear == inTheClear, looked.name == name,
-           looked.wide == wide, looked.code == code, looked.fill == fill {
+           looked.wide == wide, looked.code == code, looked.fill == fill, looked.formID == tab.formID {
             if var up = suggesting, up.tab == tab.id, up.spot != spot {
                 up.spot = spot
                 suggesting = up
             }
             return
         }
-        looked = (tab.id, host, inTheClear, name, wide, code, fill)
+        looked = (tab.id, host, inTheClear, name, wide, code, fill, tab.formID)
         if code {
             hangCodes(from: tab, spot, host: host, wide: wide)
             return
@@ -1104,14 +1115,14 @@ final class Browser: NSObject, ObservableObject {
         // What is under the pointer changed: the half second starts again.
         if let up = suggesting, up.tab == tab.id, up.logins == known, up.passkeys == passkeys, up.nameOnly == name,
            up.appleConnect == connect, up.apple.isEmpty, up.wide == wide, up.appleOffer == offer,
-           up.contacts == contacts, up.box == box,
+           up.contacts == contacts, up.box == box, up.formID == tab.formID,
            up.page == (contacts.isEmpty ? nil : tab.pageAddress) {
             suggesting?.spot = spot
             return
         }
         suggesting = Suggesting(tab: tab.id, spot: spot, logins: known, passkeys: passkeys, host: host, clear: inTheClear,
                                 nameOnly: name, appleHost: appleHost, appleConnect: connect, appleOffer: offer, wide: wide,
-                                contacts: contacts, box: box, page: contacts.isEmpty ? nil : tab.pageAddress)
+                                contacts: contacts, box: box, page: contacts.isEmpty ? nil : tab.pageAddress, formID: tab.formID)
         if let offer { applePasswordsOffer.shown(on: offer) }
     }
 
@@ -1125,7 +1136,7 @@ final class Browser: NSObject, ObservableObject {
     private func hangCodes(from tab: Tab, _ spot: CGRect, host: String, wide: Bool) {
         appleAsk += 1
         guard prefs.applePasswords, prefs.fillsPasswords,
-              let appleHost = ApplePasswords.offers(on: tab.pageAddress, privateTab: tab.shy)
+              let appleHost = ApplePasswords.offers(on: tab.formAddress, privateTab: tab.shy)
         else {
             suggesting = nil
             return
@@ -1141,25 +1152,25 @@ final class Browser: NSObject, ObservableObject {
             return
         }
         suggesting = Suggesting(tab: tab.id, spot: spot, logins: [], host: host, clear: false,
-                                appleHost: appleHost, appleConnect: true)
+                                appleHost: appleHost, appleConnect: true, formID: tab.formID)
     }
 
     /// Asks Apple's helper whose codes it keeps for the page, and hangs them
     /// from the box if the caret is still in it, on the same page.
     private func lookUpCodes(_ appleHost: String, in tab: Tab, host: String, wide: Bool) {
-        let ask = appleAsk
+        let ask = appleAsk, formID = tab.formID
         Task { [weak self] in
             guard let keeper = self?.applePasswords else { return }
             let found = await keeper.codes(for: appleHost, tab: tab.id) { [weak self] in
                 self?.appleAsk == ask
             }
-            guard let self, ask == appleAsk, let field, field.tab == tab.id, field.code, tab.id == activeID,
-                  ApplePasswords.offers(on: tab.pageAddress, privateTab: tab.shy) == appleHost
+            guard let self, ask == appleAsk, tab.formID == formID, let field, field.tab == tab.id, field.code, tab.id == activeID,
+                  ApplePasswords.offers(on: tab.formAddress, privateTab: tab.shy) == appleHost
             else { return }
             let codes = Array(found.filter { ApplePasswords.belongs([$0.domain], to: appleHost, wide: wide) }.prefix(5))
             guard !codes.isEmpty else { return }
             suggesting = Suggesting(tab: tab.id, spot: field.spot, logins: [], host: host, clear: false,
-                                    codes: codes, appleHost: appleHost, wide: wide)
+                                    codes: codes, appleHost: appleHost, wide: wide, formID: formID)
         }
     }
 
@@ -1241,12 +1252,12 @@ final class Browser: NSObject, ObservableObject {
             // Touch ID can take a while: the page must still be the one
             // asked for, in front, and the account still this site's.
             guard tabs.contains(where: { $0 === tab }), tab.id == activeID, tab.formID == list.formID,
+                  let page = tab.formAddress,
                   ApplePasswords.offers(on: tab.formAddress, privateTab: tab.shy) == appleHost,
                   ApplePasswords.belongs(found.sites, to: appleHost)
             else { return }
             tab.appleFill = AppleFill(host: appleHost, user: apple.user, password: found.password)
-            // Over https only, on that host (Tab.fill checks both in the page).
-            tab.fill(user: apple.user, password: found.password, onlyOn: URL(string: "https://\(appleHost)/")) { [weak self] worked in
+            tab.fill(user: apple.user, password: found.password, onlyOn: page) { [weak self] worked in
                 if !worked { self?.announce(L10n.text("Browser.0291")) }
             }
         }
@@ -1258,11 +1269,10 @@ final class Browser: NSObject, ObservableObject {
     func choose(_ code: AppleCode) {
         lowering?.cancel()
         guard let list = suggesting, let tab = tabs.first(where: { $0.id == list.tab }), let appleHost = list.appleHost else { return }
-        guard Date().timeIntervalSince(list.shown) > 0.5 else { return }
+        guard Date().timeIntervalSince(list.shown) > 0.5, tab.formID == list.formID else { return }
         suggesting = nil
-        guard ApplePasswords.offers(on: tab.pageAddress, privateTab: tab.shy) == appleHost,
-              ApplePasswords.belongs([code.domain], to: appleHost, wide: list.wide),
-              let page = URL(string: "https://\(appleHost)/")
+        guard let page = tab.formAddress, ApplePasswords.offers(on: page, privateTab: tab.shy) == appleHost,
+              ApplePasswords.belongs([code.domain], to: appleHost, wide: list.wide)
         else { return }
         pickedInto = tab.id
         Task { [weak self] in
@@ -1275,8 +1285,8 @@ final class Browser: NSObject, ObservableObject {
             }
             // Touch ID can take a while: the page must still be the one
             // asked for, and in front.
-            guard tabs.contains(where: { $0 === tab }), tab.id == activeID,
-                  ApplePasswords.offers(on: tab.pageAddress, privateTab: tab.shy) == appleHost
+            guard tabs.contains(where: { $0 === tab }), tab.id == activeID, tab.formID == list.formID,
+                  ApplePasswords.offers(on: tab.formAddress, privateTab: tab.shy) == appleHost
             else { return }
             tab.fillCode(value, onlyOn: page) { [weak self] worked in
                 if !worked { self?.announce(L10n.text("upstream.merge112.couldnTFindTheBoxFor")) }
@@ -2925,7 +2935,7 @@ final class Browser: NSObject, ObservableObject {
         // A website pop-up holds only the page WebKit hands over: no pins,
         // restored tabs or warm pages from other spaces.
         guard !websitePopup else { return }
-        restoreSession()
+        restoreSession(useStartPage: opensStartPage)
         // The open tabs every window lists, a turn from now: by then a
         // window made for an extension's pop-up is known to be one, and has
         // none of them (see joinTwins).
@@ -5305,6 +5315,7 @@ final class Browser: NSObject, ObservableObject {
               let index = tabs.firstIndex(where: { $0.id == tab.id })
         else { return false }
         if let web = tab.built { cancelCapture(for: web) }
+        heldDialogs.removeValue(forKey: tab.id)?.forEach { $0.dismiss() }
         // Its peek, hidden or not, doesn't follow it to another space.
         if peekFrom == tab.id { closePeek() }
         let partner = split(for: tab).flatMap { pair in tabs.first { $0.id == pair.partner(of: tab.id) } }
@@ -5496,6 +5507,7 @@ final class Browser: NSObject, ObservableObject {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         discardSidePanel(for: tab.id)
         if let web = tab.built { cancelCapture(for: web) }
+        heldDialogs.removeValue(forKey: tab.id)?.forEach { $0.dismiss() }
         // Its peek, hidden or not, doesn't follow it to another window.
         if peekFrom == tab.id { closePeek() }
         let partner = split(for: tab).flatMap { pair in tabs.first { $0.id == pair.partner(of: tab.id) } }

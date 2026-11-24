@@ -6,9 +6,11 @@ import XCTest
 final class ExtensionPortTests: XCTestCase {
     func testContentMessagesStayPlainAndOwnPageMessagesStayNumbered() throws {
         let script = ExtensionShims.script
+        let pinStart = try XCTUnwrap(script.range(of: "const pinnedPorts = new WeakSet();"))
+        let pinEnd = try XCTUnwrap(script.range(of: "// Where framed pages share their localStorage", range: pinStart.upperBound..<script.endIndex))
         let start = try XCTUnwrap(script.range(of: "if (runtime && typeof runtime.connect === \"function\" && runtime.onConnect) {"))
         let end = try XCTUnwrap(script.range(of: "// Members of namespaces WebKit has.", range: start.upperBound..<script.endIndex))
-        let ports = String(script[start.lowerBound..<end.lowerBound])
+        let ports = String(script[pinStart.lowerBound..<pinEnd.lowerBound]) + String(script[start.lowerBound..<end.lowerBound])
         for content in [true, false] {
             let js = try XCTUnwrap(JSContext())
             js.evaluateScript(#"""

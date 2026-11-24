@@ -224,12 +224,15 @@ extension Browser {
               CGImageSourceGetCount(source) > 0,
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         else { return false }
-        let w = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
-        let h = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
-        guard w > 0, h > 0 else { return false }
+        return reasonable(width: properties[kCGImagePropertyPixelWidth] as? Int ?? 0,
+                          height: properties[kCGImagePropertyPixelHeight] as? Int ?? 0)
+    }
+
+    nonisolated static func reasonable(width: Int, height: Int) -> Bool {
+        guard width > 0, height > 0 else { return false }
         // A header can declare 4294967295 × 4294967295: divide instead of
         // multiplying, so the check itself cannot overflow.
-        return w <= mostPixels / h
+        return width <= mostPixels / height
     }
 
     /// The same WKDownload this app already knows how to finish — asked for

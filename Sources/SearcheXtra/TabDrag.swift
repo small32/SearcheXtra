@@ -376,6 +376,7 @@ final class TabDrag: ObservableObject {
         recheck = nil
         trail = []
         preview = nil
+        if cancelledID != nil { cancelledID = nil }
         over = nil
         showSeparation(nil)
         sourceBrowser = nil

@@ -886,6 +886,12 @@ final class Extensions: NSObject, ObservableObject {
         }
     }
 
+    /// An installed store record for testing the update request in isolation.
+    func seedInstalledForTests(_ item: Installed) {
+        guard Store.testing, !installed.contains(where: { $0.id == item.id }) else { return }
+        installed.append(item)
+    }
+
     /// One from the store by its id, done — asked about, and installed or
     /// not — before it returns, so several brought over from another
     /// browser go one after another.
@@ -1235,7 +1241,7 @@ final class Extensions: NSObject, ObservableObject {
         var left = Store.settings.stringArray(forKey: Extensions.forgettingKey) ?? []
         if !left.contains(id) { left.append(id) }
         Store.settings.set(left, forKey: Extensions.forgettingKey)
-        forgetting[id] = Task { if await forgetData(of: id) { forgotten(id) } }
+        _ = forget(id)
     }
 
     /// Ids whose data is still to clear, kept until it is: a quit or a crash
@@ -1251,8 +1257,8 @@ final class Extensions: NSObject, ObservableObject {
 
     /// At launch, before anything loads: what a removal didn't finish clearing.
     private func forgetLeftOver() async {
-        for id in Store.settings.stringArray(forKey: Extensions.forgettingKey) ?? [] where forgetting[id] == nil {
-            if await forgetData(of: id) { forgotten(id) }
+        for id in Store.settings.stringArray(forKey: Extensions.forgettingKey) ?? [] {
+            await forget(id).value
         }
     }
 
@@ -1260,6 +1266,16 @@ final class Extensions: NSObject, ObservableObject {
     /// loaded again, or another put at its path, gets the same id, and
     /// starts with nothing of the one before, as in Chrome: loading waits.
     private var forgetting: [String: Task<Void, Never>] = [:]
+
+    private func forget(_ id: String) -> Task<Void, Never> {
+        if let pending = forgetting[id] { return pending }
+        let task = Task {
+            if await forgetData(of: id) { forgotten(id) }
+            forgetting[id] = nil
+        }
+        forgetting[id] = task
+        return task
+    }
 
     /// Its chrome.storage, which WebKit keeps by id, and what its pages
     /// kept at chrome-extension://<id>. WebKit lists no website records
@@ -1269,7 +1285,6 @@ final class Extensions: NSObject, ObservableObject {
     /// nothing of the removed extension runs again.
     /// Whether all of it was cleared.
     private func forgetData(of id: String) async -> Bool {
-        defer { forgetting[id] = nil }
         let types = WKWebExtensionController.allExtensionDataTypes
         let records = await controller.dataRecords(ofTypes: types).filter { $0.uniqueIdentifier == id }
         if !records.isEmpty { await controller.removeData(ofTypes: types, from: records) }
@@ -1282,8 +1297,16 @@ final class Extensions: NSObject, ObservableObject {
             let standIn = WKWebExtensionContext(for: try await WKWebExtension(resourceBaseURL: folder))
             standIn.uniqueIdentifier = id
             standIn.baseURL = base
-            try controller.load(standIn)
-            defer { try? controller.unload(standIn) }
+            // A separate controller keeps WebKit from relating the blank page
+            // to a former extension tab with a different website data store.
+            let cleanup = WKWebExtensionController.Configuration.nonPersistent()
+            cleanup.defaultWebsiteDataStore = Store.websites
+            let view = WKWebViewConfiguration()
+            view.websiteDataStore = Store.websites
+            cleanup.webViewConfiguration = view
+            let cleaner = WKWebExtensionController(configuration: cleanup)
+            try cleaner.load(standIn)
+            defer { try? cleaner.unload(standIn) }
             guard let configuration = standIn.webViewConfiguration else { return false }
             let page = HiddenPage(configuration)
             guard await page.loadBlank(at: base) else {
@@ -1687,15 +1710,17 @@ final class Extensions: NSObject, ObservableObject {
     /// Has WebKit build the extension's content scripts again from what it
     /// is granted now. Needed once a grant for every website is taken out of
     /// the granted list: WebKit keeps those scripts apart from the ones
-    /// for named sites and leaves them in place, so the extension went on
-    /// running on every site (and twice on the ones still named). Only a
-    /// refusal rebuilds them, so one it holds already (extension pages, see `fence`)
-    /// is made again. Pages it may still run in get its scripts once more:
-    /// WebKit's cost, and why this is only for that case.
+    /// for named sites and leaves them in place. An actual change to the
+    /// extension-page refusal rebuilds the scripts. Restore it immediately
+    /// without changing any user's grant or refusal.
     static func rebuildScripts(_ context: WKWebExtensionContext) {
-        if let pages = try? WKWebExtension.MatchPattern(string: "\(Extensions.scheme)://*/*") {
-            context.setPermissionStatus(.deniedExplicitly, for: pages)
-        }
+        guard context.isLoaded else { return }
+        let denied = context.deniedPermissionMatchPatterns
+        guard let pages = denied.keys.first(where: reachesExtensions) else { return }
+        var remaining = denied
+        remaining.removeValue(forKey: pages)
+        context.deniedPermissionMatchPatterns = remaining
+        context.deniedPermissionMatchPatterns = denied
     }
 
     /// Whether a pattern is one of WebKit's every-website grants (see

@@ -118,6 +118,7 @@ final class ExtensionSiteAccessTests: XCTestCase {
     }
 
     private func fixture(_ patterns: [String], content: [String]? = nil) async throws -> (URL, WKWebExtension) {
+        WKWebExtension.MatchPattern.registerCustomURLScheme(Extensions.scheme)
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("site-access-\(UUID())")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let manifest: [String: Any] = [

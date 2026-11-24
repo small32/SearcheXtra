@@ -1184,7 +1184,7 @@ final class Tab: ObservableObject, Identifiable {
         // (see KeptScroll.swift).
         add(KeptScroll.script, .atDocumentStart, mainFrameOnly: true, in: Web.world)
         add(Veiling.picker, .atDocumentStart, mainFrameOnly: true, in: Web.world)
-        add(FormRelay.script, .atDocumentEnd, mainFrameOnly: true, in: Web.world)
+        add(FormRelay.script, .atDocumentEnd, mainFrameOnly: false, in: Web.world)
         // The form script looks at boxes for your card only with Fill in
         // your contact details on.
         if FormRelay.contacts {
@@ -1393,7 +1393,7 @@ final class Tab: ObservableObject, Identifiable {
         }
         guard let built else { return }
         built.evaluateJavaScript("!!(window.__officeForms && window.__officeForms.hasPassword())",
-                                 in: nil, in: Web.world) { [weak self] result in
+                                 in: sent.source?.frame, in: Web.world) { [weak self] result in
             MainActor.assumeIsolated {
                 guard let self, self.sent?.id == sent.id, case .success(let still) = result else { return }
                 // The box is still there: a refused sign-in, or the second
@@ -1431,20 +1431,19 @@ final class Tab: ObservableObject, Identifiable {
     }
 
     /// One of the page script's calls, its values handed over as arguments,
-    /// never written into the source. With a page, the script first checks
-    /// it is still that scheme and host; a page that can't be checked gets
-    /// nothing.
+    /// never written into the source. Fill the focused frame only while its
+    /// origin and the document that reported the field still match.
     private func callForms(_ call: String, _ values: [String: Any], onlyOn page: URL?, done: ((Bool) -> Void)?) {
-        var arguments = values.merging(["scheme": "", "host": ""]) { own, _ in own }
-        if let page {
-            guard let scheme = page.scheme?.lowercased(), let host = page.host()?.lowercased() else { done?(false); return }
-            arguments["scheme"] = scheme + ":"
-            arguments["host"] = host
-        }
-        web.callInSearch("""
-            if (scheme && (location.protocol !== scheme || location.hostname.toLowerCase() !== host)) return false;
-            return !!(window.__officeForms && window.__officeForms.\(call));
-            """, arguments: arguments) { done?(($0 as? Bool) ?? false) }
+        guard let built, let origin = Self.origin(of: page ?? formAddress) else { done?(false); return }
+        let source = formSource
+        var arguments = values
+        arguments["origin"] = origin
+        arguments["sourceDocument"] = source?.document ?? ""
+        built.callInSearch("""
+            const forms = window.__officeForms;
+            if (location.origin !== origin || !forms || (sourceDocument && forms.document !== sourceDocument)) return false;
+            return !!forms.\(call);
+            """, arguments: arguments, in: source?.frame) { done?(($0 as? Bool) ?? false) }
     }
 
     /// Your card's details, picked from under a box for one, into the
@@ -3597,8 +3596,8 @@ extension WKWebView {
 
     /// As `evaluateInSearch`, for a function body: `arguments` arrive as
     /// its named parameters, so what they hold is never part of the source.
-    func callInSearch(_ body: String, arguments: [String: Any], then: ((Any?) -> Void)? = nil) {
-        callAsyncJavaScript(body, arguments: arguments, in: nil, in: Web.world) { result in
+    func callInSearch(_ body: String, arguments: [String: Any], in frame: WKFrameInfo? = nil, then: ((Any?) -> Void)? = nil) {
+        callAsyncJavaScript(body, arguments: arguments, in: frame, in: Web.world) { result in
             then?(try? result.get())
         }
     }
