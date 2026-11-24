@@ -19,16 +19,12 @@ final class ExtensionBoundaryTests: XCTestCase {
         folders.removeAll()
     }
 
-    private func context(permissions: [String] = [], popup: String? = nil) async throws -> WKWebExtensionContext {
+    private func context(permissions: [String]) async throws -> WKWebExtensionContext {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("extension-boundaries-\(UUID())")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         folders.append(folder)
-        var manifest: [String: Any] = ["manifest_version": 3, "name": "Boundary fixture", "version": "1",
+        let manifest: [String: Any] = ["manifest_version": 3, "name": "Boundary fixture", "version": "1",
                                        "permissions": permissions]
-        if let popup {
-            manifest["action"] = ["default_popup": popup]
-            try Data("<!doctype html><title>Popup</title>".utf8).write(to: folder.appendingPathComponent("popup.html"))
-        }
         try JSONSerialization.data(withJSONObject: manifest).write(to: folder.appendingPathComponent("manifest.json"))
         let webExtension = try await WKWebExtension(resourceBaseURL: folder)
         let context = WKWebExtensionContext(for: webExtension)
@@ -114,26 +110,25 @@ final class ExtensionBoundaryTests: XCTestCase {
         XCTAssertNotNil(refused["error"], "Removing a grant must immediately close the native boundary")
     }
 
-    func testPopupURLsStayInsideTheirOwnExtension() async throws {
-        _ = NSApplication.shared
-        let context = try await context(popup: "popup.html?view=compact#settings")
-        let popup = try XCTUnwrap(Extensions.popupURL(for: context))
+    func testPopupURLsStayInsideTheirOwnExtension() throws {
+        let base = try XCTUnwrap(URL(string: "\(Extensions.scheme)://extension-fixture/"))
+        let popup = try XCTUnwrap(Extensions.popupURL(from: ["action": ["default_popup": "popup.html?view=compact#settings"]], relativeTo: base))
         XCTAssertEqual(popup.scheme, Extensions.scheme)
-        XCTAssertEqual(popup.host, context.baseURL.host)
+        XCTAssertEqual(popup.host, base.host)
         XCTAssertEqual(popup.path, "/popup.html")
         XCTAssertEqual(popup.query, "view=compact")
         XCTAssertEqual(popup.fragment, "settings")
         for path in ["/popup.html", "./popup.html", "nested/../popup.html", popup.absoluteString] {
-            let own = try XCTUnwrap(Extensions.ownPage(path, for: context), path)
+            let own = try XCTUnwrap(Extensions.ownPage(path, relativeTo: base), path)
             XCTAssertEqual(own.scheme, Extensions.scheme)
-            XCTAssertEqual(own.host, context.baseURL.host)
+            XCTAssertEqual(own.host, base.host)
         }
         for path in ["https://example.com/popup", "http://example.com/", "//example.com/popup",
                      "\(Extensions.scheme)://another-extension/popup.html", "file:///tmp/popup.html",
                      "data:text/html,popup", "javascript:alert(1)", "about:blank"] {
-            XCTAssertNil(Extensions.ownPage(path, for: context), path)
+            XCTAssertNil(Extensions.ownPage(path, relativeTo: base), path)
         }
-        let external = try await self.context(popup: "https://example.com/popup")
-        XCTAssertNil(Extensions.popupURL(for: external), "Manifest popups use the same origin restriction")
+        let external = ["action": ["default_popup": "https://example.com/popup"]]
+        XCTAssertNil(Extensions.popupURL(from: external, relativeTo: base), "Manifest popups use the same origin restriction")
     }
 }

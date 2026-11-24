@@ -314,6 +314,7 @@ final class SidebarPressTests: XCTestCase {
         let first = browser.tabs[0]
         browser.select(first)
         let window = makeWindow(browser)
+        browser.window = window
         try await settle()
         browser.beginTabRename(first)
         try await settle()
@@ -485,9 +486,7 @@ final class SidebarPressTests: XCTestCase {
     }
 
     private func makeWindow(_ browser: Browser) -> NSWindow {
-        let window = makeWindow(root: SideBar(browser: browser, prefs: browser.prefs), width: browser.prefs.sideWidth, height: 500)
-        browser.window = window
-        return window
+        makeWindow(root: SideBar(browser: browser, prefs: browser.prefs), width: browser.prefs.sideWidth, height: 500)
     }
 
     private func makeWindow<V: View>(root: V, width: CGFloat = 250, height: CGFloat = 40) -> NSWindow {

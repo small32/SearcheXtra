@@ -90,14 +90,24 @@ final class WakeLatencyTests: XCTestCase {
     /// in a window. Waiting for a timer to look again, it was asked for at
     /// the timer's next tick, 20 ms after the wake, however soon the stage
     /// had the view in place.
-    func testAWokenPageLoadsAsSoonAsItsViewIsInAWindow() throws {
+    func testAWokenPageLoadsAsSoonAsItsViewIsInAWindow() async throws {
         let tab = try asleep()
         let before = server.requests("/page")
         tab.wake()
+        let view = tab.web
+        XCTAssertTrue(view.awaitingWindow)
         attach(tab)
-        // A few milliseconds of the run loop, a good deal less than a tick.
-        spin(for: 0.008) { server.requests("/page") > before || tab.web.isLoading }
-        XCTAssertTrue(tab.web.isLoading, "The page should be asked for as the view lands, not on a timer's tick")
+        // Check the attachment callback on its first main queue turn.
+        // WebKit may acknowledge the actual request later on a slower Mac.
+        let started = await withCheckedContinuation { resume in
+            DispatchQueue.main.async { resume.resume(returning: !view.awaitingWindow) }
+        }
+        XCTAssertTrue(started, "Attaching the view should consume its pending load on the next turn")
+        let deadline = Date().addingTimeInterval(3)
+        while server.requests("/page") == before, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertGreaterThan(server.requests("/page"), before)
     }
 
     /// A view nobody puts in a window still loads, once the second the wait

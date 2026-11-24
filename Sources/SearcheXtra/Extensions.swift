@@ -1590,20 +1590,19 @@ final class Extensions: NSObject, ObservableObject {
     }
 
     /// The page the manifest names for the button, when WebKit hasn't said.
-    static func popupURL(for context: WKWebExtensionContext) -> URL? {
-        let manifest = context.webExtension.manifest
+    static func popupURL(from manifest: [String: Any], relativeTo base: URL) -> URL? {
         let action = (manifest["action"] ?? manifest["browser_action"]) as? [String: Any]
         guard let path = action?["default_popup"] as? String, !path.isEmpty else { return nil }
         // Relative to the extension, and keeping a query it may carry.
-        return ownPage(path, for: context)
+        return ownPage(path, relativeTo: base)
     }
 
     /// A page of the extension's own. Chrome refuses anything else for a
     /// popup, and so does this: an absolute https address would turn the
     /// button's panel into somebody else's site with no address bar over it.
-    static func ownPage(_ path: String, for context: WKWebExtensionContext) -> URL? {
-        guard let url = URL(string: path, relativeTo: context.baseURL)?.absoluteURL else { return nil }
-        guard url.scheme == Extensions.scheme, url.host == context.baseURL.host else { return nil }
+    static func ownPage(_ path: String, relativeTo base: URL) -> URL? {
+        guard let url = URL(string: path, relativeTo: base)?.absoluteURL else { return nil }
+        guard url.scheme == Extensions.scheme, url.host == base.host else { return nil }
         return url
     }
 
@@ -2097,9 +2096,9 @@ final class Extensions: NSObject, ObservableObject {
         let set = ExtensionShims.popups[context.uniqueIdentifier] ?? [:]
         let active = targetBrowser.flatMap { activeAdapter(of: $0, for: context) } ?? activeAdapter(for: context)
         let path = active?.tab.flatMap { set[$0.id.uuidString] } ?? set["*"]
-        guard let path else { return Extensions.popupURL(for: context) }
+        guard let path else { return Extensions.popupURL(from: context.webExtension.manifest, relativeTo: context.baseURL) }
         guard !path.isEmpty else { return nil }
-        return Extensions.ownPage(path, for: context)
+        return Extensions.ownPage(path, relativeTo: context.baseURL)
     }
 
     /// A keystroke an extension registered for.

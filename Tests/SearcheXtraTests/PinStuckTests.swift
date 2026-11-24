@@ -179,7 +179,7 @@ final class PinStuckTests: XCTestCase {
             (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs,
              prefs.usesSpaces, prefs.sharesPins, prefs.glyph) = previous
         }
-        let browser = Browser(record: WindowRecord())
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
         browsers.append(browser)
         browser.prefs.sidebar = true
         browser.prefs.usesTabGroups = false
@@ -190,7 +190,7 @@ final class PinStuckTests: XCTestCase {
         browser.prefs.glyph = .letters
         for word in (0..<count).map({ "t\($0)" }) {
             if browser.tabs.last?.isBlank == false { browser.newTab() }
-            browser.tabs.last?.restore(url: URL(string: "about:blank#\(word)")!, title: word)
+            if let tab = browser.tabs.last { setPinDragFixture(tab, name: word) }
         }
         return browser
     }
@@ -220,7 +220,7 @@ final class PinStuckTests: XCTestCase {
         try await settle()
     }
 
-    /// See PinDragTests.drag: not held still long, or a tooltip ends it.
+    /// Let the column lay out the destination before releasing the square.
     private func drag(from start: NSPoint, through points: [NSPoint], in window: NSWindow) async throws {
         let last = try await carry(from: start, through: points, in: window)
         try await Task.sleep(for: .milliseconds(120))

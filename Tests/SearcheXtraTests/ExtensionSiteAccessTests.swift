@@ -277,6 +277,13 @@ final class ExtensionSiteAccessTests: XCTestCase {
         _ = NSApplication.shared
         let (folder, ext) = try await fixture(["<all_urls>"])
         defer { try? FileManager.default.removeItem(at: folder) }
+        let server = try LocalPageServer(["/sites": .init(type: "text/html", body: "<!doctype html><title>Site access fixture</title>")])
+        defer { server.stop() }
+        let allowed = server.url("/sites")
+        var alternate = try XCTUnwrap(URLComponents(url: allowed, resolvingAgainstBaseURL: false))
+        alternate.host = "localhost"
+        let other = try XCTUnwrap(alternate.url)
+        let host = try XCTUnwrap(allowed.host())
         let controller = WKWebExtensionController(configuration: .nonPersistent())
         let context = WKWebExtensionContext(for: ext)
         context.uniqueIdentifier = "siteaccessnarrow"
@@ -289,18 +296,34 @@ final class ExtensionSiteAccessTests: XCTestCase {
         config.websiteDataStore = .nonPersistent()
         config.webExtensionController = controller
         let denied = Set(context.deniedPermissionMatchPatterns.keys.map(\.string))
+        func countScripts(at url: URL) async throws -> String {
+            let web = WKWebView(frame: .zero, configuration: config)
+            web.load(URLRequest(url: url))
+            for _ in 0..<100 {
+                if !web.isLoading, web.url == url, web.title == "Site access fixture" {
+                    return try await injected(web)
+                }
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            throw NSError(domain: "ExtensionSiteAccessTests", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Could not load \(url)"])
+        }
+        // Loading a context starts asynchronous registration on older WebKit.
+        // Verify the broad grant is already injecting before changing it.
+        for url in [allowed, other] {
+            let initial = try await countScripts(at: url)
+            XCTAssertEqual(initial, "1", "before narrowing: \(url)")
+        }
         for (access, expected) in [
-            (SiteAccess(mode: .some, hosts: ["example.com"]), ["example.com": "1", "other.test": ""]),
-            (SiteAccess(mode: .click), ["example.com": "", "other.test": ""]),
-            (SiteAccess(), ["example.com": "1", "other.test": "1"]),
+            (SiteAccess(mode: .some, hosts: [host]), [(allowed, "1"), (other, "")]),
+            (SiteAccess(mode: .click), [(allowed, ""), (other, "")]),
+            (SiteAccess(), [(allowed, "1"), (other, "1")]),
         ] {
             Extensions.apply(access, to: context)
             XCTAssertEqual(Set(context.deniedPermissionMatchPatterns.keys.map(\.string)), denied, "fence's refusals stand")
-            for (host, want) in expected {
-                let web = WKWebView(frame: .zero, configuration: config)
-                try await load(web, host)
-                let found = try await injected(web)
-                XCTAssertEqual(found, want, "\(access.mode) \(host)")
+            for (url, want) in expected {
+                let found = try await countScripts(at: url)
+                XCTAssertEqual(found, want, "\(access.mode) \(url)")
             }
         }
     }

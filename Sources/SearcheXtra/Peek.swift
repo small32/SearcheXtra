@@ -322,7 +322,7 @@ struct PeekSkeleton: View {
                 Palette.ground
                 if shown {
                     ZStack {
-                        Bones(width: width).foregroundStyle(Palette.wash).drawingGroup()
+                        Bones(width: width).foregroundStyle(Palette.wash)
                         if !(reducedMotion ?? Motion.reduced) {
                             PeekSweep()
                                 .mask(Bones(width: width))

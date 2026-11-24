@@ -224,21 +224,29 @@ final class RowCarryTests: XCTestCase {
     /// takes the tab away, so it has to show.
     func testLeavingTheWindowLevelWithTheRowLifts() async throws {
         let browser = makeBrowser()
+        let tab = browser.tabs[2]
+        browser.select(tab)
         let window = try makeTopRow(browser)
         browser.window = window
         try await settle()
-        let inside = NSPoint(x: window.frame.midX, y: window.frame.midY)
-        TabDrag.testPointer = inside
+        let hitArea = try tabStripFrame(for: tab, in: window)
+        let start = NSPoint(x: hitArea.midX, y: hitArea.midY)
+        let end = NSPoint(x: start.x + 25, y: start.y)
+        TabDrag.testPointer = window.convertToScreen(NSRect(origin: start, size: .zero)).origin
         defer { TabDrag.testPointer = nil }
-        let y = Metrics.strip / 2
-        try await send(.leftMouseDown, at: NSPoint(x: 800, y: y), in: window)
-        try await send(.leftMouseDragged, at: NSPoint(x: 808, y: y), in: window)
+        try await send(.leftMouseDown, at: start, in: window)
+        for distance in [8.0, 16] {
+            let point = NSPoint(x: start.x + distance, y: start.y)
+            TabDrag.testPointer = window.convertToScreen(NSRect(origin: point, size: .zero)).origin
+            try await send(.leftMouseDragged, at: point, in: window)
+        }
+        XCTAssertEqual(CarryGuard.count, 1, "picked up before leaving its window")
         XCTAssertFalse(TabLift.shared.carrying, "still in the window")
-        TabDrag.testPointer = NSPoint(x: window.frame.maxX + 100, y: inside.y)
-        try await send(.leftMouseDragged, at: NSPoint(x: 816, y: y), in: window)
+        TabDrag.testPointer = NSPoint(x: window.frame.maxX + 100, y: window.frame.minY + start.y)
+        try await send(.leftMouseDragged, at: end, in: window)
         XCTAssertTrue(TabLift.shared.carrying, "past its side")
-        TabDrag.testPointer = inside
-        try await send(.leftMouseUp, at: NSPoint(x: 816, y: y), in: window)
+        TabDrag.testPointer = window.convertToScreen(NSRect(origin: end, size: .zero)).origin
+        try await send(.leftMouseUp, at: end, in: window)
         try await settle()
     }
 

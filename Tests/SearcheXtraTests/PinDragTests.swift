@@ -97,7 +97,7 @@ final class PinDragTests: XCTestCase {
         let browser = makeBrowser(count: 5)
         let t = browser.tabs
         browser.pin(t[0]); browser.pin(t[1])
-        let page = t[3].built
+        let page = t[3].web
         XCTAssertTrue(browser.pinDropped(t[3], listed: false, at: 1))
         XCTAssertEqual(browser.tabs.map(\.id), [t[0], t[3], t[1], t[2], t[4]].map(\.id))
         XCTAssertNotNil(t[3].pin)
@@ -125,13 +125,11 @@ final class PinDragTests: XCTestCase {
         let browser = makeBrowser(count: 5)
         let t = browser.tabs
         browser.pin(t[0]); browser.pin(t[1])
-        // On screen first, so its page is made before the drag, as a tab
-        // you pick up is selected by the press that picks it up.
+        // Start with an existing view so the drop must preserve its identity.
         browser.select(t[3])
+        let page = t[3].web
         let window = makeWindow(browser)
         try await settle()
-        let page = t[3].built
-        XCTAssertNotNil(page)
         // The rows start under the grid: 34 + 10.
         let start = point(x: 70, y: Metrics.strip + 44 + 14 + 30, in: window)
         // Between the two squares: the middle of three places.
@@ -288,7 +286,7 @@ final class PinDragTests: XCTestCase {
             (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs,
              prefs.usesSpaces, prefs.sharesPins) = previous
         }
-        let browser = Browser(record: WindowRecord())
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
         browsers.append(browser)
         browser.prefs.sidebar = true
         browser.prefs.usesTabGroups = false
@@ -300,7 +298,7 @@ final class PinDragTests: XCTestCase {
         for index in 0..<count {
             let word = index < names.count ? names[index] : "tab-\(index + 1)"
             if browser.tabs.last?.isBlank == false { browser.newTab() }
-            browser.tabs.last?.restore(url: URL(string: "about:blank#\(word)")!, title: word)
+            if let tab = browser.tabs.last { setPinDragFixture(tab, name: word) }
         }
         return browser
     }
@@ -326,11 +324,7 @@ final class PinDragTests: XCTestCase {
     }
 
     /// Down at `start`, through `points` a few points at a time, and up at
-    /// the last. Not held still long before letting go: a window that isn't
-    /// on a screen gets these events from the test, not from the mouse, so
-    /// AppKit doesn't know a button is down and puts up a pin's tooltip after
-    /// half a second at rest, which ends the drag. A real hand's button is
-    /// down, and no tooltip comes during a drag.
+    /// the last after the column has laid out the destination.
     private func drag(from start: NSPoint, through points: [NSPoint], in window: NSWindow) async throws {
         let last = try await carry(from: start, through: points, in: window)
         try await Task.sleep(for: .milliseconds(60))
@@ -342,8 +336,7 @@ final class PinDragTests: XCTestCase {
         try await send(.leftMouseDown, at: start, in: window)
         var last = start
         for target in points {
-            // Sample the path without leaving the AppKit tooltip timer
-            // enough time to interrupt the synthetic drag.
+            // Sample each leg so the dragged item visits intermediate slots.
             let steps = max(1, Int((hypot(target.x - last.x, target.y - last.y) / 10).rounded(.up)))
             for step in 1...steps {
                 let f = CGFloat(step) / CGFloat(steps)
@@ -410,4 +403,14 @@ final class PinDragTests: XCTestCase {
         window.sendEvent(event)
         try await Task.sleep(for: .milliseconds(30))
     }
+}
+
+/// These tests drive the sidebar, with no page displayed. A pending load
+/// changes the pin's glyph under its gesture on selection, which tests the
+/// WebKit process timing instead of where an uninterrupted drag lands.
+@MainActor
+func setPinDragFixture(_ tab: SearcheXtra.Tab, name: String) {
+    tab.setAddressOptimistically(URL(string: "about:blank#\(name)")!)
+    tab.name = name
+    tab.failure = "Fixture has no document"
 }

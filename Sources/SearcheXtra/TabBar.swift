@@ -2182,17 +2182,25 @@ struct MiddleClick: NSViewRepresentable {
         }
 
         override func otherMouseDown(with event: NSEvent) {
-            guard event.buttonNumber == 2 else { return }
-            pressed = true
+            press(button: event.buttonNumber)
         }
 
         /// On the release, not the press, and only if it is still over the
         /// tab: a middle button pressed by mistake can be taken back the way
         /// a click on the cross can, by moving off before letting go.
         override func otherMouseUp(with event: NSEvent) {
-            guard event.buttonNumber == 2, pressed else { return }
+            release(button: event.buttonNumber, at: convert(event.locationInWindow, from: nil))
+        }
+
+        func press(button: Int) {
+            guard button == 2 else { return }
+            pressed = true
+        }
+
+        func release(button: Int, at point: NSPoint) {
+            guard button == 2, pressed else { return }
             pressed = false
-            if bounds.contains(convert(event.locationInWindow, from: nil)) { act() }
+            if bounds.contains(point) { act() }
         }
     }
 }

@@ -2846,7 +2846,7 @@ final class PageView: WKWebView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         gateTrackingAreas()
-        guard window != nil, onWindow != nil else { return }
+        guard window != nil, awaitingWindow else { return }
         // Not in this very step: the stage puts the view in its window and
         // only then gives it its size, and a page asked to load before that
         // starts out laid out at no size.
@@ -2860,6 +2860,7 @@ final class PageView: WKWebView {
     /// is: a timer left over from an earlier wait is no bound for this one.
     private var onWindow: (() -> Void)?
     private var waits: UInt64 = 0
+    var awaitingWindow: Bool { onWindow != nil }
 
     /// `then`, once this view is in a window, or after `limit` seconds with
     /// none — a view nobody is going to show still has to load.
