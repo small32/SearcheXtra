@@ -214,12 +214,11 @@ struct TabBar: View {
                         AgentStatus(browser: browser, style: .door)
                         // Only while a download is running, and a moment after.
                         FetchDoor(browser: browser, fetches: browser.fetches)
-                        ExtensionSlot(browser: browser)
                         if !browser.prefs.navigationLeft {
                             Helm(browser: browser)
                         }
                         BookmarkDoor(browser: browser, arrowEdge: .bottom)
-                        ExtensionSlot()
+                        ExtensionSlot(browser: browser)
                     }
                     .background {
                         GeometryReader { box in

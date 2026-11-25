@@ -1,5 +1,15 @@
 # SearcheXtra 更新日志
 
+## 2.2.8 — 2026-11-25
+
+### 简体中文
+
+- 修复横向标签栏右上角重复显示扩展图标和拼图菜单的问题。
+
+### English
+
+- Fix duplicate extension icons and the duplicate puzzle menu in the top tab bar.
+
 ## 2.2.7 — 2026-11-23
 
 ### 简体中文

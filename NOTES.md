@@ -1,3 +1,5 @@
+SearcheXtra 2.2.8 修复横向标签栏右上角的扩展图标和拼图菜单重复显示的问题。 SearcheXtra 2.2.8 fixes duplicate extension icons and the duplicate puzzle menu in the top tab bar.
+
 SearcheXtra 2.2.7：分屏最多可显示四个页面，新增固定标签文件夹、RSS 动态文件夹和可选的文件夹同步。清除缓存会同时清除 Service Worker 缓存，并改善地址栏和扩展兼容性。 SearcheXtra 2.2.7 adds four-page Split View, pinned-tab folders, live RSS folders, and optional folder sync. Clearing the cache includes Service Worker Cache Storage. This release also improves the address field and extension compatibility.
 
 SearcheXtra 2.2.5：合并上游更新代码，并修复了一些BUG。 SearcheXtra 2.2.5: Merged upstream updates and fixed some bugs.
