@@ -5,13 +5,14 @@ import XCTest
 
 /// A pair carried down the column comes apart only where that was shown
 /// (#883): the hand at rest over another tab dims the half that stays, and
-/// only then does letting go take the other half out. Hosted as
-/// PinDragTests does, in a borderless window far off every screen; the hand
-/// is told to TabDrag through `testPointer`, since the mouse is elsewhere.
+/// only then does letting go take the other half out. Drive TabDrag at its
+/// gesture boundary with real drop markers. The optional screenshots still
+/// drive the hosted sidebar with AppKit events.
 @MainActor
 final class PairSeparateTests: XCTestCase {
     private var browsers: [Browser] = []
     private var windows: [NSWindow] = []
+    private var markers: [SplitDropZone.Marker] = []
     private var restorePreferences: (() -> Void)?
     private var activationPolicy: NSApplication.ActivationPolicy?
 
@@ -30,6 +31,12 @@ final class PairSeparateTests: XCTestCase {
 
     override func tearDown() async throws {
         TabDrag.testPointer = nil
+        for browser in browsers {
+            for tab in browser.tabs { TabDrag.shared.callOff(tab) }
+        }
+        TabDrag.shared.pressBegan()
+        for marker in markers { TabDrag.shared.unregister(marker) }
+        markers.removeAll()
         for window in windows { window.contentView = nil; window.close() }
         for browser in browsers { browser.window = nil; browser.closeAll() }
         restorePreferences?()
@@ -43,10 +50,10 @@ final class PairSeparateTests: XCTestCase {
     func testCarriedOnWithoutStoppingStaysAPair() async throws {
         let (browser, t, window) = try await setUpColumn()
         let (from, to) = try dragPoints(t, in: window)
-        try await carry(from: from, to: to, in: window)
+        carry(t[1], half: t[2], in: browser, from: from, to: to, in: window)
         XCTAssertNil(PairSeparation.shared.leaving, "nothing shown")
-        try await send(.leftMouseUp, at: to, in: window)
-        try await settle()
+        let result = TabDrag.shared.finish(browser: browser, tab: t[1])
+        if case .strip = result.drop { XCTFail("A moving pair must not split on release") }
         XCTAssertNotNil(browser.split(for: t[1]), "still a pair")
         XCTAssertEqual(browser.tabs.map(\.id), t.map(\.id))
     }
@@ -54,11 +61,10 @@ final class PairSeparateTests: XCTestCase {
     func testAtRestOverAnotherTabShowsItThenSeparates() async throws {
         let (browser, t, window) = try await setUpColumn()
         let (from, to) = try dragPoints(t, in: window)
-        try await carry(from: from, to: to, in: window)
-        try await Task.sleep(for: .milliseconds(500))
+        carry(t[1], half: t[2], in: browser, from: from, to: to, in: window)
+        try await waitForSeparation(of: t[2])
         XCTAssertEqual(PairSeparation.shared.leaving, t[2].id, "the half held is the one leaving")
-        try await send(.leftMouseUp, at: to, in: window)
-        try await settle()
+        dropHalf(t[2], of: t[1], before: t[3], in: browser)
         XCTAssertNil(browser.split(for: t[1]), "apart, as shown")
         XCTAssertNil(PairSeparation.shared.leaving, "nothing shown once let go")
     }
@@ -66,43 +72,41 @@ final class PairSeparateTests: XCTestCase {
     func testBackOverItsOwnPlaceTakesTheSeparationBack() async throws {
         let (browser, t, window) = try await setUpColumn()
         let (from, to) = try dragPoints(t, in: window)
-        try await carry(from: from, to: to, in: window)
-        try await Task.sleep(for: .milliseconds(500))
+        carry(t[1], half: t[2], in: browser, from: from, to: to, in: window)
+        try await waitForSeparation(of: t[2])
         XCTAssertEqual(PairSeparation.shared.leaving, t[2].id)
-        try await send(.leftMouseDragged, at: from, in: window)
+        drag(t[1], in: browser, from: from, to: from, in: window)
         XCTAssertNil(PairSeparation.shared.leaving, "taken back")
-        try await send(.leftMouseUp, at: from, in: window)
-        try await settle()
+        let result = TabDrag.shared.finish(browser: browser, tab: t[1])
+        if case .strip = result.drop { XCTFail("Returning the pair must take its separation back") }
         XCTAssertNotNil(browser.split(for: t[1]), "still a pair")
     }
 
     /// Escape puts the carried tab down until the button comes up: the next
-    /// move of the hand picked it up again, shadow and all. Escape is sent
-    /// to TabDrag directly, since its monitor asks whether the real button
-    /// is down.
+    /// move of the hand picked it up again, shadow and all.
     func testEscapedStaysPutDownUntilLetGo() async throws {
         let (browser, t, window) = try await setUpColumn()
         let (from, to) = try dragPoints(t, in: window)
-        try await carry(from: from, to: to, in: window)
-        XCTAssertEqual(CarryGuard.count, 1, "carried")
+        carry(t[1], half: t[2], in: browser, from: from, to: to, in: window)
         TabDrag.shared.cancel()
-        try await settle()
+        XCTAssertEqual(TabDrag.shared.cancelledID, t[1].id)
         for travel in [4.0, 8, 12] {
-            try await send(.leftMouseDragged, at: NSPoint(x: to.x, y: to.y - travel), in: window)
+            drag(t[1], in: browser, from: from, to: NSPoint(x: to.x, y: to.y - travel), in: window)
         }
-        XCTAssertEqual(CarryGuard.count, 0, "not picked up again")
-        try await send(.leftMouseUp, at: NSPoint(x: to.x, y: to.y - 12), in: window)
-        try await settle()
+        XCTAssertNil(TabDrag.shared.source(of: t[1]), "not picked up again")
+        XCTAssertNil(PairSeparation.shared.leaving)
+        let cancelled = TabDrag.shared.finish(browser: browser, tab: t[1])
+        guard case .cancelled = cancelled.drop else { return XCTFail("Releasing a cancelled drag must drop nothing") }
         XCTAssertNotNil(browser.split(for: t[1]), "still a pair")
         XCTAssertEqual(browser.tabs.map(\.id), t.map(\.id))
 
         // The next carry is its own, not the cancelled one.
         let (nextFrom, nextTo) = try dragPoints(t, in: window)
-        try await carry(from: nextFrom, to: nextTo, in: window)
-        try await Task.sleep(for: .milliseconds(500))
+        TabDrag.shared.pressBegan()
+        carry(t[1], half: t[2], in: browser, from: nextFrom, to: nextTo, in: window)
+        try await waitForSeparation(of: t[2])
         XCTAssertEqual(PairSeparation.shared.leaving, t[2].id)
-        try await send(.leftMouseUp, at: nextTo, in: window)
-        try await settle()
+        dropHalf(t[2], of: t[1], before: t[3], in: browser)
         XCTAssertNil(browser.split(for: t[1]), "apart, as shown")
     }
 
@@ -110,14 +114,18 @@ final class PairSeparateTests: XCTestCase {
     /// PAIR_SEPARATE_SHOTS names a folder.
     func testLooks() async throws {
         guard let folder = ProcessInfo.processInfo.environment["PAIR_SEPARATE_SHOTS"] else { return }
-        let (_, tabs, window) = try await setUpColumn()
+        let (_, tabs, window) = try await setUpColumn(hostSidebar: true)
         func shoot(_ name: String) throws {
             guard let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
             view.cacheDisplay(in: view.bounds, to: rep)
             try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "\(folder)/\(name).png"))
         }
         let (from, to) = try dragPoints(tabs, in: window)
-        try await carry(from: from, to: to, in: window)
+        try await send(.leftMouseDown, at: from, in: window)
+        for point in dragPoints(from: from, to: to) {
+            try await send(.leftMouseDragged, at: point, in: window)
+        }
+        XCTAssertEqual(CarryGuard.count, 1, "The pair is carried before taking screenshots")
         try shoot("carried")
         try await Task.sleep(for: .milliseconds(500))
         try shoot("shown")
@@ -128,7 +136,7 @@ final class PairSeparateTests: XCTestCase {
 
     // MARK: - helpers
 
-    private func setUpColumn() async throws -> (Browser, [SearcheXtra.Tab], NSWindow) {
+    private func setUpColumn(hostSidebar: Bool = false) async throws -> (Browser, [SearcheXtra.Tab], NSWindow) {
         _ = NSApplication.shared
         activationPolicy = NSApp.activationPolicy()
         NSApp.setActivationPolicy(.prohibited)
@@ -137,7 +145,7 @@ final class PairSeparateTests: XCTestCase {
         restorePreferences = {
             (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs) = previous
         }
-        let browser = Browser(record: WindowRecord())
+        let browser = Browser(record: WindowRecord(), opensStartPage: false)
         browsers.append(browser)
         browser.prefs.sidebar = true
         browser.prefs.usesTabGroups = false
@@ -146,7 +154,7 @@ final class PairSeparateTests: XCTestCase {
         browser.prefs.roomyTabs = false
         for word in ["one", "two", "three", "four", "five"] {
             if browser.tabs.last?.isBlank == false { browser.newTab() }
-            browser.tabs.last?.restore(url: URL(string: "about:blank#\(word)")!, title: word)
+            if let tab = browser.tabs.last { setPinDragFixture(tab, name: word) }
         }
         let t = browser.tabs
         browser.pair(t[2], with: t[1], onLeft: false)
@@ -154,12 +162,26 @@ final class PairSeparateTests: XCTestCase {
         let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: browser.prefs.sideWidth, height: 400),
                               styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: SideBar(browser: browser, prefs: browser.prefs))
-        window.orderFrontRegardless()
+        if hostSidebar {
+            window.contentView = NSHostingView(rootView: SideBar(browser: browser, prefs: browser.prefs))
+            window.orderFrontRegardless()
+        } else {
+            let strip = NSView(frame: NSRect(origin: .zero, size: window.frame.size))
+            window.contentView = strip
+            for (index, tab) in t.enumerated() {
+                let marker = SplitDropZone.Marker(frame: NSRect(x: 10, y: 320 - CGFloat(index) * 30,
+                                                                  width: browser.prefs.sideWidth - 20, height: 28))
+                marker.browser = browser
+                marker.tab = tab
+                strip.addSubview(marker)
+                markers.append(marker)
+                TabDrag.shared.register(marker)
+            }
+        }
         XCTAssertFalse(NSScreen.screens.contains { $0.frame.intersects(window.frame) }, "never on a screen")
         windows.append(window)
         browser.window = window
-        try await settle()
+        if hostSidebar { try await settle() }
         return (browser, t, window)
     }
 
@@ -172,13 +194,33 @@ final class PairSeparateTests: XCTestCase {
         return (NSPoint(x: x, y: half.minY + 4), NSPoint(x: x, y: next.maxY - 5))
     }
 
-    private func carry(from: NSPoint, to: NSPoint, in window: NSWindow) async throws {
-        try await send(.leftMouseDown, at: from, in: window)
-        for fraction in [0.4, 0.75, 1] {
-            let y = from.y + (to.y - from.y) * fraction
-            try await send(.leftMouseDragged, at: NSPoint(x: from.x, y: y), in: window)
+    private func dragPoints(from: NSPoint, to: NSPoint) -> [NSPoint] {
+        [0.4, 0.75, 1].map { NSPoint(x: from.x, y: from.y + (to.y - from.y) * $0) }
+    }
+
+    private func carry(_ row: SearcheXtra.Tab, half: SearcheXtra.Tab, in browser: Browser, from: NSPoint, to: NSPoint, in window: NSWindow) {
+        for point in dragPoints(from: from, to: to) { drag(row, in: browser, from: from, to: point, in: window) }
+        XCTAssertTrue(TabDrag.shared.source(of: row) === half, "The half under the hand is carried")
+    }
+
+    private func drag(_ tab: SearcheXtra.Tab, in browser: Browser, from: NSPoint, to: NSPoint, in window: NSWindow) {
+        TabDrag.testPointer = window.convertToScreen(NSRect(origin: to, size: .zero)).origin
+        _ = TabDrag.shared.update(browser: browser, tab: tab, translation: CGSize(width: to.x - from.x, height: from.y - to.y))
+    }
+
+    private func waitForSeparation(of tab: SearcheXtra.Tab) async throws {
+        for _ in 0..<100 {
+            if PairSeparation.shared.leaving == tab.id { return }
+            try await Task.sleep(for: .milliseconds(20))
         }
-        XCTAssertEqual(CarryGuard.count, 1, "The pair is carried before testing its drop")
+    }
+
+    private func dropHalf(_ tab: SearcheXtra.Tab, of row: SearcheXtra.Tab, before next: SearcheXtra.Tab, in browser: Browser) {
+        let result = TabDrag.shared.finish(browser: browser, tab: row)
+        guard case .strip(let destination) = result.drop else { return XCTFail("The shown separation must be the drop") }
+        XCTAssertTrue(result.source === tab)
+        XCTAssertTrue(destination === next)
+        browser.dropTabIntoStrip(result.source, before: destination)
     }
 
     private func settle() async throws {

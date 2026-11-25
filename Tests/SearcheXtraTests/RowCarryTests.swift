@@ -222,32 +222,39 @@ final class RowCarryTests: XCTestCase {
 
     /// Out of the window's side, still level with the row: letting go there
     /// takes the tab away, so it has to show.
-    func testLeavingTheWindowLevelWithTheRowLifts() async throws {
-        let browser = makeBrowser()
+    func testLeavingTheWindowLevelWithTheRowLifts() {
+        let browser = makeBrowser(withStaticTabs: true)
+        browser.prefs.sidebar = false
         let tab = browser.tabs[2]
         browser.select(tab)
-        let window = try makeTopRow(browser)
+        let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 1100, height: Metrics.strip),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        windows.append(window)
         browser.window = window
-        try await settle()
-        let hitArea = try tabStripFrame(for: tab, in: window)
-        let start = NSPoint(x: hitArea.midX, y: hitArea.midY)
-        let end = NSPoint(x: start.x + 25, y: start.y)
-        TabDrag.testPointer = window.convertToScreen(NSRect(origin: start, size: .zero)).origin
-        defer { TabDrag.testPointer = nil }
-        try await send(.leftMouseDown, at: start, in: window)
-        for distance in [8.0, 16] {
-            let point = NSPoint(x: start.x + distance, y: start.y)
-            TabDrag.testPointer = window.convertToScreen(NSRect(origin: point, size: .zero)).origin
-            try await send(.leftMouseDragged, at: point, in: window)
+        let inside = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        let location = CGPoint(x: window.frame.width / 2, y: Metrics.strip / 2)
+        TabDrag.testPointer = inside
+        defer {
+            TabLift.shared.put()
+            TabDrag.shared.callOff(tab)
+            TabDrag.testPointer = nil
         }
-        XCTAssertEqual(CarryGuard.count, 1, "picked up before leaving its window")
+        _ = TabDrag.shared.update(browser: browser, tab: tab, translation: CGSize(width: 8, height: 0))
+        XCTAssertTrue(TabDrag.shared.source(of: tab) === tab, "picked up before leaving its window")
+        XCTAssertEqual(Carried.lift(browser: browser, tab: tab, at: location, vertical: false), false)
         XCTAssertFalse(TabLift.shared.carrying, "still in the window")
-        TabDrag.testPointer = NSPoint(x: window.frame.maxX + 100, y: window.frame.minY + start.y)
-        try await send(.leftMouseDragged, at: end, in: window)
+
+        TabDrag.testPointer = NSPoint(x: window.frame.maxX + 100, y: inside.y)
+        _ = TabDrag.shared.update(browser: browser, tab: tab, translation: CGSize(width: 25, height: 0))
+        XCTAssertEqual(Carried.lift(browser: browser, tab: tab, at: location, vertical: false), true)
         XCTAssertTrue(TabLift.shared.carrying, "past its side")
-        TabDrag.testPointer = window.convertToScreen(NSRect(origin: end, size: .zero)).origin
-        try await send(.leftMouseUp, at: end, in: window)
-        try await settle()
+        XCTAssertEqual(TabLift.shared.shown, tab.id)
+
+        TabDrag.testPointer = inside
+        _ = TabDrag.shared.update(browser: browser, tab: tab, translation: CGSize(width: 8, height: 0))
+        XCTAssertEqual(Carried.lift(browser: browser, tab: tab, at: location, vertical: false), false)
+        XCTAssertFalse(TabLift.shared.carrying, "back inside the window")
     }
 
     /// A pin can't leave its window (Browser.dragOut), so nothing says it could.
@@ -365,7 +372,7 @@ final class RowCarryTests: XCTestCase {
 
     // MARK: - helpers
 
-    private func makeBrowser() -> Browser {
+    private func makeBrowser(withStaticTabs: Bool = false) -> Browser {
         _ = NSApplication.shared
         activationPolicy = NSApp.activationPolicy()
         NSApp.setActivationPolicy(.prohibited)
@@ -374,7 +381,7 @@ final class RowCarryTests: XCTestCase {
         restorePreferences = {
             (prefs.sidebar, prefs.usesTabGroups, prefs.splitView, prefs.listsPins, prefs.roomyTabs) = previous
         }
-        let browser = Browser(record: WindowRecord())
+        let browser = Browser(record: WindowRecord(), opensStartPage: !withStaticTabs)
         browsers.append(browser)
         browser.prefs.sidebar = true
         browser.prefs.usesTabGroups = false
@@ -383,7 +390,12 @@ final class RowCarryTests: XCTestCase {
         browser.prefs.roomyTabs = false
         for word in ["one", "two", "three", "four", "five"] {
             if browser.tabs.last?.isBlank == false { browser.newTab() }
-            browser.tabs.last?.restore(url: URL(string: "about:blank#\(word)")!, title: word)
+            guard let tab = browser.tabs.last else { continue }
+            if withStaticTabs {
+                setPinDragFixture(tab, name: word)
+            } else {
+                tab.restore(url: URL(string: "about:blank#\(word)")!, title: word)
+            }
         }
         return browser
     }

@@ -38,6 +38,34 @@ final class BenchBoundaryTests: XCTestCase {
         }
     }
 
+    func testExtremeKeyCodesCreateEventsWithoutIntegerTraps() async throws {
+        try await withBrowser { _ in
+            let bench = Bench()
+            for (code, expected) in [(Int.min, UInt16(0)), (Int.max, UInt16.max), (12, UInt16(12))] {
+                var response: [String: Any]?
+                let done = self.expectation(description: "press reply")
+                bench.handle(["do": "press", "code": code, "chars": "x"]) { response = $0; done.fulfill() }
+                // Inspect the actual posted events without sending them to a page.
+                for type in [NSEvent.EventTypeMask.keyDown, .keyUp] {
+                    let event = try XCTUnwrap(NSApp.nextEvent(matching: type, until: Date(), inMode: .default, dequeue: true))
+                    XCTAssertEqual(event.keyCode, expected)
+                }
+                await self.fulfillment(of: [done], timeout: 2)
+                XCTAssertNil(response?["error"])
+            }
+        }
+    }
+}
+
+/// Run rendering tests in their own process in the macOS regression runner.
+/// A snapshot creates and draws a WebView, unlike checking a window index.
+@MainActor
+final class BenchPageBoundaryTests: XCTestCase {
+    override class func setUp() {
+        setenv("SEARCH_PROBE", "bench-page-boundary-\(getpid())", 1)
+        super.setUp()
+    }
+
     func testShippedModeRejectsTakingOverTheUIAndWritingCustomFiles() async throws {
         try await withBrowser { browser in
             // The data world remains isolated; only the command policy is real-mode.
@@ -100,26 +128,11 @@ final class BenchBoundaryTests: XCTestCase {
             XCTAssertNotNil(NSImage(contentsOf: requested), "An isolated test run may still choose its output")
         }
     }
+}
 
-    func testExtremeKeyCodesCreateEventsWithoutIntegerTraps() async throws {
-        try await withBrowser { _ in
-            let bench = Bench()
-            for (code, expected) in [(Int.min, UInt16(0)), (Int.max, UInt16.max), (12, UInt16(12))] {
-                var response: [String: Any]?
-                let done = self.expectation(description: "press reply")
-                bench.handle(["do": "press", "code": code, "chars": "x"]) { response = $0; done.fulfill() }
-                // Inspect the actual posted events without sending them to a page.
-                for type in [NSEvent.EventTypeMask.keyDown, .keyUp] {
-                    let event = try XCTUnwrap(NSApp.nextEvent(matching: type, until: Date(), inMode: .default, dequeue: true))
-                    XCTAssertEqual(event.keyCode, expected)
-                }
-                await self.fulfillment(of: [done], timeout: 2)
-                XCTAssertNil(response?["error"])
-            }
-        }
-    }
-
-    private func reply(_ bench: Bench, _ request: [String: Any]) async throws -> [String: Any] {
+@MainActor
+private extension XCTestCase {
+    func reply(_ bench: Bench, _ request: [String: Any]) async throws -> [String: Any] {
         let done = expectation(description: "bench \(request["do"] ?? "")")
         var result: [String: Any]?
         bench.handle(request) { result = $0; done.fulfill() }
@@ -127,14 +140,16 @@ final class BenchBoundaryTests: XCTestCase {
         return try XCTUnwrap(result)
     }
 
-    private func withBrowser(_ body: (Browser) async throws -> Void) async throws {
+    func withBrowser(_ body: (Browser) async throws -> Void) async throws {
         guard Store.testing else { throw XCTSkip("Requires an isolated data world") }
         _ = NSApplication.shared
         let browser = Browser(record: WindowRecord(), opensStartPage: false)
         Browsers.register(browser)
         defer {
-            for tab in browser.tabs where tab.bench { tab.built?.window?.close() }
+            // Discard the browser first so WebKit detaches its views. The
+            // shared rendering window remains available to later tests.
             Browsers.discard(browser)
+            PageRoom.shared.window?.orderOut(nil)
         }
         try await body(browser)
     }

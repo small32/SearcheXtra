@@ -1388,20 +1388,27 @@ struct Carried: ViewModifier {
     /// says it could.
     private func lift(at location: CGPoint) {
         guard let browser, let tab else { return }
+        if let off = Carried.lift(browser: browser, tab: tab, at: location, vertical: vertical), off != lifted {
+            lifted = off
+        }
+    }
+
+    @MainActor
+    static func lift(browser: Browser, tab: Tab, at location: CGPoint, vertical: Bool) -> Bool? {
         let carried = TabDrag.shared.source(of: tab) ?? tab
-        guard carried.pin == nil else { return }
+        guard carried.pin == nil else { return nil }
         let slack: CGFloat = 8
         let point = TabDrag.shared.pointer(in: browser)
         // The column's rows are measured from 10 inside its edges.
         let off = browser.isPastEdge(point) || (vertical
             ? location.x < -10 - slack || location.x > browser.prefs.columnWidth - 10 + slack
             : location.y < -slack || location.y > Metrics.strip + slack)
-        if off != lifted { lifted = off }
         if off {
             TabLift.shared.carry(carried, browser: browser, at: point)
         } else {
             TabLift.shared.put()
         }
+        return off
     }
 
     /// The drag taken away without onEnded (see CarryGuard): put down where
